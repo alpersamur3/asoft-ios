@@ -1,0 +1,121 @@
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index 19f27cd..604b955 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -810,6 +810,108 @@ SECURITY_READ_ONLY_LATE(static struct pe_serial_functions) sweet_fbcon_serial_fu
+ 	.device = SERIAL_SWEET_FBCON
+ };
+ 
++/*
++ * QEMU ramfb: show the "sweet-fbcon" framebuffer in the QEMU window (QEMU
++ * virt only; start QEMU with -device ramfb). The ADT node "sweet-ramfb" gives
++ * the fw_cfg MMIO window:
++ *   reg = <phys size>           absolute physical address (virt: 0x09020000)
++ * The fw_cfg file "etc/ramfb" is written once through the DMA interface;
++ * QEMU then scans out guest memory itself, so the kernel console and the
++ * frames AppleCLCD copies into the framebuffer appear without further work.
++ */
++#define FW_CFG_DATA             0x00
++#define FW_CFG_SELECTOR         0x08    /* 16-bit, big endian */
++#define FW_CFG_DMA              0x10    /* 64-bit, big endian; writing the low half starts it */
++#define FW_CFG_SIGNATURE        0x0000
++#define FW_CFG_ID               0x0001
++#define FW_CFG_FILE_DIR         0x0019
++#define FW_CFG_ID_DMA           0x02
++#define FW_CFG_DMA_ERROR        0x01
++#define FW_CFG_DMA_SELECT       0x08
++#define FW_CFG_DMA_WRITE        0x10
++#define DRM_FORMAT_XRGB8888     0x34325258u     /* "XR24": B G R X in memory, like fbcon */
++
++/* FWCfgDmaAccess followed by RAMFBCfg, all fields big endian. */
++static struct {
++	uint32_t control, length;
++	uint64_t address;
++	uint64_t fb_addr;
++	uint32_t fourcc, flags, width, height, stride;
++} __attribute__((aligned(16))) sweet_ramfb_dma;        /* naturally packed: 16 + 28 bytes */
++
++static uint32_t
++fw_cfg_read_be(volatile uint8_t *data, unsigned int bytes)
++{
++	uint32_t v = 0;
++	while (bytes--) {
++		v = (v << 8) | *data;
++	}
++	return v;
++}
++
++static void
++sweet_ramfb_probe(uint64_t fb_phys, uint32_t width, uint32_t height, uint32_t stride)
++{
++	DTEntry entry;
++	uint64_t const *reg;
++	unsigned int size;
++
++	if (SecureDTFindEntry("name", "sweet-ramfb", &entry) != kSuccess ||
++	    SecureDTGetProperty(entry, "reg", (void const **)&reg, &size) != kSuccess || size < 16) {
++		return;
++	}
++	vm_offset_t fw = ml_io_map(reg[0], reg[1]);
++	volatile uint16_t *selector = (volatile uint16_t *)(fw + FW_CFG_SELECTOR);
++	volatile uint8_t *data = (volatile uint8_t *)(fw + FW_CFG_DATA);
++
++	*selector = __builtin_bswap16(FW_CFG_SIGNATURE);
++	if (fw_cfg_read_be(data, 4) != 0x51454d55u) {           /* "QEMU" */
++		return;
++	}
++	*selector = __builtin_bswap16(FW_CFG_ID);
++	if (!(__builtin_bswap32(fw_cfg_read_be(data, 4)) & FW_CFG_ID_DMA)) {
++		return;
++	}
++	*selector = __builtin_bswap16(FW_CFG_FILE_DIR);
++	uint32_t count = fw_cfg_read_be(data, 4);
++	uint16_t ramfb = 0;
++	for (uint32_t i = 0; i < count && !ramfb; i++) {
++		char name[56];
++		(void)fw_cfg_read_be(data, 4);                  /* size */
++		uint16_t select = (uint16_t)fw_cfg_read_be(data, 2);
++		(void)fw_cfg_read_be(data, 2);                  /* reserved */
++		for (unsigned int c = 0; c < sizeof(name); c++) {
++			name[c] = (char)*data;
++		}
++		if (strncmp(name, "etc/ramfb", sizeof(name)) == 0) {
++			ramfb = select;
++		}
++	}
++	if (!ramfb) {
++		return;
++	}
++
++	sweet_ramfb_dma.fb_addr = __builtin_bswap64(fb_phys);
++	sweet_ramfb_dma.fourcc = __builtin_bswap32(DRM_FORMAT_XRGB8888);
++	sweet_ramfb_dma.flags = 0;
++	sweet_ramfb_dma.width = __builtin_bswap32(width);
++	sweet_ramfb_dma.height = __builtin_bswap32(height);
++	sweet_ramfb_dma.stride = __builtin_bswap32(stride);
++	sweet_ramfb_dma.control = __builtin_bswap32(((uint32_t)ramfb << 16) | FW_CFG_DMA_SELECT | FW_CFG_DMA_WRITE);
++	sweet_ramfb_dma.length = __builtin_bswap32(28);
++	sweet_ramfb_dma.address = __builtin_bswap64(ml_static_vtop((vm_offset_t)&sweet_ramfb_dma.fb_addr));
++	uint64_t dma_pa = ml_static_vtop((vm_offset_t)&sweet_ramfb_dma);
++	__builtin_arm_dsb(0xf);                                 /* DSB SY */
++	*(volatile uint32_t *)(fw + FW_CFG_DMA) = __builtin_bswap32((uint32_t)(dma_pa >> 32));
++	*(volatile uint32_t *)(fw + FW_CFG_DMA + 4) = __builtin_bswap32((uint32_t)dma_pa);
++	for (unsigned int spin = 0; spin < 1000000; spin++) {
++		uint32_t control = __builtin_bswap32(*(volatile uint32_t *)&sweet_ramfb_dma.control);
++		if ((control & ~FW_CFG_DMA_ERROR) == 0) {
++			break;
++		}
++	}
++}
++
+ static void
+ fbcon_probe(void)
+ {
+@@ -839,6 +941,7 @@ fbcon_probe(void)
+ 	sweet_early_mark(18, "fbcon mapping returned");
+ 	if (fbcon_base != NULL) {
+ 		register_serial_functions(&sweet_fbcon_serial_functions);
++		sweet_ramfb_probe(reg[0], fbcon_width, fbcon_height, fbcon_stride);
+ 	}
+ }
+ 
