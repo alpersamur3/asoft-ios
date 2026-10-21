@@ -61,6 +61,7 @@ jobs:
             mingw-w64-ucrt-x86_64-libslirp
             mingw-w64-ucrt-x86_64-gtk3
             mingw-w64-ucrt-x86_64-libepoxy
+            mingw-w64-ucrt-x86_64-angleproject
             mingw-w64-ucrt-x86_64-SDL2
 
       - name: Fetch QEMU
@@ -91,8 +92,14 @@ jobs:
         run: |
           mkdir dist
           cp build/qemu-system-aarch64.exe build/qemu-system-aarch64w.exe dist/
-          # The DLLs from /ucrt64/bin the exe needs, recursively (as scripts/nsis.py does).
+          # ANGLE (libEGL/libGLESv2): libepoxy loads it at run time for gl=on, so no import
+          # table names it; without it gl=on crashes.
           todo="dist/qemu-system-aarch64.exe"
+          for dll in $(pacman -Ql mingw-w64-ucrt-x86_64-angleproject | awk '/\/bin\/.*\.dll$/ {print $2}'); do
+            cp "$dll" dist/
+            todo="$todo dist/$(basename "$dll")"
+          done
+          # The DLLs from /ucrt64/bin these need, recursively (as scripts/nsis.py does).
           while [ -n "$todo" ]; do
             next=""
             for f in $todo; do

@@ -1,0 +1,34 @@
+ui/gtk: do not refresh more often than every 30 ms
+
+gd_update_monitor_refresh_rate() takes the refresh interval from the
+monitor, capped at 30 ms from above only, so on a 144 Hz laptop panel the
+GTK console refreshed every 7 ms. With ramfb, which has no dirty tracking,
+every refresh uploads the whole 1080x2400 surface (10 MB) with the BQL
+held: the main loop held the BQL two thirds of the time and every vCPU
+exit, exception return and I/O register access queued behind it, while
+the guest (iOS) only draws 30 frames per second. Use the monitor's
+interval only when it is longer than GUI_REFRESH_INTERVAL_DEFAULT.
+Based on QEMU v11.1.2.
+
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 7078d89..6174fea 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -810,9 +810,15 @@ void gd_update_monitor_refresh_rate(VirtualConsole *vc, GtkWidget *widget)
+ 
+     gd_set_ui_refresh_rate(vc, refresh_rate);
+ 
+-    /* T = 1 / f = 1 [s*Hz] / f = 1000*1000 [ms*mHz] / f */
++    /*
++     * T = 1 / f = 1 [s*Hz] / f = 1000*1000 [ms*mHz] / f, but never shorter
++     * than GUI_REFRESH_INTERVAL_DEFAULT: a refresh redraws the whole surface
++     * of a display without dirty tracking (ramfb) with the BQL held, and at
++     * the 144 Hz of a laptop panel that kept the main loop, and so every vCPU
++     * waiting for the BQL, busy two thirds of the time.
++     */
+     vc->gfx.dcl.update_interval = refresh_rate ?
+-        MIN(1000 * 1000 / refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
++        MAX(1000 * 1000 / refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
+         GUI_REFRESH_INTERVAL_DEFAULT;
+ #endif
+ }
