@@ -1,0 +1,125 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+index 0719750..aecb99e 100644
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -13,8 +13,10 @@
+ #include <kern/thread_call.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
++#include <sys/reboot.h>
+ 
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern "C" int reboot_kernel(int howto, char *message);
+ 
+ /*
+  * Real-time clock: an ARM PL031 (QEMU virt's at 0x09010000, ADT node
+@@ -28,6 +30,58 @@ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
+ static volatile uint32_t *sweet_rtc;
+ 
++/*
++ * Power off. QEMU's power key (monitor command system_powerdown, or closing
++ * the window with qemu/patches/0003) is a line of the virt machine's PL061
++ * GPIO (ADT node /sweet-power-key: absolute reg, gpio-line). The PL061
++ * latches the press (rising edge) in its raw interrupt status, polled every
++ * 250 ms. A press starts the kernel's own shutdown, reboot_kernel(RB_HALT):
++ * every process gets SIGTERM and then SIGKILL, the disks are synced and
++ * unmounted (HFS+ closes its journal cleanly), and the final halt powers
++ * QEMU off with PSCI SYSTEM_OFF (a restart: SYSTEM_RESET). Without the PSCI
++ * HVC conduit (the phone) halt and restart behave as before.
++ */
++#define PL061_IEV       0x40c   /* interrupt event: 1 = rising edge */
++#define PL061_RIS       0x414   /* raw interrupt status (latched edges) */
++#define PL061_IC        0x41c   /* interrupt clear */
++#define PSCI_SYSTEM_OFF         0x84000008U
++#define PSCI_SYSTEM_RESET       0x84000009U
++
++static volatile uint32_t *sweet_gpio;
++static uint32_t sweet_power_mask;
++static thread_call_t sweet_power_call;
++static bool sweet_psci_hvc;
++
++static void
++sweet_power_arm(void)
++{
++	uint64_t deadline;
++	clock_interval_to_deadline(250, NSEC_PER_MSEC, &deadline);
++	thread_call_enter_delayed(sweet_power_call, deadline);
++}
++
++static void
++sweet_power_poll(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
++{
++	if (!(sweet_gpio[PL061_RIS / 4] & sweet_power_mask)) {
++		sweet_power_arm();
++		return;
++	}
++	sweet_gpio[PL061_IC / 4] = sweet_power_mask;
++	IOLog("SWEET POWER: power key, shutting down\n");
++	reboot_kernel(RB_HALT, NULL);   /* returns only when a shutdown is already running */
++}
++
++/* SMCCC 1.0 through HVC (QEMU virt's PSCI); x1-x17 may be clobbered. */
++static void
++sweet_psci_system(uint64_t function)
++{
++	register uint64_t x0 __asm__("x0") = function;
++	__asm__ volatile("hvc #0" : "+r"(x0) : :
++	    "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
++	    "x14", "x15", "x16", "x17", "cc", "memory");
++}
++
+ /*
+  * Boot-arg sweetbusy=N: every N seconds, 8 times, print what keeps IOKit
+  * from going quiet. A service's busy count includes its children's, so the
+@@ -98,6 +152,7 @@ public:
+ 	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
+ 	long getGMTTimeOfDay(void) APPLE_KEXT_OVERRIDE;
+ 	void setGMTTimeOfDay(long secs) APPLE_KEXT_OVERRIDE;
++	int haltRestart(unsigned int type) APPLE_KEXT_OVERRIDE;
+ };
+ 
+ OSDefineMetaClassAndStructors(SweetPlatformExpert, IODTPlatformExpert);
+@@ -124,6 +179,26 @@ SweetPlatformExpert::start(IOService *provider)
+ 	}
+ 	publishResource("IORTC");
+ 
++	DTEntry chosen, key;
++	char const *conduit;
++	uint32_t const *line = NULL;
++	sweet_psci_hvc = SecureDTLookupEntry(NULL, "/chosen", &chosen) == kSuccess &&
++	    SecureDTGetProperty(chosen, "sweet-psci-conduit", (void const **)&conduit, &size) == kSuccess &&
++	    size >= 4 && strncmp(conduit, "hvc", size) == 0;
++	if (SecureDTLookupEntry(NULL, "/sweet-power-key", &key) == kSuccess &&
++	    SecureDTGetProperty(key, "reg", (void const **)&reg, &size) == kSuccess &&
++	    size >= 2 * sizeof(uintptr_t) &&
++	    SecureDTGetProperty(key, "gpio-line", (void const **)&line, &size) == kSuccess &&
++	    size == sizeof(uint32_t) && *line < 8 &&
++	    (sweet_power_call = thread_call_allocate(sweet_power_poll, NULL))) {
++		sweet_gpio = (volatile uint32_t *)ml_io_map(reg[0], reg[1]);
++		sweet_power_mask = 1U << *line;
++		sweet_gpio[PL061_IEV / 4] |= sweet_power_mask;
++		sweet_gpio[PL061_IC / 4] = sweet_power_mask;
++		IOLog("SWEET POWER: power key on PL061 at 0x%lx line %u\n", (unsigned long)reg[0], *line);
++		sweet_power_arm();
++	}
++
+ 	if (PE_parse_boot_argn("sweetbusy", &sweet_busy_secs, sizeof(sweet_busy_secs)) && sweet_busy_secs &&
+ 	    (sweet_busy_call = thread_call_allocate(sweet_busy_dump, NULL))) {
+ 		sweet_busy_arm();
+@@ -145,6 +220,15 @@ SweetPlatformExpert::setGMTTimeOfDay(long secs)
+ 	}
+ }
+ 
++int
++SweetPlatformExpert::haltRestart(unsigned int type)
++{
++	if (sweet_psci_hvc && (type == kPEHaltCPU || type == kPEUPSDelayHaltCPU || type == kPERestartCPU)) {
++		sweet_psci_system(type == kPERestartCPU ? PSCI_SYSTEM_RESET : PSCI_SYSTEM_OFF);
++	}
++	return IODTPlatformExpert::haltRestart(type);
++}
++
+ const char *
+ SweetPlatformExpert::deleteList(void)
+ {

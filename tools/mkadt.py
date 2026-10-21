@@ -40,6 +40,8 @@ QEMU_FW_CFG, QEMU_FW_CFG_SIZE = 0x09020000, 0x18
 QEMU_TIMEOUT_SCALE = 100
 # QEMU virt's PL031 real-time clock (UTC seconds from the host)
 QEMU_RTC, QEMU_RTC_SIZE = 0x09010000, 0x1000
+# QEMU virt's PL061 GPIO: system_powerdown presses the power key on its line 3
+QEMU_GPIO, QEMU_GPIO_SIZE, QEMU_POWER_KEY_LINE = 0x09030000, 0x1000, 3
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -237,6 +239,14 @@ def build(seed=None, qemu=False, highmem=False):
         ('reg', u64(QEMU_RTC, QEMU_RTC_SIZE)),
     ])
 
+    # iokit/Kernel/arm/SweetPlatformExpert.cpp: the power key shuts iOS down cleanly (absolute physical reg)
+    power_key = node('sweet-power-key', [
+        ph(),
+        ('compatible', cstr('arm,pl061')),
+        ('reg', u64(QEMU_GPIO, QEMU_GPIO_SIZE)),
+        ('gpio-line', u32(QEMU_POWER_KEY_LINE)),
+    ])
+
     # pmap_compute_max_asids requires the node even when no overrides are set.
     # An absent pmap-max-asids property selects XNU's own MAX_ASIDS default.
     # No effaceable storage: keybagd then reads /private/var/keybags/systembag.kb
@@ -272,7 +282,7 @@ def build(seed=None, qemu=False, highmem=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk, ramfb, rtc] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk, ramfb, rtc, power_key] if qemu else [ufs]))
 
 
 if __name__ == '__main__':
