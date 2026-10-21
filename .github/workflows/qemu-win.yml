@@ -73,7 +73,8 @@ jobs:
         run: |
           for p in qemu/patches/*.patch; do
             echo "== $p"
-            git -C qemu-src apply --verbose "$PWD/$p"
+            # checkout on Windows may have given the patch CRLF line ends; QEMU's sources are LF
+            sed 's/\r$//' "$p" | git -C qemu-src apply --verbose -
           done
 
       - name: Configure
