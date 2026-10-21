@@ -38,6 +38,8 @@ QEMU_VIRTIO, QEMU_VIRTIO_SIZE = 0x0a000000, 32 * 0x200
 # QEMU virt's fw_cfg (MMIO, with DMA): the kernel configures ramfb through it
 QEMU_FW_CFG, QEMU_FW_CFG_SIZE = 0x09020000, 0x18
 QEMU_TIMEOUT_SCALE = 100
+# QEMU virt's PL031 real-time clock (UTC seconds from the host)
+QEMU_RTC, QEMU_RTC_SIZE = 0x09010000, 0x1000
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -228,6 +230,13 @@ def build(seed=None, qemu=False, highmem=False):
         ('reg', u64(QEMU_FW_CFG, QEMU_FW_CFG_SIZE)),
     ])
 
+    # iokit/Kernel/arm/SweetPlatformExpert.cpp: calendar time from QEMU's PL031 (absolute physical reg)
+    rtc = node('sweet-rtc', [
+        ph(),
+        ('compatible', cstr('arm,pl031')),
+        ('reg', u64(QEMU_RTC, QEMU_RTC_SIZE)),
+    ])
+
     # pmap_compute_max_asids requires the node even when no overrides are set.
     # An absent pmap-max-asids property selects XNU's own MAX_ASIDS default.
     # No effaceable storage: keybagd then reads /private/var/keybags/systembag.kb
@@ -258,7 +267,7 @@ def build(seed=None, qemu=False, highmem=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk, ramfb] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk, ramfb, rtc] if qemu else [ufs]))
 
 
 if __name__ == '__main__':

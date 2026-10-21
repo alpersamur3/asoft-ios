@@ -1,0 +1,71 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+index 0631685..1ebd344 100644
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -9,6 +9,21 @@
+ #include <IOKit/IOPlatformExpert.h>
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOLib.h>
++#include <pexpert/device_tree.h>
++
++extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++/*
++ * Real-time clock: an ARM PL031 (QEMU virt's at 0x09010000, ADT node
++ * /sweet-rtc with an absolute reg) counts UTC seconds; the phone has none.
++ * IOKitInitializeTime() waits up to 30 s for the "IORTC" resource before
++ * clock_initialize_calendar(), so it is published right away either way:
++ * without a PL031 the calendar starts at 0 as before, just 30 s sooner.
++ */
++#define PL031_DR        0x00    /* data: current count (seconds) */
++#define PL031_LR        0x08    /* load: sets the count */
++
++static volatile uint32_t *sweet_rtc;
+ 
+ class SweetPlatformExpert : public IODTPlatformExpert {
+ 	OSDeclareDefaultStructors(SweetPlatformExpert);
+@@ -18,6 +33,8 @@ public:
+ 	void processTopLevel(IORegistryEntry *root) APPLE_KEXT_OVERRIDE;
+ 	const char *deleteList(void) APPLE_KEXT_OVERRIDE;
+ 	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
++	long getGMTTimeOfDay(void) APPLE_KEXT_OVERRIDE;
++	void setGMTTimeOfDay(long secs) APPLE_KEXT_OVERRIDE;
+ };
+ 
+ OSDefineMetaClassAndStructors(SweetPlatformExpert, IODTPlatformExpert);
+@@ -31,9 +48,35 @@ SweetPlatformExpert::start(IOService *provider)
+ 	}
+ 	registerService();
+ 	IOLog("SWEET: platform expert registered\n");
++
++	DTEntry rtc;
++	uintptr_t const *reg = NULL;
++	unsigned int size = 0;
++	if (SecureDTLookupEntry(NULL, "/sweet-rtc", &rtc) == kSuccess &&
++	    SecureDTGetProperty(rtc, "reg", (void const **)&reg, &size) == kSuccess &&
++	    size >= 2 * sizeof(uintptr_t)) {
++		sweet_rtc = (volatile uint32_t *)ml_io_map(reg[0], reg[1]);
++		IOLog("SWEET RTC: PL031 at 0x%lx, %u s since 1970\n", (unsigned long)reg[0],
++		    sweet_rtc[PL031_DR / 4]);
++	}
++	publishResource("IORTC");
+ 	return true;
+ }
+ 
++long
++SweetPlatformExpert::getGMTTimeOfDay(void)
++{
++	return sweet_rtc ? (long)sweet_rtc[PL031_DR / 4] : 0;
++}
++
++void
++SweetPlatformExpert::setGMTTimeOfDay(long secs)
++{
++	if (sweet_rtc && secs > 0) {
++		sweet_rtc[PL031_LR / 4] = (uint32_t)secs;
++	}
++}
++
+ const char *
+ SweetPlatformExpert::deleteList(void)
+ {
