@@ -1,24 +1,28 @@
 diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
-index cb67b4d..79cc5f1 100644
+index cb67b4d..a747f4e 100644
 --- a/bsd/kern/sweet_amfi.c
 +++ b/bsd/kern/sweet_amfi.c
-@@ -305,8 +305,42 @@ sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
+@@ -305,8 +305,46 @@ sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
  	}
  }
  
 +/*
 + * Policy "AMFI": libmis calls __mac_syscall("AMFI", op, arg) through
-+ * __sandbox_ms. lsd asks for the boot-arg state (op 0x60,
-+ * amfi_interface_query_bootarg_state) before it reads the ExtensionKit
-+ * extension point cache; when that fails ("Unable to find AMFI") no
-+ * extension point is registered and no ExtensionKit extension (posters,
-+ * widgets) ever runs: the wallpaper stays black. The state is a uint64_t
-+ * of AMFI boot-arg flags; SWEET sets none, so it is 0, as on a device
-+ * booted without them. Every other operation still fails with ENOPOLICY,
-+ * as it did before the policy had this name. The first use of each
-+ * operation number is logged.
++ * __sandbox_ms. Op 0x60 (amfi_interface_query_bootarg_state) returns a
++ * uint64_t of AMFI boot-arg flags. ExtensionFoundation and installd
++ * (InstalledContentLibrary) read any of the bits 0x86 as "code signing
++ * enforcement is disabled", which is SWEET's state: page hashes are
++ * checked, but any signer is accepted (no trust cache, no certificate
++ * checks). Without that answer lsd verifies the XPC extension point cache
++ * through the AppleMobileFileIntegrity IOService, which SWEET does not
++ * have ("Unable to find AMFI"): no extension point gets registered, no
++ * ExtensionKit extension (posters, widgets) ever runs and the wallpaper
++ * stays black. SWEET reports bit 0x2. Every other operation still fails
++ * with ENOPOLICY, as it did before the policy had this name. The first
++ * use of each operation number is logged.
 + */
 +#define SWEET_AMFI_OP_BOOTARG_STATE     0x60
++#define SWEET_AMFI_BOOTARG_STATE        0x2ULL
 +
 +static uint64_t sweet_amfi_seen[2];
 +
@@ -33,7 +37,7 @@ index cb67b4d..79cc5f1 100644
 +		printf("SWEET AMFI: %s op 0x%x\n", name, call);
 +	}
 +	if (call == SWEET_AMFI_OP_BOOTARG_STATE) {
-+		uint64_t state = 0;
++		uint64_t state = SWEET_AMFI_BOOTARG_STATE;
 +		return copyout(&state, arg, sizeof(state));
 +	}
 +	return ENOPOLICY;
@@ -45,7 +49,7 @@ index cb67b4d..79cc5f1 100644
  };
  
  /*
-@@ -360,7 +394,7 @@ static struct mac_policy_conf sweet_sandbox_mac_conf = {
+@@ -360,7 +398,7 @@ static struct mac_policy_conf sweet_sandbox_mac_conf = {
  static mac_policy_handle_t sweet_sandbox_mac_handle;
  
  static struct mac_policy_conf sweet_amfi_mac_conf = {
