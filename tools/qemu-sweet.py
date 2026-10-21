@@ -240,8 +240,11 @@ def main():
     ap.add_argument('--disk', help='raw iOS root image attached as virtio-blk (boot with rd=vblkroot0; ADT from mkadt.py --qemu)')
     ap.add_argument('--snapshot', action='store_true', help='with --disk: discard guest writes when QEMU exits')
     ap.add_argument('--smp', type=int, default=1, help='QEMU CPUs (boot with cpus=N <= this; ADT from mkadt.py --qemu)')
-    ap.add_argument('--display', choices=('gtk', 'sdl'),
-                    help='live window through QEMU ramfb instead of -nographic; runs until the window is closed')
+    ap.add_argument('--display', metavar='SPEC',
+                    help='QEMU -display through ramfb instead of -nographic (gtk, sdl, none, or with options such as '
+                         'gtk,gl=on); runs until QEMU exits')
+    ap.add_argument('--disk-cache', default='writeback', help='with --disk: QEMU cache mode (default: writeback)')
+    ap.add_argument('--disk-aio', help='with --disk: QEMU aio backend (threads, native, io_uring)')
     ap.add_argument('--qmp-tcp', type=int, metavar='PORT',
                     help='with --display: QMP on 127.0.0.1:PORT (e.g. for screendump)')
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
@@ -293,7 +296,10 @@ def main():
     ram_gib = max(4, -(-(phys_base + mem_size - 0x40000000) // (1 << 30)))
     if a.display:
         # ramfb scans out the fbcon framebuffer once the kernel configures it (ADT sweet-ramfb)
-        screen = ['-display', f'{a.display},zoom-to-fit=on' if a.display == 'gtk' else a.display,
+        spec = a.display
+        if spec.split(',')[0] == 'gtk' and 'zoom-to-fit' not in spec:
+            spec += ',zoom-to-fit=on'
+        screen = ['-display', spec,
                   '-device', 'ramfb',
                   # bsd/dev/sweet_vinput.c: F1-F4 = Home/side/volume buttons, tablet = touch
                   '-device', 'virtio-keyboard-device', '-device', 'virtio-tablet-device']
@@ -310,8 +316,9 @@ def main():
     if a.disk:
         # bsd/dev/sweet_vblk.c drives only modern (version 2) virtio-mmio transports
         cmd += ['-global', 'virtio-mmio.force-legacy=false',
-                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,cache=writeback,'
+                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,cache={a.disk_cache},'
                           f'format={"qcow2" if a.disk.endswith(".qcow2") else "raw"}'
+                          + (f',aio={a.disk_aio}' if a.disk_aio else '')
                           + (',snapshot=on' if a.snapshot else ''),
                 '-device', 'virtio-blk-device,drive=root']
     if a.gdb:
