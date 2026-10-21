@@ -561,10 +561,10 @@ index 92f3e26..a508398 100644
      "   {"
      "     'IOClass'         = IOPanicPlatform;"
 diff --git a/iokit/conf/Makefile.template b/iokit/conf/Makefile.template
-index 7613d9b..fcdde39 100644
+index 7613d9b..86f97ae 100644
 --- a/iokit/conf/Makefile.template
 +++ b/iokit/conf/Makefile.template
-@@ -57,6 +57,12 @@ COMP_SUBDIRS = \
+@@ -57,6 +57,15 @@ COMP_SUBDIRS = \
  
  %MACHDEP
  
@@ -573,6 +573,9 @@ index 7613d9b..fcdde39 100644
 +# with the SDK's TargetConditionals.h staged next to it; see sweet_net_compat.h.
 +SWEET_NET_OBJS = IOEthernetController.cpo IOEthernetInterface.cpo IOKernelDebugger.cpo IOMbufMemoryCursor.cpo IONetworkController.cpo IONetworkData.cpo IONetworkInterface.cpo IONetworkMedium.cpo IONetworkStack.cpo IONetworkUserClient.cpo IOOutputQueue.cpo IOPacketQueue.cpo
 +$(foreach o,$(SWEET_NET_OBJS),$(eval $(o)_CXXWARNFLAGS_ADD += -Wno-everything) $(eval $(o)_CFLAGS_ADD += -include $(SRCROOT)/iokit/sweet_net/sweet_net_compat.h) $(eval $(o)_INCFLAGS += -I$(SRCROOT)/iokit/sweet_net -I$(SRCROOT)/bsd))
++# SweetVirtioNet subclasses the family's controller: same __PRIVATE_SPI__
++# (else its vtable names the reserved slots the SPI methods replace).
++SweetVirtioNet.cpo_CFLAGS_ADD += -D__PRIVATE_SPI__=1
 +
  #
  # Diagnostic opt-outs.  We need to make this list empty.
@@ -603,10 +606,10 @@ index acc9ae0..88b23ce 100644
  iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
 diff --git a/iokit/sweet_net/sweet_net_compat.h b/iokit/sweet_net/sweet_net_compat.h
 new file mode 100755
-index 0000000..7843821
+index 0000000..e9a005a
 --- /dev/null
 +++ b/iokit/sweet_net/sweet_net_compat.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,32 @@
 +/*
 + * SWEET: Apple's IONetworkingFamily (staged into iokit/sweet_net by
 + * xnu/patches/0094-stage-ionetworking.sh) built into the kernel.
@@ -621,8 +624,9 @@ index 0000000..7843821
 + *   OSMetaClass.h. Those come first here, as C++; their include guards keep
 + *   the later extern "C" includes from opening them again. They declare
 + *   their C functions inside __BEGIN_DECLS themselves.
-+ * - The kext's project defines __PRIVATE_SPI__; the class layout is the same
-+ *   either way (the SPI methods use reserved vtable slots).
++ * - The kext's project defines __PRIVATE_SPI__. The SPI methods take reserved
++ *   vtable slots, so a subclass compiled without it names placeholders that
++ *   then do not exist (SweetVirtioNet.cpo gets the define as well).
 + */
 +#ifndef SWEET_NET_COMPAT_H
 +#define SWEET_NET_COMPAT_H
