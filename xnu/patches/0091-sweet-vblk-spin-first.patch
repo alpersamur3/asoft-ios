@@ -1,0 +1,84 @@
+diff --git a/bsd/dev/sweet_vblk.c b/bsd/dev/sweet_vblk.c
+index 5b4ac57..c1c7cd8 100644
+--- a/bsd/dev/sweet_vblk.c
++++ b/bsd/dev/sweet_vblk.c
+@@ -96,7 +96,8 @@ extern void sweet_vinput_init(void);
+ #define QUEUE_SIZE              4u
+ #define BOUNCE_SIZE             (1u << 20)
+ #define CMD_TIMEOUT_NS          (30ull * NSEC_PER_SEC)
+-#define CMD_SPINS               64              /* yields before the first timer check */
++#define CMD_SPIN_CHECK          4096            /* spins between timer reads */
++#define CMD_SPIN_NS             (2ull * NSEC_PER_MSEC)  /* then sleep, if allowed */
+ #define CMD_SLEEP_NS            (200ull * NSEC_PER_USEC)
+ 
+ struct vq_desc {
+@@ -179,41 +180,44 @@ vb_wr64(uint32_t lo, uint32_t hi, uint64_t v)
+ /*
+  * Wait until the device has consumed the request. Under QEMU TCG every timer
+  * read (CNTVCT) takes QEMU's global lock, which the main loop also needs to
+- * complete the request: yield first, then sleep in CMD_SLEEP_NS steps when the
+- * context allows it, instead of delay(1), which reads the timer continuously.
++ * complete the request, and sleeping costs a timer interrupt per wakeup: spin
++ * on the used index in RAM (no lock; YIELD is a no-op under MTTCG), read the
++ * timer only every CMD_SPIN_CHECK spins, and sleep in CMD_SLEEP_NS steps only
++ * once a request has taken longer than CMD_SPIN_NS (a flush, a busy host).
+  */
+ static int
+ vblk_wait_used(volatile struct vq_used *used, uint32_t type, uint64_t sector)
+ {
+-	for (int i = 0; i < CMD_SPINS; i++) {
+-		if (used->idx != vb.used_idx) {
+-			return 0;
+-		}
++	uint64_t start = 0, spin_until = 0, deadline = 0, interval = 0;
++	bool sleepable = false;
++
++	for (uint32_t i = 1; used->idx == vb.used_idx; i++) {
+ 		__builtin_arm_yield();
+-	}
+-	bool sleepable = ml_get_interrupts_enabled() && !ml_at_interrupt_context() &&
+-	    get_preemption_level() == 0;
+-	uint64_t now = mach_absolute_time(), deadline, interval;
+-	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
+-	nanoseconds_to_absolutetime(CMD_SLEEP_NS, &interval);
+-	deadline += now;
+-	while (used->idx == vb.used_idx) {
++		if (i % CMD_SPIN_CHECK) {
++			continue;
++		}
++		uint64_t now = mach_absolute_time();
++		if (!start) {
++			start = now;
++			nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
++			spin_until += now;
++			nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
++			deadline += now;
++			nanoseconds_to_absolutetime(CMD_SLEEP_NS, &interval);
++			sleepable = ml_get_interrupts_enabled() && !ml_at_interrupt_context() &&
++			    get_preemption_level() == 0;
++			continue;
++		}
+ 		if (now > deadline) {
+ 			printf("SWEET VBLK: request type %u sector 0x%llx timed out\n", type, sector);
+ 			return ETIMEDOUT;
+ 		}
+-		if (sleepable) {
+-			/* Keep the mutex: the queue and the bounce buffer are still owned. */
+-			if (assert_wait_deadline_with_leeway((event_t)&vb.used_idx, THREAD_UNINT,
+-			    TIMEOUT_URGENCY_SYS_CRITICAL, now + interval, 0) == THREAD_WAITING) {
+-				thread_block(THREAD_CONTINUE_NULL);
+-			}
+-		} else {
+-			for (int i = 0; i < CMD_SPINS && used->idx == vb.used_idx; i++) {
+-				__builtin_arm_yield();
+-			}
++		/* Keep the mutex: the queue and the bounce buffer are still owned. */
++		if (sleepable && now > spin_until &&
++		    assert_wait_deadline_with_leeway((event_t)&vb.used_idx, THREAD_UNINT,
++		    TIMEOUT_URGENCY_SYS_CRITICAL, now + interval, 0) == THREAD_WAITING) {
++			thread_block(THREAD_CONTINUE_NULL);
+ 		}
+-		now = mach_absolute_time();
+ 	}
+ 	return 0;
+ }
