@@ -1,0 +1,45 @@
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+index c86b9e7..0b8dd55 100644
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -270,8 +270,9 @@ _cnputc(char c, bool poll)
+ extern void sweet_log_append(const char *c, int size);  /* bsd/dev/sweet_ufs.c */
+ /*
+  * Set by AppleCLCD (boot-arg sweetfb_noconsole=1) once the GUI presents:
+- * console text still goes to the persistent log, but is not drawn over
+- * the GUI. A panic draws again.
++ * console text still goes to the persistent log and to a real UART (QEMU's
++ * PL011), but is not drawn over the GUI: pexpert/arm/pe_serial.c checks it
++ * in the framebuffer console only. A panic draws again.
+  */
+ int sweet_console_muted;
+ #endif
+@@ -283,9 +284,6 @@ _cnputs(char *c, int size, bool poll)
+ 
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	sweet_log_append(c, size);
+-	if (sweet_console_muted && !panic_active()) {
+-		return;
+-	}
+ #endif
+ 
+ 	if (disableConsoleOutput) {
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index 604b955..5371ade 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -758,9 +758,14 @@ fbcon_transmit_ready(void)
+ 	return 1;
+ }
+ 
++extern int sweet_console_muted;         /* osfmk/console/serial_console.c */
++
+ static void
+ fbcon_transmit_data(uint8_t c)
+ {
++	if (sweet_console_muted && !panic_active()) {
++		return;
++	}
+ 	if (c == '\r') {
+ 		fbcon_col = 0;
+ 		return;
