@@ -35,6 +35,8 @@ QEMU_VTIMER_INTID = 27
 # QEMU virt's PL011 UART and its 32 virtio-mmio transports (0x200 bytes each)
 QEMU_UART, QEMU_UART_SIZE = 0x09000000, 0x1000
 QEMU_VIRTIO, QEMU_VIRTIO_SIZE = 0x0a000000, 32 * 0x200
+# QEMU virt's fw_cfg (MMIO, with DMA): the kernel configures ramfb through it
+QEMU_FW_CFG, QEMU_FW_CFG_SIZE = 0x09020000, 0x18
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -114,7 +116,10 @@ def build(seed=None, qemu=False, highmem=False):
         ('effective-production-status-ap', u32(0)),
         ('certificate-security-mode', u32(1)),
         ('effective-security-mode-sep', u32(1)),
-    ], [node('memory-map', [ph()]),
+    ] + ([
+        # QEMU virt has no EL3: PSCI CPU_ON goes through HVC (iokit/Kernel/arm/SweetCPU.cpp)
+        ('sweet-psci-conduit', cstr('hvc')),
+    ] if qemu else []), [node('memory-map', [ph()]),
         # Local boot policy (kern_csr.c): SIP relaxed like `csrutil disable`
         # (lp-sip0: untrusted kexts, unrestricted FS, task_for_pid, kernel
         # debugger, dtrace, nvram), lp-sip1: unauthenticated (unsealed) root.
@@ -125,14 +130,14 @@ def build(seed=None, qemu=False, highmem=False):
     # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
     # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one
     # and uses cpus=N to select an initial prefix (N <= 8).
-    # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
+    # QEMU virt numbers its CPUs in MPIDR Aff0 (0-7) instead of Aff1.
     cpu_nodes = []
-    for core in range(1 if qemu else 8):
+    for core in range(8):
         cpu_nodes.append(node(f'cpu{core}', [
             ph(),
             ('device_type', cstr('cpu')),
             ('compatible', cstr('qcom,kryo470') + cstr('ARM,v8')),
-            ('reg', u32(core << 8)),  # actual MPIDR Aff1:Aff0, NOT logical ID
+            ('reg', u32(core if qemu else core << 8)),  # actual MPIDR Aff1:Aff0, NOT logical ID
             ('cpu-id', u32(core)),   # descriptive: XNU assigns IDs by DT order
             ('cluster-id', u32(0)),  # descriptive; see ml_parse_cpu_topology
             ('cluster-type', u32(0)),  # homogeneous CLUSTER_TYPE_SMP, not AMP
@@ -211,6 +216,13 @@ def build(seed=None, qemu=False, highmem=False):
         ('reg', u64(QEMU_VIRTIO, QEMU_VIRTIO_SIZE)),
     ])
 
+    # pexpert/arm/pe_serial.c: QEMU ramfb shows the fbcon framebuffer (absolute physical reg)
+    ramfb = node('sweet-ramfb', [
+        ph(),
+        ('compatible', cstr('qemu,fw-cfg-mmio')),
+        ('reg', u64(QEMU_FW_CFG, QEMU_FW_CFG_SIZE)),
+    ])
+
     # pmap_compute_max_asids requires the node even when no overrides are set.
     # An absent pmap-max-asids property selects XNU's own MAX_ASIDS default.
     # No effaceable storage: keybagd then reads /private/var/keybags/systembag.kb
@@ -241,7 +253,7 @@ def build(seed=None, qemu=False, highmem=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([vblk, ramfb] if qemu else [ufs]))
 
 
 if __name__ == '__main__':

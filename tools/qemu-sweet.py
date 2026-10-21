@@ -29,9 +29,18 @@ STUB_PA = 0x40200000	# above the dtb QEMU places at RAM base
 BOOT_LINE_LENGTH = 608
 
 
+def find_qemu():
+    """qemu-system-aarch64: $QEMU_SYSTEM_AARCH64, PATH, or the Windows installer's default folder."""
+    for cand in (os.environ.get('QEMU_SYSTEM_AARCH64'), shutil.which('qemu-system-aarch64'),
+                 r'C:\Program Files\qemu\qemu-system-aarch64.exe' if os.name == 'nt' else None):
+        if cand and os.path.isfile(cand):
+            return cand
+    return None
+
+
 def check_qemu_dependency(cpu='cortex-a76'):
     """Verify qemu-system-aarch64 binary and CPU model support."""
-    qemu_bin = shutil.which('qemu-system-aarch64')
+    qemu_bin = find_qemu()
     if not qemu_bin:
         print('[!] Error: qemu-system-aarch64 not found in PATH.', file=sys.stderr)
         print('    Install instructions:', file=sys.stderr)
@@ -230,6 +239,9 @@ def main():
     ap.add_argument('--check-env', action='store_true', help='check QEMU installation and dependencies without running a payload')
     ap.add_argument('--disk', help='raw iOS root image attached as virtio-blk (boot with rd=vblkroot0; ADT from mkadt.py --qemu)')
     ap.add_argument('--snapshot', action='store_true', help='with --disk: discard guest writes when QEMU exits')
+    ap.add_argument('--smp', type=int, default=1, help='QEMU CPUs (boot with cpus=N <= this; ADT from mkadt.py --qemu)')
+    ap.add_argument('--display', choices=('gtk', 'sdl'),
+                    help='live window through QEMU ramfb instead of -nographic; runs until the window is closed')
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
                     help="QEMU -d items for qemu.log (default: int,guest_errors,unimp; 'int' is very slow for a full iOS boot)")
     a = ap.parse_args()
@@ -277,8 +289,14 @@ def main():
     # virt RAM starts at 0x40000000: cover the payload's RAM (mkadt.py --highmem needs 8G).
     mem_size = struct.unpack_from('<Q', payload, 0x40)[0]
     ram_gib = max(4, -(-(phys_base + mem_size - 0x40000000) // (1 << 30)))
-    cmd = ['qemu-system-aarch64', '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', '1', '-m', f'{ram_gib}G',
-           '-nographic', '-serial', f'file:{out}/serial.txt', '-qmp', f'unix:{mon},server,nowait',
+    if a.display:
+        # ramfb scans out the fbcon framebuffer once the kernel configures it (ADT sweet-ramfb)
+        screen = ['-display', f'{a.display},zoom-to-fit=on' if a.display == 'gtk' else a.display,
+                  '-device', 'ramfb']
+    else:
+        screen = ['-nographic', '-qmp', f'unix:{mon},server,nowait']
+    cmd = [find_qemu(), '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', str(a.smp), '-m', f'{ram_gib}G',
+           *screen, '-serial', f'file:{out}/serial.txt',
            '-d', a.qemu_log, '-D', f'{out}/qemu.log', '-no-reboot',
            '-device', f'loader,file={out}/ram.bin,addr={phys_base:#x},force-raw=on',
            '-device', f'loader,file={out}/stub.bin,addr={STUB_PA:#x},force-raw=on',
@@ -286,7 +304,8 @@ def main():
     if a.disk:
         # bsd/dev/sweet_vblk.c drives only modern (version 2) virtio-mmio transports
         cmd += ['-global', 'virtio-mmio.force-legacy=false',
-                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,format=raw,cache=writeback'
+                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,cache=writeback,'
+                          f'format={"qcow2" if a.disk.endswith(".qcow2") else "raw"}'
                           + (',snapshot=on' if a.snapshot else ''),
                 '-device', 'virtio-blk-device,drive=root']
     if a.gdb:
@@ -301,6 +320,14 @@ def main():
         if a.gdb:
             print('gdb stub on :1234; QMP socket:', mon, file=sys.stderr)
             p.wait()
+            return 0
+        if a.display:
+            while p.poll() is None:
+                if a.live_serial:
+                    serial_pos = stream_serial_file(serial_file, serial_pos)
+                time.sleep(0.2)
+            if a.live_serial:
+                stream_serial_file(serial_file, serial_pos)
             return 0
 
         t0 = time.time()
