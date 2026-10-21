@@ -1,0 +1,47 @@
+ui/gtk: window-close=off powers the guest down
+
+With window-close=off, closing the window now requests a guest powerdown
+(like the system_powerdown monitor command) instead of being ignored, so
+the guest can sync and unmount its disks and turn itself off. On the virt
+machine that presses the power key (PL061 line 3). Closing the window a
+second time quits QEMU right away.
+Based on QEMU v11.1.2.
+
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 7078d89..6e76e7e 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -714,20 +714,26 @@ static void gd_mouse_mode_change(Notifier *notify, void *data)
+ 
+ /** GTK Events **/
+ 
++/*
++ * window-close=off: closing the window asks the guest to power down (as
++ * system_powerdown does: on the virt machine its power key is pressed), so
++ * it can sync and unmount its disks and then turn itself off. Closing the
++ * window again quits right away.
++ */
+ static gboolean gd_window_close(GtkWidget *widget, GdkEvent *event,
+                                 void *opaque)
+ {
+     GtkDisplayState *s = opaque;
+-    bool allow_close = true;
+-
+-    if (s->opts->has_window_close && !s->opts->window_close) {
+-        allow_close = false;
+-    }
++    static bool powerdown_requested;
+ 
+-    if (allow_close) {
+-        qmp_quit(NULL);
++    if (s->opts->has_window_close && !s->opts->window_close &&
++        !powerdown_requested) {
++        powerdown_requested = true;
++        qemu_system_powerdown_request();
++        return TRUE;
+     }
+ 
++    qmp_quit(NULL);
+     return TRUE;
+ }
+ 
