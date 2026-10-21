@@ -1,0 +1,603 @@
+diff --git a/iokit/Kernel/arm/SweetVirtioNet.cpp b/iokit/Kernel/arm/SweetVirtioNet.cpp
+new file mode 100755
+index 0000000..7ee8e86
+--- /dev/null
++++ b/iokit/Kernel/arm/SweetVirtioNet.cpp
+@@ -0,0 +1,532 @@
++/*
++ * SWEET virtio-net (QEMU): an Ethernet controller for the first virtio-net
++ * device in QEMU virt's virtio-mmio window (ADT /sweet-vblk, the window
++ * bsd/dev/sweet_vblk.c and sweet_vinput.c use).
++ *
++ * It is an IOEthernetController of the built-in IONetworkingFamily (staged
++ * by xnu/patches/0094-stage-ionetworking.sh), so iOS gets a real IOKit
++ * network interface: configd names it (en*), runs DHCP on it and makes it
++ * the primary network. A bare ifnet, as the phone's USB ue0, stays
++ * invisible to configd.
++ *
++ * Virtio 1.x without offloads: receive queue 0 and transmit queue 1, each
++ * with QUEUE_SIZE buffers of BUF_SIZE bytes behind the 12-byte virtio-net
++ * header. No interrupt is wired: a timer on the work loop polls both used
++ * rings every POLL_MS. Start QEMU with
++ *   -netdev user,id=net0 -device virtio-net-device,netdev=net0
++ * (and -global virtio-mmio.force-legacy=false). Boot-arg sweetvnet=0 off.
++ */
++#include <pexpert/arm64/board_config.h>
++
++#if defined(SWEET)
++#include <IOKit/IOLib.h>
++#include <IOKit/system.h>
++#include <IOKit/IOBufferMemoryDescriptor.h>
++#include <IOKit/IOTimerEventSource.h>
++#include <IOKit/IOWorkLoop.h>
++#include <IOKit/network/IOEthernetController.h>
++#include <IOKit/network/IOEthernetInterface.h>
++#include <IOKit/network/IOGatedOutputQueue.h>
++#include <IOKit/network/IONetworkMedium.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++
++extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++
++/* virtio-mmio transport registers (virtio 1.x, section 4.2.2) */
++#define VIRTIO_MAGIC            0x000
++#define VIRTIO_VERSION          0x004
++#define VIRTIO_DEVICE_ID        0x008
++#define VIRTIO_DEV_FEATURES     0x010
++#define VIRTIO_DEV_FEATURES_SEL 0x014
++#define VIRTIO_DRV_FEATURES     0x020
++#define VIRTIO_DRV_FEATURES_SEL 0x024
++#define VIRTIO_QUEUE_SEL        0x030
++#define VIRTIO_QUEUE_NUM_MAX    0x034
++#define VIRTIO_QUEUE_NUM        0x038
++#define VIRTIO_QUEUE_READY      0x044
++#define VIRTIO_QUEUE_NOTIFY     0x050
++#define VIRTIO_INT_STATUS       0x060
++#define VIRTIO_INT_ACK          0x064
++#define VIRTIO_STATUS           0x070
++#define VIRTIO_QUEUE_DESC_LO    0x080
++#define VIRTIO_QUEUE_DESC_HI    0x084
++#define VIRTIO_QUEUE_AVAIL_LO   0x090
++#define VIRTIO_QUEUE_AVAIL_HI   0x094
++#define VIRTIO_QUEUE_USED_LO    0x0a0
++#define VIRTIO_QUEUE_USED_HI    0x0a4
++#define VIRTIO_CONFIG           0x100           /* virtio-net: mac[6] */
++
++#define VIRTIO_MAGIC_VALUE      0x74726976u     /* "virt" */
++#define VIRTIO_SLOT_SIZE        0x200
++#define VIRTIO_ID_NET           1
++
++#define STATUS_ACKNOWLEDGE      1u
++#define STATUS_DRIVER           2u
++#define STATUS_DRIVER_OK        4u
++#define STATUS_FEATURES_OK      8u
++#define F_NET_MAC               (1ull << 5)
++#define F_VERSION_1             (1ull << 32)
++#define DESC_F_WRITE            2u
++
++#define RXQ                     0
++#define TXQ                     1
++#define QUEUE_SIZE              64u
++#define HDR_LEN                 12              /* struct virtio_net_hdr with num_buffers (v1) */
++#define BUF_SIZE                2048            /* >= HDR_LEN + 1514 without mergeable buffers */
++#define MAX_FRAME               1514
++#define POLL_MS                 1
++
++struct vq_desc {
++	uint64_t addr;
++	uint32_t len;
++	uint16_t flags;
++	uint16_t next;
++};
++
++struct vq_avail {
++	uint16_t flags;
++	uint16_t idx;
++	uint16_t ring[QUEUE_SIZE];
++	uint16_t used_event;
++};
++
++struct vq_used {
++	uint16_t flags;
++	uint16_t idx;
++	struct {
++		uint32_t id;
++		uint32_t len;
++	} ring[QUEUE_SIZE];
++	uint16_t avail_event;
++};
++
++/* Layout of each queue's physically contiguous allocation. */
++#define Q_DESC          0x0000                  /* 16 * 64 = 1 KiB */
++#define Q_AVAIL         0x0400
++#define Q_USED          0x0600                  /* 4 + 8 * 64 + 2 */
++#define Q_BUFS          0x1000
++#define Q_SIZE          (Q_BUFS + QUEUE_SIZE * BUF_SIZE)
++
++struct SweetVirtqueue {
++	IOBufferMemoryDescriptor *mem;
++	uint8_t *va;
++	uint64_t pa;
++	uint16_t avail_idx;
++	uint16_t used_idx;
++
++	struct vq_desc *desc() { return (struct vq_desc *)(va + Q_DESC); }
++	struct vq_avail *avail() { return (struct vq_avail *)(va + Q_AVAIL); }
++	volatile struct vq_used *used() { return (volatile struct vq_used *)(va + Q_USED); }
++	uint8_t *buf(uint16_t i) { return va + Q_BUFS + (size_t)i * BUF_SIZE; }
++	uint64_t buf_pa(uint16_t i) { return pa + Q_BUFS + (uint64_t)i * BUF_SIZE; }
++
++	void
++	post(uint16_t id)
++	{
++		avail()->ring[avail_idx % QUEUE_SIZE] = id;
++		__builtin_arm_dmb(0xb);
++		avail()->idx = ++avail_idx;
++	}
++};
++
++class SweetVirtioNet : public IOEthernetController {
++	OSDeclareDefaultStructors(SweetVirtioNet);
++
++	vm_offset_t fRegs;
++	uint64_t fRegsPA;
++	IOEthernetAddress fMAC;
++	SweetVirtqueue fQ[2];
++	uint16_t fTxFree[QUEUE_SIZE];
++	unsigned fTxFreeCount;
++	bool fTxStalled;
++	bool fEnabled;
++	IOWorkLoop *fWorkLoop;
++	IOTimerEventSource *fTimer;
++	IOEthernetInterface *fNetif;
++	IONetworkMedium *fMedium;
++	uint64_t fRxFrames, fTxFrames;
++
++	uint32_t rd(uint32_t off) { return *(volatile uint32_t *)(fRegs + off); }
++	void wr(uint32_t off, uint32_t val) { *(volatile uint32_t *)(fRegs + off) = val; }
++	bool findDevice();
++	bool setupQueue(unsigned q);
++	bool setupDevice();
++	void reclaimTx();
++	void poll(IOTimerEventSource *sender);
++
++public:
++	/* Overloads of the methods implemented here stay visible. */
++	using IOEthernetController::enable;
++	using IOEthernetController::disable;
++	using IOEthernetController::getHardwareAddress;
++
++	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++	void free() APPLE_KEXT_OVERRIDE;
++	bool createWorkLoop() APPLE_KEXT_OVERRIDE;
++	IOWorkLoop *getWorkLoop() const APPLE_KEXT_OVERRIDE;
++	IOOutputQueue *createOutputQueue() APPLE_KEXT_OVERRIDE;
++	IOReturn enable(IONetworkInterface *netif) APPLE_KEXT_OVERRIDE;
++	IOReturn disable(IONetworkInterface *netif) APPLE_KEXT_OVERRIDE;
++	UInt32 outputPacket(mbuf_t m, void *param) APPLE_KEXT_OVERRIDE;
++	IOReturn getHardwareAddress(IOEthernetAddress *addr) APPLE_KEXT_OVERRIDE;
++	IOReturn setPromiscuousMode(bool active) APPLE_KEXT_OVERRIDE;
++	IOReturn setMulticastMode(bool active) APPLE_KEXT_OVERRIDE;
++	IOReturn setMulticastList(IOEthernetAddress *addrs, UInt32 count) APPLE_KEXT_OVERRIDE;
++	const OSString *newVendorString() const APPLE_KEXT_OVERRIDE;
++	const OSString *newModelString() const APPLE_KEXT_OVERRIDE;
++};
++
++OSDefineMetaClassAndStructors(SweetVirtioNet, IOEthernetController);
++
++bool
++SweetVirtioNet::findDevice()
++{
++	DTEntry node;
++	uintptr_t const *reg = NULL;
++	unsigned int size = 0;
++
++	if (SecureDTLookupEntry(NULL, "/sweet-vblk", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
++	    size < 2 * sizeof(uintptr_t)) {
++		return false;
++	}
++	vm_offset_t window = ml_io_map(reg[0], reg[1]);
++	for (uint64_t off = 0; off + VIRTIO_SLOT_SIZE <= reg[1]; off += VIRTIO_SLOT_SIZE) {
++		volatile uint32_t *slot = (volatile uint32_t *)(window + off);
++		if (slot[VIRTIO_MAGIC / 4] == VIRTIO_MAGIC_VALUE && slot[VIRTIO_DEVICE_ID / 4] == VIRTIO_ID_NET &&
++		    slot[VIRTIO_VERSION / 4] == 2) {
++			fRegs = window + off;
++			fRegsPA = reg[0] + off;
++			return true;
++		}
++	}
++	return false;
++}
++
++bool
++SweetVirtioNet::setupQueue(unsigned q)
++{
++	SweetVirtqueue *vq = &fQ[q];
++
++	vq->mem = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
++	    kIODirectionInOut | kIOMemoryPhysicallyContiguous, Q_SIZE, 0xFFFFFFFFFFFFF000ULL);
++	if (!vq->mem || vq->mem->prepare() != kIOReturnSuccess) {
++		return false;
++	}
++	vq->va = (uint8_t *)vq->mem->getBytesNoCopy();
++	vq->pa = vq->mem->getPhysicalSegment(0, NULL, kIOMemoryMapperNone);
++	bzero(vq->va, Q_SIZE);
++
++	wr(VIRTIO_QUEUE_SEL, q);
++	if (rd(VIRTIO_QUEUE_READY) || rd(VIRTIO_QUEUE_NUM_MAX) < QUEUE_SIZE) {
++		return false;
++	}
++	for (uint16_t i = 0; i < QUEUE_SIZE; i++) {
++		vq->desc()[i] = (struct vq_desc){ vq->buf_pa(i), BUF_SIZE, (uint16_t)(q == RXQ ? DESC_F_WRITE : 0), 0 };
++		if (q == RXQ) {
++			vq->post(i);
++		} else {
++			fTxFree[fTxFreeCount++] = i;
++		}
++	}
++	wr(VIRTIO_QUEUE_NUM, QUEUE_SIZE);
++	wr(VIRTIO_QUEUE_DESC_LO, (uint32_t)(vq->pa + Q_DESC));
++	wr(VIRTIO_QUEUE_DESC_HI, (uint32_t)((vq->pa + Q_DESC) >> 32));
++	wr(VIRTIO_QUEUE_AVAIL_LO, (uint32_t)(vq->pa + Q_AVAIL));
++	wr(VIRTIO_QUEUE_AVAIL_HI, (uint32_t)((vq->pa + Q_AVAIL) >> 32));
++	wr(VIRTIO_QUEUE_USED_LO, (uint32_t)(vq->pa + Q_USED));
++	wr(VIRTIO_QUEUE_USED_HI, (uint32_t)((vq->pa + Q_USED) >> 32));
++	wr(VIRTIO_QUEUE_READY, 1);
++	return true;
++}
++
++bool
++SweetVirtioNet::setupDevice()
++{
++	wr(VIRTIO_STATUS, 0);
++	wr(VIRTIO_STATUS, STATUS_ACKNOWLEDGE);
++	wr(VIRTIO_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER);
++	wr(VIRTIO_DEV_FEATURES_SEL, 0);
++	uint64_t features = rd(VIRTIO_DEV_FEATURES);
++	wr(VIRTIO_DEV_FEATURES_SEL, 1);
++	features |= (uint64_t)rd(VIRTIO_DEV_FEATURES) << 32;
++	if (!(features & F_VERSION_1)) {
++		return false;
++	}
++	uint64_t wanted = F_VERSION_1 | (features & F_NET_MAC);
++	wr(VIRTIO_DRV_FEATURES_SEL, 0);
++	wr(VIRTIO_DRV_FEATURES, (uint32_t)wanted);
++	wr(VIRTIO_DRV_FEATURES_SEL, 1);
++	wr(VIRTIO_DRV_FEATURES, (uint32_t)(wanted >> 32));
++	wr(VIRTIO_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK);
++	if (!(rd(VIRTIO_STATUS) & STATUS_FEATURES_OK)) {
++		return false;
++	}
++
++	if (wanted & F_NET_MAC) {
++		for (int i = 0; i < 6; i++) {
++			fMAC.bytes[i] = *(volatile uint8_t *)(fRegs + VIRTIO_CONFIG + i);
++		}
++	} else {
++		/* QEMU's default prefix, locally administered */
++		static const uint8_t mac[6] = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x56 };
++		bcopy(mac, fMAC.bytes, sizeof(mac));
++	}
++
++	if (!setupQueue(RXQ) || !setupQueue(TXQ)) {
++		return false;
++	}
++	wr(VIRTIO_STATUS, STATUS_ACKNOWLEDGE | STATUS_DRIVER | STATUS_FEATURES_OK | STATUS_DRIVER_OK);
++	__builtin_arm_dsb(0xf);
++	wr(VIRTIO_QUEUE_NOTIFY, RXQ);
++	return true;
++}
++
++bool
++SweetVirtioNet::start(IOService *provider)
++{
++	uint32_t enabled = 1;
++
++	PE_parse_boot_argn("sweetvnet", &enabled, sizeof(enabled));
++	if (!enabled || !findDevice()) {
++		return false;
++	}
++	if (!IOEthernetController::start(provider)) {
++		return false;
++	}
++	if (!setupDevice()) {
++		IOLog("SWEET VNET: virtio-net at 0x%llx not usable\n", fRegsPA);
++		return false;
++	}
++
++	fTimer = IOTimerEventSource::timerEventSource(this,
++	    OSMemberFunctionCast(IOTimerEventSource::Action, this, &SweetVirtioNet::poll));
++	if (!fTimer || fWorkLoop->addEventSource(fTimer) != kIOReturnSuccess) {
++		return false;
++	}
++
++	OSDictionary *media = OSDictionary::withCapacity(1);
++	fMedium = IONetworkMedium::medium(kIOMediumEthernetAuto, 1000ULL * 1000 * 1000);
++	if (!media || !fMedium || !IONetworkMedium::addMedium(media, fMedium) ||
++	    !publishMediumDictionary(media)) {
++		OSSafeReleaseNULL(media);
++		return false;
++	}
++	media->release();
++
++	if (!attachInterface((IONetworkInterface **)&fNetif, true)) {
++		return false;
++	}
++	IOLog("SWEET VNET: virtio-net at 0x%llx, MAC %02x:%02x:%02x:%02x:%02x:%02x\n", fRegsPA,
++	    fMAC.bytes[0], fMAC.bytes[1], fMAC.bytes[2], fMAC.bytes[3], fMAC.bytes[4], fMAC.bytes[5]);
++	return true;
++}
++
++void
++SweetVirtioNet::free()
++{
++	if (fTimer) {
++		fTimer->cancelTimeout();
++		if (fWorkLoop) {
++			fWorkLoop->removeEventSource(fTimer);
++		}
++		OSSafeReleaseNULL(fTimer);
++	}
++	for (unsigned q = 0; q < 2; q++) {
++		if (fQ[q].mem) {
++			fQ[q].mem->complete();
++			OSSafeReleaseNULL(fQ[q].mem);
++		}
++	}
++	OSSafeReleaseNULL(fNetif);
++	OSSafeReleaseNULL(fMedium);
++	OSSafeReleaseNULL(fWorkLoop);
++	IOEthernetController::free();
++}
++
++bool
++SweetVirtioNet::createWorkLoop()
++{
++	fWorkLoop = IOWorkLoop::workLoop();
++	return fWorkLoop != NULL;
++}
++
++IOWorkLoop *
++SweetVirtioNet::getWorkLoop() const
++{
++	return fWorkLoop;
++}
++
++IOOutputQueue *
++SweetVirtioNet::createOutputQueue()
++{
++	return IOGatedOutputQueue::withTarget(this, getWorkLoop());
++}
++
++IOReturn
++SweetVirtioNet::enable(IONetworkInterface *netif)
++{
++	if (fEnabled) {
++		return kIOReturnSuccess;
++	}
++	IOOutputQueue *queue = getOutputQueue();
++	queue->setCapacity(QUEUE_SIZE);
++	queue->start();
++	fEnabled = true;
++	fTimer->setTimeoutMS(POLL_MS);
++	setLinkStatus(kIONetworkLinkValid | kIONetworkLinkActive, fMedium, fMedium->getSpeed());
++	IOLog("SWEET VNET: %s enabled, link up\n", netif->getNamePrefix());
++	return kIOReturnSuccess;
++}
++
++IOReturn
++SweetVirtioNet::disable(__unused IONetworkInterface *netif)
++{
++	if (!fEnabled) {
++		return kIOReturnSuccess;
++	}
++	fEnabled = false;
++	fTimer->cancelTimeout();
++	IOOutputQueue *queue = getOutputQueue();
++	queue->stop();
++	queue->setCapacity(0);
++	queue->flush();
++	setLinkStatus(kIONetworkLinkValid, NULL);
++	return kIOReturnSuccess;
++}
++
++/* Take back the transmit buffers the device has sent. Work loop only. */
++void
++SweetVirtioNet::reclaimTx()
++{
++	SweetVirtqueue *vq = &fQ[TXQ];
++	volatile struct vq_used *used = vq->used();
++
++	while (used->idx != vq->used_idx) {
++		__builtin_arm_dmb(0xb);
++		uint16_t id = (uint16_t)used->ring[vq->used_idx % QUEUE_SIZE].id;
++		vq->used_idx++;
++		if (id < QUEUE_SIZE && fTxFreeCount < QUEUE_SIZE) {
++			fTxFree[fTxFreeCount++] = id;
++		}
++	}
++}
++
++UInt32
++SweetVirtioNet::outputPacket(mbuf_t m, __unused void *param)
++{
++	SweetVirtqueue *vq = &fQ[TXQ];
++	size_t len = mbuf_pkthdr_len(m);
++
++	if (len > MAX_FRAME) {
++		freePacket(m);
++		return kIOReturnOutputDropped;
++	}
++	reclaimTx();
++	if (fTxFreeCount == 0) {
++		fTxStalled = true;
++		return kIOReturnOutputStall;
++	}
++	uint16_t id = fTxFree[--fTxFreeCount];
++	uint8_t *buf = vq->buf(id);
++	bzero(buf, HDR_LEN);
++	mbuf_copydata(m, 0, len, buf + HDR_LEN);
++	freePacket(m);
++	vq->desc()[id].len = (uint32_t)(HDR_LEN + len);
++	vq->post(id);
++	__builtin_arm_dsb(0xf);
++	wr(VIRTIO_QUEUE_NOTIFY, TXQ);
++	fTxFrames++;
++	return kIOReturnOutputSuccess;
++}
++
++/* Every POLL_MS on the work loop: received frames up the stack, sent buffers back. */
++void
++SweetVirtioNet::poll(__unused IOTimerEventSource *sender)
++{
++	SweetVirtqueue *vq = &fQ[RXQ];
++	volatile struct vq_used *used = vq->used();
++	unsigned input = 0;
++	bool posted = false;
++
++	if (!fEnabled) {
++		return;
++	}
++	while (used->idx != vq->used_idx) {
++		__builtin_arm_dmb(0xb);
++		uint16_t id = (uint16_t)used->ring[vq->used_idx % QUEUE_SIZE].id;
++		uint32_t len = used->ring[vq->used_idx % QUEUE_SIZE].len;
++		vq->used_idx++;
++		if (id >= QUEUE_SIZE) {
++			continue;
++		}
++		if (len > HDR_LEN && len <= BUF_SIZE) {
++			uint32_t frame = len - HDR_LEN;
++			mbuf_t m = allocatePacket(frame);
++			if (m && mbuf_copyback(m, 0, frame, vq->buf(id) + HDR_LEN, MBUF_DONTWAIT) == 0) {
++				fNetif->inputPacket(m, frame, IONetworkInterface::kInputOptionQueuePacket);
++				input++;
++				fRxFrames++;
++			} else if (m) {
++				freePacket(m);
++			}
++		}
++		vq->post(id);
++		posted = true;
++	}
++	if (input) {
++		fNetif->flushInputQueue();
++	}
++	if (posted) {
++		__builtin_arm_dsb(0xf);
++		wr(VIRTIO_QUEUE_NOTIFY, RXQ);
++	}
++	wr(VIRTIO_INT_ACK, rd(VIRTIO_INT_STATUS));
++
++	reclaimTx();
++	if (fTxStalled && fTxFreeCount) {
++		fTxStalled = false;
++		getOutputQueue()->service(IOBasicOutputQueue::kServiceAsync);
++	}
++	fTimer->setTimeoutMS(POLL_MS);
++}
++
++IOReturn
++SweetVirtioNet::getHardwareAddress(IOEthernetAddress *addr)
++{
++	bcopy(&fMAC, addr, sizeof(fMAC));
++	return kIOReturnSuccess;
++}
++
++/* QEMU's virtio-net without a control queue delivers everything: nothing to set. */
++IOReturn
++SweetVirtioNet::setPromiscuousMode(__unused bool active)
++{
++	return kIOReturnSuccess;
++}
++
++IOReturn
++SweetVirtioNet::setMulticastMode(__unused bool active)
++{
++	return kIOReturnSuccess;
++}
++
++IOReturn
++SweetVirtioNet::setMulticastList(__unused IOEthernetAddress *addrs, __unused UInt32 count)
++{
++	return kIOReturnSuccess;
++}
++
++const OSString *
++SweetVirtioNet::newVendorString() const
++{
++	return OSString::withCString("QEMU");
++}
++
++const OSString *
++SweetVirtioNet::newModelString() const
++{
++	return OSString::withCString("virtio-net");
++}
++#endif /* SWEET */
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 92f3e26..a508398 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -82,6 +82,19 @@ const char * gIOKernelConfigTables =
+     "     'IOProviderClass' = IOResources;"
+     "     'IOMatchCategory' = SweetBattery;"
+     "   },"
++    /* IONetworkingFamily's personality: the stack waits for BSD */
++    "   {"
++    "     'IOClass'         = IONetworkStack;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = IONetworkStack;"
++    "     'IOResourceMatch' = IOBSD;"
++    "   },"
++    "   {"
++    "     'IOClass'         = SweetVirtioNet;"
++    "     'IOProviderClass' = IOResources;"
++    "     'IOMatchCategory' = SweetVirtioNet;"
++    "     'IOResourceMatch' = IOBSD;"
++    "   },"
+ #endif
+     "   {"
+     "     'IOClass'         = IOPanicPlatform;"
+diff --git a/iokit/conf/Makefile.template b/iokit/conf/Makefile.template
+index 7613d9b..d1688b8 100644
+--- a/iokit/conf/Makefile.template
++++ b/iokit/conf/Makefile.template
+@@ -57,6 +57,12 @@ COMP_SUBDIRS = \
+ 
+ %MACHDEP
+ 
++# Apple OSS IONetworkingFamily built in (iokit/sweet_net, staged by
++# xnu/patches/0094-stage-ionetworking.sh): compiled as upstream wrote it,
++# with the SDK's TargetConditionals.h staged next to it.
++SWEET_NET_OBJS = IOEthernetController.cpo IOEthernetInterface.cpo IOKernelDebugger.cpo IOMbufMemoryCursor.cpo IONetworkController.cpo IONetworkData.cpo IONetworkInterface.cpo IONetworkMedium.cpo IONetworkStack.cpo IONetworkUserClient.cpo IOOutputQueue.cpo IOPacketQueue.cpo
++$(foreach o,$(SWEET_NET_OBJS),$(eval $(o)_CXXWARNFLAGS_ADD += -Wno-everything) $(eval $(o)_INCFLAGS += -I$(SRCROOT)/iokit/sweet_net))
++
+ #
+ # Diagnostic opt-outs.  We need to make this list empty.
+ #
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+index acc9ae0..88b23ce 100644
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -17,6 +17,19 @@ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitc
+ iokit/Kernel/arm/SweetFramebuffer.cpp                            optional iokitcpp
+ iokit/Kernel/arm/SweetBattery.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/SweetHID.cpp                                optional iokitcpp
++iokit/Kernel/arm/SweetVirtioNet.cpp                              optional iokitcpp
++iokit/sweet_net/IOEthernetController.cpp                         optional iokitcpp
++iokit/sweet_net/IOEthernetInterface.cpp                          optional iokitcpp
++iokit/sweet_net/IOKernelDebugger.cpp                             optional iokitcpp
++iokit/sweet_net/IOMbufMemoryCursor.cpp                           optional iokitcpp
++iokit/sweet_net/IONetworkController.cpp                          optional iokitcpp
++iokit/sweet_net/IONetworkData.cpp                                optional iokitcpp
++iokit/sweet_net/IONetworkInterface.cpp                           optional iokitcpp
++iokit/sweet_net/IONetworkMedium.cpp                              optional iokitcpp
++iokit/sweet_net/IONetworkStack.cpp                               optional iokitcpp
++iokit/sweet_net/IONetworkUserClient.cpp                          optional iokitcpp
++iokit/sweet_net/IOOutputQueue.cpp                                optional iokitcpp
++iokit/sweet_net/IOPacketQueue.cpp                                optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp

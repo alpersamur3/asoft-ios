@@ -245,6 +245,9 @@ def main():
                          'gtk,gl=on); runs until QEMU exits')
     ap.add_argument('--disk-cache', default='writeback', help='with --disk: QEMU cache mode (default: writeback)')
     ap.add_argument('--disk-aio', help='with --disk: QEMU aio backend (threads, native, io_uring)')
+    ap.add_argument('--net', choices=('user', 'none'), default='user',
+                    help="'user': a virtio-net device on QEMU's built-in NAT (slirp: DHCP gives the "
+                         "guest 10.0.2.15, DNS 10.0.2.3); 'none': no network")
     ap.add_argument('--qmp-tcp', type=int, metavar='PORT',
                     help='with --display: QMP on 127.0.0.1:PORT (e.g. for screendump)')
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
@@ -316,10 +319,14 @@ def main():
            '-device', f'loader,file={out}/ram.bin,addr={phys_base:#x},force-raw=on',
            '-device', f'loader,file={out}/stub.bin,addr={STUB_PA:#x},force-raw=on',
            '-device', f'loader,addr={STUB_PA:#x},cpu-num=0']
+    if a.disk or a.net != 'none':
+        # the SWEET virtio drivers handle only modern (version 2) virtio-mmio transports
+        cmd += ['-global', 'virtio-mmio.force-legacy=false']
+    if a.net == 'user':
+        # iokit/Kernel/arm/SweetVirtioNet.cpp (kernel 0095+); older kernels leave it unused
+        cmd += ['-netdev', 'user,id=net0', '-device', 'virtio-net-device,netdev=net0']
     if a.disk:
-        # bsd/dev/sweet_vblk.c drives only modern (version 2) virtio-mmio transports
-        cmd += ['-global', 'virtio-mmio.force-legacy=false',
-                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,cache={a.disk_cache},'
+        cmd += ['-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,cache={a.disk_cache},'
                           f'format={"qcow2" if a.disk.endswith(".qcow2") else "raw"}'
                           + (f',aio={a.disk_aio}' if a.disk_aio else '')
                           + (',snapshot=on' if a.snapshot else ''),
