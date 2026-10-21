@@ -561,19 +561,18 @@ index 92f3e26..a508398 100644
      "   {"
      "     'IOClass'         = IOPanicPlatform;"
 diff --git a/iokit/conf/Makefile.template b/iokit/conf/Makefile.template
-index 7613d9b..a5b7f3c 100644
+index 7613d9b..fcdde39 100644
 --- a/iokit/conf/Makefile.template
 +++ b/iokit/conf/Makefile.template
-@@ -57,6 +57,13 @@ COMP_SUBDIRS = \
+@@ -57,6 +57,12 @@ COMP_SUBDIRS = \
  
  %MACHDEP
  
 +# Apple OSS IONetworkingFamily built in (iokit/sweet_net, staged by
 +# xnu/patches/0094-stage-ionetworking.sh): compiled as upstream wrote it,
-+# with the SDK's TargetConditionals.h staged next to it and the kext's
-+# view of the kernel headers (sweet_net_compat.h).
++# with the SDK's TargetConditionals.h staged next to it; see sweet_net_compat.h.
 +SWEET_NET_OBJS = IOEthernetController.cpo IOEthernetInterface.cpo IOKernelDebugger.cpo IOMbufMemoryCursor.cpo IONetworkController.cpo IONetworkData.cpo IONetworkInterface.cpo IONetworkMedium.cpo IONetworkStack.cpo IONetworkUserClient.cpo IOOutputQueue.cpo IOPacketQueue.cpo
-+$(foreach o,$(SWEET_NET_OBJS),$(eval $(o)_CXXWARNFLAGS_ADD += -Wno-everything) $(eval $(o)_CFLAGS_ADD += -include $(SRCROOT)/iokit/sweet_net/sweet_net_compat.h) $(eval $(o)_INCFLAGS += -I$(SRCROOT)/iokit/sweet_net))
++$(foreach o,$(SWEET_NET_OBJS),$(eval $(o)_CXXWARNFLAGS_ADD += -Wno-everything) $(eval $(o)_CFLAGS_ADD += -include $(SRCROOT)/iokit/sweet_net/sweet_net_compat.h) $(eval $(o)_INCFLAGS += -I$(SRCROOT)/iokit/sweet_net -I$(SRCROOT)/bsd))
 +
  #
  # Diagnostic opt-outs.  We need to make this list empty.
@@ -604,29 +603,38 @@ index acc9ae0..88b23ce 100644
  iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
 diff --git a/iokit/sweet_net/sweet_net_compat.h b/iokit/sweet_net/sweet_net_compat.h
 new file mode 100755
-index 0000000..f2ba05c
+index 0000000..7843821
 --- /dev/null
 +++ b/iokit/sweet_net/sweet_net_compat.h
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,31 @@
 +/*
 + * SWEET: Apple's IONetworkingFamily (staged into iokit/sweet_net by
-+ * xnu/patches/0094-stage-ionetworking.sh) built into the kernel the way its
-+ * kext is built. iokit/conf/Makefile.template force-includes this header in
-+ * every source of the family.
++ * xnu/patches/0094-stage-ionetworking.sh) built into the kernel.
++ * iokit/conf/Makefile.template force-includes this header in every source
++ * of the family, and adds bsd/ to their include path for the KPI headers a
++ * kext finds in Kernel.framework but the kernel build does not export
++ * (net/classq/classq.h, from net/dlil.h).
 + *
-+ * - A kext sees the kernel's KPI view of the BSD and Mach headers: without
-+ *   the XNU internals, kalloc/zalloc pull in startup.h's C++ templates
-+ *   (inside the family's extern "C" includes) and bpf.h pulls in Skywalk.
++ * - The family includes BSD headers inside extern "C" { }. Inside the
++ *   kernel they reach kalloc/zalloc and startup.h, whose C++ templates need
++ *   C++ linkage, and bpf.h reaches Skywalk's IOKit header, which needs
++ *   OSMetaClass.h. Those come first here, as C++; their include guards keep
++ *   the later extern "C" includes from opening them again. They declare
++ *   their C functions inside __BEGIN_DECLS themselves.
 + * - The kext's project defines __PRIVATE_SPI__; the class layout is the same
 + *   either way (the SPI methods use reserved vtable slots).
 + */
 +#ifndef SWEET_NET_COMPAT_H
 +#define SWEET_NET_COMPAT_H
 +
-+#undef XNU_KERNEL_PRIVATE
-+#undef BSD_KERNEL_PRIVATE
-+#undef IOKIT_KERNEL_PRIVATE
-+
 +#define __PRIVATE_SPI__ 1
++
++#ifdef __cplusplus
++#include <libkern/c++/OSMetaClass.h>
++#include <kern/startup.h>
++#include <kern/locks.h>
++#include <kern/zalloc.h>
++#include <kern/kalloc.h>
++#endif
 +
 +#endif /* SWEET_NET_COMPAT_H */
