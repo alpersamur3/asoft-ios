@@ -294,7 +294,9 @@ def main():
     if a.display:
         # ramfb scans out the fbcon framebuffer once the kernel configures it (ADT sweet-ramfb)
         screen = ['-display', f'{a.display},zoom-to-fit=on' if a.display == 'gtk' else a.display,
-                  '-device', 'ramfb']
+                  '-device', 'ramfb',
+                  # bsd/dev/sweet_vinput.c: F1-F4 = Home/side/volume buttons, tablet = touch
+                  '-device', 'virtio-keyboard-device', '-device', 'virtio-tablet-device']
         if a.qmp_tcp:
             screen += ['-qmp', f'tcp:127.0.0.1:{a.qmp_tcp},server,nowait']
     else:
