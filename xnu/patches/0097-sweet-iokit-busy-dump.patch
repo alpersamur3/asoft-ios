@@ -1,0 +1,93 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+index 1ebd344..0719750 100644
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -9,6 +9,9 @@
+ #include <IOKit/IOPlatformExpert.h>
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOLib.h>
++#include <kern/clock.h>
++#include <kern/thread_call.h>
++#include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ 
+ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+@@ -25,6 +28,66 @@ extern "C" vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+ 
+ static volatile uint32_t *sweet_rtc;
+ 
++/*
++ * Boot-arg sweetbusy=N: every N seconds, 8 times, print what keeps IOKit
++ * from going quiet. A service's busy count includes its children's, so the
++ * services printed are the busy ones without a busy child, with their state
++ * bits (1 inactive, 2 registered, 4 matched, 8 first published). configd
++ * names a new network interface only once the service plane is quiet (or
++ * after 240 s).
++ */
++static thread_call_t sweet_busy_call;
++static uint32_t sweet_busy_secs, sweet_busy_rounds;
++
++static void
++sweet_busy_arm(void)
++{
++	uint64_t deadline;
++	clock_interval_to_deadline(sweet_busy_secs, NSEC_PER_SEC, &deadline);
++	thread_call_enter_delayed(sweet_busy_call, deadline);
++}
++
++static void
++sweet_busy_dump(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
++{
++	IOService *root = IOService::getServiceRoot();
++	IOLog("SWEET BUSY: round %u, root busy %u\n", sweet_busy_rounds, (unsigned)root->getBusyState());
++	IORegistryIterator *iter = IORegistryIterator::iterateOver(root, gIOServicePlane,
++	    kIORegistryIterateRecursively);
++	if (iter) {
++		IORegistryEntry *entry;
++		while ((entry = iter->getNextObject())) {
++			IOService *service = OSDynamicCast(IOService, entry);
++			if (!service || !service->getBusyState()) {
++				continue;
++			}
++			bool busyChild = false;
++			OSIterator *children = service->getChildIterator(gIOServicePlane);
++			if (children) {
++				OSObject *child;
++				while (!busyChild && (child = children->getNextObject())) {
++					IOService *cs = OSDynamicCast(IOService, child);
++					busyChild = cs && cs->getBusyState();
++				}
++				children->release();
++			}
++			if (!busyChild) {
++				char path[256];
++				int len = sizeof(path);
++				if (!service->getPath(path, &len, gIOServicePlane)) {
++					strlcpy(path, "?", sizeof(path));
++				}
++				IOLog("SWEET BUSY: %s busy %u state 0x%x %s\n", service->getMetaClass()->getClassName(),
++				    (unsigned)service->getBusyState(), (unsigned)service->getState(), path);
++			}
++		}
++		iter->release();
++	}
++	if (++sweet_busy_rounds < 8) {
++		sweet_busy_arm();
++	}
++}
++
+ class SweetPlatformExpert : public IODTPlatformExpert {
+ 	OSDeclareDefaultStructors(SweetPlatformExpert);
+ 
+@@ -60,6 +123,11 @@ SweetPlatformExpert::start(IOService *provider)
+ 		    sweet_rtc[PL031_DR / 4]);
+ 	}
+ 	publishResource("IORTC");
++
++	if (PE_parse_boot_argn("sweetbusy", &sweet_busy_secs, sizeof(sweet_busy_secs)) && sweet_busy_secs &&
++	    (sweet_busy_call = thread_call_allocate(sweet_busy_dump, NULL))) {
++		sweet_busy_arm();
++	}
+ 	return true;
+ }
+ 
