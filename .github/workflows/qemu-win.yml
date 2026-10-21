@@ -1,6 +1,6 @@
 name: qemu-win
 
-# qemu-system-aarch64 for Windows (MSYS2 MINGW64), built twice from the same QEMU tag:
+# qemu-system-aarch64 for Windows (MSYS2 UCRT64), built twice from the same QEMU tag:
 # "stock" and "patched" (qemu/patches/*.patch), so the patches can be measured against a
 # build that differs in nothing else. Each artifact is a folder with the exe and its DLLs;
 # run it with QEMU_SYSTEM_AARCH64=<folder>\qemu-system-aarch64.exe tools/qemu-sweet.py ...
@@ -42,27 +42,26 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
             bison diffutils flex git grep make sed
-            mingw-w64-x86_64-binutils
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-python
-            mingw-w64-x86_64-python-certifi
-            mingw-w64-x86_64-python-setuptools
-            mingw-w64-x86_64-python-wheel
-            mingw-w64-x86_64-glib2
-            mingw-w64-x86_64-pixman
-            mingw-w64-x86_64-zstd
-            mingw-w64-x86_64-dtc
-            mingw-w64-x86_64-capstone
-            mingw-w64-x86_64-libslirp
-            mingw-w64-x86_64-gtk3
-            mingw-w64-x86_64-libepoxy
-            mingw-w64-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-certifi
+            mingw-w64-ucrt-x86_64-python-setuptools
+            mingw-w64-ucrt-x86_64-python-wheel
+            mingw-w64-ucrt-x86_64-glib2
+            mingw-w64-ucrt-x86_64-pixman
+            mingw-w64-ucrt-x86_64-zstd
+            mingw-w64-ucrt-x86_64-capstone
+            mingw-w64-ucrt-x86_64-libslirp
+            mingw-w64-ucrt-x86_64-gtk3
+            mingw-w64-ucrt-x86_64-libepoxy
+            mingw-w64-ucrt-x86_64-SDL2
 
       - name: Fetch QEMU
         run: |
@@ -82,7 +81,7 @@ jobs:
           mkdir build && cd build
           ../qemu-src/configure --target-list=aarch64-softmmu -Ddebug=false \
             --disable-docs --disable-tools --disable-guest-agent \
-            --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=system
+            --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=internal
 
       - name: Build
         run: make -C build -j"$(nproc)"
@@ -91,14 +90,14 @@ jobs:
         run: |
           mkdir dist
           cp build/qemu-system-aarch64.exe build/qemu-system-aarch64w.exe dist/
-          # The DLLs from /mingw64/bin the exe needs, recursively (as scripts/nsis.py does).
+          # The DLLs from /ucrt64/bin the exe needs, recursively (as scripts/nsis.py does).
           todo="dist/qemu-system-aarch64.exe"
           while [ -n "$todo" ]; do
             next=""
             for f in $todo; do
               for dll in $(objdump -p "$f" | sed -n 's/^\s*DLL Name: //p'); do
-                if [ -f "/mingw64/bin/$dll" ] && [ ! -f "dist/$dll" ]; then
-                  cp "/mingw64/bin/$dll" dist/
+                if [ -f "/ucrt64/bin/$dll" ] && [ ! -f "dist/$dll" ]; then
+                  cp "/ucrt64/bin/$dll" dist/
                   next="$next dist/$dll"
                 fi
               done
@@ -107,8 +106,8 @@ jobs:
           done
           # GTK runtime data: settings schemas and the image loaders for the window icon.
           mkdir -p dist/share/glib-2.0/schemas dist/lib
-          cp /mingw64/share/glib-2.0/schemas/gschemas.compiled dist/share/glib-2.0/schemas/
-          cp -r /mingw64/lib/gdk-pixbuf-2.0 dist/lib/
+          cp /ucrt64/share/glib-2.0/schemas/gschemas.compiled dist/share/glib-2.0/schemas/
+          cp -r /ucrt64/lib/gdk-pixbuf-2.0 dist/lib/
           cp qemu-src/COPYING qemu-src/LICENSE dist/
           [ "${{ matrix.variant }}" = patched ] && cp qemu/patches/*.patch dist/
           echo "QEMU $QEMU_REF ($(git -C qemu-src rev-parse HEAD)), ${{ matrix.variant }}" > dist/BUILD.txt
