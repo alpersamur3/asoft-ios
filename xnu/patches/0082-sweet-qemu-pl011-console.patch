@@ -1,0 +1,18 @@
+diff --git a/pexpert/pexpert/arm64/SWEET.h b/pexpert/pexpert/arm64/SWEET.h
+index b99c2f4..dd5914e 100644
+--- a/pexpert/pexpert/arm64/SWEET.h
++++ b/pexpert/pexpert/arm64/SWEET.h
+@@ -38,6 +38,13 @@
+ 
+ #define HAS_GIC_V3                1
+ 
++/*
++ * PL011 console (pexpert/arm/pe_serial.c, written for Apple's VMs). It
++ * registers only when the ADT has a "uart0" node: tools/mkadt.py --qemu adds
++ * one for QEMU virt's UART at 0x09000000; the phone tree has none.
++ */
++#define VMAPPLE_UART
++
+ #ifndef ASSEMBLER
+ #define PLATFORM_PANIC_LOG_DISABLED
+ #endif /* ! ASSEMBLER */
