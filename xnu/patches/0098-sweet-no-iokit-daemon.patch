@@ -1,0 +1,27 @@
+diff --git a/libkern/c++/OSKext.cpp b/libkern/c++/OSKext.cpp
+index 82661cf..c682296 100644
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -1481,11 +1481,22 @@ finish:
+ bool
+ OSKext::iokitDaemonAvailable(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	/*
++	 * SWEET runs the iOS userland on a macOS-config kernel: no IOKit daemon
++	 * (kernelmanagerd) ever checks in. With one expected, StartIOKitMatching()
++	 * keeps the service root busy until it does, so IOKit never goes quiet,
++	 * and configd names a new network interface only after a 240 s timeout;
++	 * matches deferred to the daemon would never run either.
++	 */
++	return false;
++#else
+ 	int notused;
+ 	if (PE_parse_boot_argn("-restore", &notused, sizeof(notused))) {
+ 		return false;
+ 	}
+ 	return true;
++#endif
+ }
+ 
+ /*********************************************************************
