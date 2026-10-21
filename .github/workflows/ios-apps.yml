@@ -1,0 +1,44 @@
+name: ios-apps
+
+# Our own iOS binaries for SWEET: sweetinstalld (installs .ipa files dropped into
+# an inbox, see apps/sweetinstalld/main.m) and Hello.ipa (a minimal UIKit app to
+# test it). Both are ad-hoc signed; SWEET accepts any signer.
+on:
+  workflow_dispatch:
+  push:
+    branches: [qemu-virt]
+    paths:
+      - "apps/**"
+      - ".github/workflows/ios-apps.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          CC="xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK -miphoneos-version-min=16.0 -fobjc-arc -O2"
+          mkdir -p out/Payload/Hello.app
+
+          $CC apps/sweetinstalld/main.m -framework Foundation -framework MobileCoreServices -o out/sweetinstalld
+          codesign -f -s - --entitlements apps/sweetinstalld/entitlements.plist out/sweetinstalld
+
+          $CC apps/hello/main.m -framework UIKit -framework Foundation -o out/Payload/Hello.app/Hello
+          plutil -convert binary1 -o out/Payload/Hello.app/Info.plist apps/hello/Info.plist
+          printf 'APPL????' > out/Payload/Hello.app/PkgInfo
+          codesign -f -s - out/Payload/Hello.app
+          (cd out && zip -qry Hello.ipa Payload)
+
+          codesign -dvv out/sweetinstalld 2>&1 | head -5
+          codesign -d --entitlements - out/sweetinstalld 2>&1 | head -20
+          codesign -dvv out/Payload/Hello.app 2>&1 | head -5
+          ls -la out out/Payload/Hello.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-apps
+          path: |
+            out/sweetinstalld
+            out/Hello.ipa
