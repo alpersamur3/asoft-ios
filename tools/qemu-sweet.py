@@ -310,6 +310,9 @@ def main():
     cmd = [find_qemu(), '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', str(a.smp), '-m', f'{ram_gib}G',
            *screen, '-serial', f'file:{out}/serial.txt',
            '-d', a.qemu_log, '-D', f'{out}/qemu.log', '-no-reboot',
+           # No default PCI NIC: iOS has no PCI driver for it, and builds without the
+           # option ROMs next to the exe refuse to start (efi-virtio.rom)
+           '-nic', 'none',
            '-device', f'loader,file={out}/ram.bin,addr={phys_base:#x},force-raw=on',
            '-device', f'loader,file={out}/stub.bin,addr={STUB_PA:#x},force-raw=on',
            '-device', f'loader,addr={STUB_PA:#x},cpu-num=0']
