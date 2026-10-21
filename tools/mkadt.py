@@ -37,6 +37,7 @@ QEMU_UART, QEMU_UART_SIZE = 0x09000000, 0x1000
 QEMU_VIRTIO, QEMU_VIRTIO_SIZE = 0x0a000000, 32 * 0x200
 # QEMU virt's fw_cfg (MMIO, with DMA): the kernel configures ramfb through it
 QEMU_FW_CFG, QEMU_FW_CFG_SIZE = 0x09020000, 0x18
+QEMU_TIMEOUT_SCALE = 100
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -125,7 +126,11 @@ def build(seed=None, qemu=False, highmem=False):
         # debugger, dtrace, nvram), lp-sip1: unauthenticated (unsealed) root.
         # The iOS shared cache is in no trust cache, so dyld can only map it
         # with CSR_ALLOW_UNRESTRICTED_FS (vm_unix.c shared region checks).
-        node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])])
+        node('asmb', [ph(), ('lp-sip0', u64(0x6f)), ('lp-sip1', u32(1))])] + ([
+        # TCG is slow and QEMU's 62.5 MHz timebase makes the tick-based defaults
+        # (osfmk/arm64/machine_routines.c: lock 6e6, ticket-lock 3e6) 2.6x shorter
+        # than on the phone: scale every machine timeout (osfmk/kern/machine.c).
+        node('machine-timeouts', [ph(), ('global-scale', u32(QEMU_TIMEOUT_SCALE))])] if qemu else []))
 
     # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
     # 6-7 Cortex-A76), one homogeneous cluster. The kernel defaults to one

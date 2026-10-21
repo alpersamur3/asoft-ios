@@ -242,6 +242,8 @@ def main():
     ap.add_argument('--smp', type=int, default=1, help='QEMU CPUs (boot with cpus=N <= this; ADT from mkadt.py --qemu)')
     ap.add_argument('--display', choices=('gtk', 'sdl'),
                     help='live window through QEMU ramfb instead of -nographic; runs until the window is closed')
+    ap.add_argument('--qmp-tcp', type=int, metavar='PORT',
+                    help='with --display: QMP on 127.0.0.1:PORT (e.g. for screendump)')
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
                     help="QEMU -d items for qemu.log (default: int,guest_errors,unimp; 'int' is very slow for a full iOS boot)")
     a = ap.parse_args()
@@ -293,6 +295,8 @@ def main():
         # ramfb scans out the fbcon framebuffer once the kernel configures it (ADT sweet-ramfb)
         screen = ['-display', f'{a.display},zoom-to-fit=on' if a.display == 'gtk' else a.display,
                   '-device', 'ramfb']
+        if a.qmp_tcp:
+            screen += ['-qmp', f'tcp:127.0.0.1:{a.qmp_tcp},server,nowait']
     else:
         screen = ['-nographic', '-qmp', f'unix:{mon},server,nowait']
     cmd = [find_qemu(), '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', str(a.smp), '-m', f'{ram_gib}G',
