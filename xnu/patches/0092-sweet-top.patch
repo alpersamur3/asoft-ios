@@ -1,0 +1,111 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+index b40eccd..7170fa2 100644
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -11,11 +11,20 @@
+  * syscall stub in pc and its caller in lr/bt.
+  *
+  * First sample 90 s after start, then every 120 s, 40 samples at most.
++ *
++ * SWEET top: who uses the CPU while iOS boots? With boot-arg sweettop=<ms>
++ * (default 0 = off) another thread prints every <ms>, for each process that
++ * used at least 1 ms of CPU since the previous table,
++ *   "TOP <pid> <name> <ms in interval> <ms total> <pageins in interval>"
++ * and then "TOP --- <ms since boot> procs <n> cpu <ms used by all of them>".
++ * A process that exits between two tables is not counted.
+  */
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/proc.h>
+ #include <sys/proc_internal.h>
++#include <sys/bsdtask_info.h>
++#include <kern/clock.h>
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <pexpert/pexpert.h>
+@@ -78,11 +87,85 @@ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ 	}
+ }
+ 
++#define TOP_SLOTS       4096            /* indexed by pid; boot stays well below */
++
++static struct {
++	int pid;
++	uint32_t ms;
++	int32_t pageins;
++} top_prev[TOP_SLOTS];
++
++struct top_table {
++	uint32_t procs;
++	uint64_t cpu_ms;
++};
++
++static uint64_t
++top_now_ms(void)
++{
++	uint64_t ns;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	return ns / NSEC_PER_MSEC;
++}
++
++static int
++sweet_top_proc(proc_t p, void *arg)
++{
++	struct top_table *table = arg;
++	task_t task = proc_task(p);
++	if (task == TASK_NULL) {
++		return PROC_RETURNED;
++	}
++	struct proc_taskinfo_internal ti = {};
++	fill_taskprocinfo(task, &ti);
++	uint64_t ns;
++	absolutetime_to_nanoseconds(ti.pti_total_user + ti.pti_total_system, &ns);
++	uint32_t ms = (uint32_t)(ns / NSEC_PER_MSEC);
++	int pid = proc_pid(p);
++	__typeof__(&top_prev[0]) prev = &top_prev[pid & (TOP_SLOTS - 1)];
++	if (prev->pid != pid) {
++		prev->pid = pid;
++		prev->ms = 0;
++		prev->pageins = 0;
++	}
++	uint32_t delta = ms - prev->ms;
++	table->procs++;
++	table->cpu_ms += delta;
++	if (delta > 0) {
++		printf("TOP %d %s %u %u %d\n", pid, proc_best_name(p), delta, ms,
++		    ti.pti_pageins - prev->pageins);
++	}
++	prev->ms = ms;
++	prev->pageins = ti.pti_pageins;
++	return PROC_RETURNED;
++}
++
++static void
++sweet_top_thread(void *arg, __unused wait_result_t wr)
++{
++	static int chan;
++	int interval_ms = (int)(uintptr_t)arg;
++	for (;;) {
++		(void)tsleep(&chan, PZERO, "sweettop", MAX(1, interval_ms * hz / 1000));
++		struct top_table table = {};
++		proc_iterate(PROC_ALLPROCLIST, sweet_top_proc, &table, NULL, NULL);
++		printf("TOP --- %llu procs %u cpu %llu\n", top_now_ms(), table.procs, table.cpu_ms);
++	}
++}
++
+ void
+ sweet_sample_start(void)
+ {
++	static bool top_started;
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
++	int top_ms = 0;
++	if (!top_started && PE_parse_boot_argn("sweettop", &top_ms, sizeof(top_ms)) && top_ms > 0) {
++		top_started = true;
++		if (kernel_thread_start(sweet_top_thread, (void *)(uintptr_t)top_ms, &thread) == KERN_SUCCESS) {
++			thread_deallocate(thread);
++		}
++	}
+ }
