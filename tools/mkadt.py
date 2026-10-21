@@ -253,6 +253,11 @@ def build(seed=None, qemu=False, highmem=False):
     ])
 
     product_props = d22ap_product()
+    if product_props and qemu:
+        # QEMU's ramfb is an sRGB scanout and CoreAnimation renders without a GPU. With the
+        # phone's P3 gamut WebKit draws page tiles into 10-bit w30r IOSurfaces, which the
+        # software renderer shows blank (Safari pages stayed white); sRGB gives BGRA tiles.
+        product_props = [(k, cstr('sRGB') if k == 'artwork-display-gamut' else v) for k, v in product_props]
     product = [node('product', [ph()] + product_props)] if product_props else []
 
     # Identity of the iPhone X whose userland runs here: compatible[0] is
