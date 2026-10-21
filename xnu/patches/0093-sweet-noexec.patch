@@ -1,0 +1,61 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+index 68612db..69b513f 100644
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -7325,6 +7325,42 @@ proc_process_signature(proc_t p, os_reason_t *signature_failure_reason)
+ 	return error;
+ }
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/*
++ * Boot-arg sweetnoexec=name,name,...: refuse to run these binaries (matched
++ * on the process name), to measure what the boot gains without them. The
++ * process is killed like a binary for the wrong platform; launchd sees a
++ * failed job. Debugging only: the root image is not changed.
++ */
++static bool
++sweet_noexec(const char *name)
++{
++	static char names[512];
++	static int parsed;      /* 0: not yet, 1: list in names, -1: none */
++	if (parsed == 0) {
++		/* Racing first execs parse the same bytes into the same buffer. */
++		int have = PE_parse_boot_argn("sweetnoexec", names, sizeof(names));
++		os_atomic_store(&parsed, have ? 1 : -1, release);
++	}
++	if (os_atomic_load(&parsed, acquire) < 0) {
++		return false;
++	}
++	size_t n = strlen(name);
++	for (const char *t = names; *t;) {
++		const char *end = strchr(t, ',');
++		size_t len = end ? (size_t)(end - t) : strlen(t);
++		if (len == n && n > 0 && strncmp(t, name, n) == 0) {
++			return true;
++		}
++		if (!end) {
++			break;
++		}
++		t = end + 1;
++	}
++	return false;
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */
++
+ static int
+ process_signature(proc_t p, struct image_params *imgp)
+ {
+@@ -7414,6 +7450,13 @@ process_signature(proc_t p, struct image_params *imgp)
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 			/* SWEET runs every iOS binary this way: one short line per exec. */
+ 			printf("exec %s\n", p->p_name);
++			if (sweet_noexec(p->p_name)) {
++				printf("exec %s denied (sweetnoexec)\n", p->p_name);
++				signature_failure_reason = os_reason_create(OS_REASON_EXEC,
++				    EXEC_EXIT_REASON_WRONG_PLATFORM);
++				error = EACCES;
++				goto done;
++			}
+ #else
+ 			printf("Allowing spawn of iOS binary %s since it has "
+ 			    "com.apple.private.security.no-sandbox entitlement or unentitled_ios_sim_launch "
