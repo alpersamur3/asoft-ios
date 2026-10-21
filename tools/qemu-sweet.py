@@ -228,6 +228,10 @@ def main():
     ap.add_argument('--fail-on-panic', action='store_true', help='exit 2 for a visible panic, 3 for incomplete/blank decoding; requires --kernel')
     ap.add_argument('--live-serial', action='store_true', help='stream serial console output to stdout in real time')
     ap.add_argument('--check-env', action='store_true', help='check QEMU installation and dependencies without running a payload')
+    ap.add_argument('--disk', help='raw iOS root image attached as virtio-blk (boot with rd=vblkroot0; ADT from mkadt.py --qemu)')
+    ap.add_argument('--snapshot', action='store_true', help='with --disk: discard guest writes when QEMU exits')
+    ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
+                    help="QEMU -d items for qemu.log (default: int,guest_errors,unimp; 'int' is very slow for a full iOS boot)")
     a = ap.parse_args()
 
     if a.check_env:
@@ -275,10 +279,16 @@ def main():
     ram_gib = max(4, -(-(phys_base + mem_size - 0x40000000) // (1 << 30)))
     cmd = ['qemu-system-aarch64', '-M', 'virt,gic-version=3', '-cpu', a.cpu, '-smp', '1', '-m', f'{ram_gib}G',
            '-nographic', '-serial', f'file:{out}/serial.txt', '-qmp', f'unix:{mon},server,nowait',
-           '-d', 'int,guest_errors,unimp', '-D', f'{out}/qemu.log', '-no-reboot',
+           '-d', a.qemu_log, '-D', f'{out}/qemu.log', '-no-reboot',
            '-device', f'loader,file={out}/ram.bin,addr={phys_base:#x},force-raw=on',
            '-device', f'loader,file={out}/stub.bin,addr={STUB_PA:#x},force-raw=on',
            '-device', f'loader,addr={STUB_PA:#x},cpu-num=0']
+    if a.disk:
+        # bsd/dev/sweet_vblk.c drives only modern (version 2) virtio-mmio transports
+        cmd += ['-global', 'virtio-mmio.force-legacy=false',
+                '-drive', f'file={os.path.abspath(a.disk)},if=none,id=root,format=raw,cache=writeback'
+                          + (',snapshot=on' if a.snapshot else ''),
+                '-device', 'virtio-blk-device,drive=root']
     if a.gdb:
         cmd += ['-S', '-gdb', 'tcp::1234']
 
