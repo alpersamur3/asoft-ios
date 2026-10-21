@@ -5,11 +5,20 @@ name: qemu-win
 # build that differs in nothing else. Each artifact is a folder with the exe and its DLLs;
 # run it with QEMU_SYSTEM_AARCH64=<folder>\qemu-system-aarch64.exe tools/qemu-sweet.py ...
 on:
+  # Dispatch needs the file on the default branch; a push to qemu-virt runs it from there.
+  push:
+    branches: [qemu-virt]
+    paths:
+      - "qemu/patches/**"
+      - ".github/workflows/qemu-win.yml"
   workflow_dispatch:
     inputs:
       qemu_ref:
         description: QEMU tag or branch to build
         default: v11.1.2
+
+env:
+  QEMU_REF: ${{ inputs.qemu_ref || 'v11.1.2' }}
 
 concurrency:
   group: qemu-win-${{ github.ref }}
@@ -57,7 +66,7 @@ jobs:
 
       - name: Fetch QEMU
         run: |
-          git clone -q --depth 1 -b "${{ inputs.qemu_ref }}" https://github.com/qemu/qemu.git qemu-src
+          git clone -q --depth 1 -b "$QEMU_REF" https://github.com/qemu/qemu.git qemu-src
           git -C qemu-src log --oneline -1
 
       - name: Apply patches
@@ -102,7 +111,7 @@ jobs:
           cp -r /mingw64/lib/gdk-pixbuf-2.0 dist/lib/
           cp qemu-src/COPYING qemu-src/LICENSE dist/
           [ "${{ matrix.variant }}" = patched ] && cp qemu/patches/*.patch dist/
-          echo "QEMU ${{ inputs.qemu_ref }} ($(git -C qemu-src rev-parse HEAD)), ${{ matrix.variant }}" > dist/BUILD.txt
+          echo "QEMU $QEMU_REF ($(git -C qemu-src rev-parse HEAD)), ${{ matrix.variant }}" > dist/BUILD.txt
           (cd dist && sha256sum qemu-system-aarch64.exe > SHA256SUMS)
           ls dist | wc -l
           du -sh dist
