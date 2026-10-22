@@ -76,6 +76,15 @@ if (Test-Path $Qemu) {
     $Display = $Display -replace ',window-close=off', '' -replace ',sidebar=on', ''
 }
 
+# Two QEMUs writing one disk would wreck it (QEMU's image locking does not work on Windows)
+$written = if ($Persist) { $UserDisk } elseif ($Keep) { $Disk } else { '' }
+if ($written) {
+    $name = [IO.Path]::GetFileName($written)
+    $other = Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($name) } | Select-Object -First 1
+    if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
+}
+
 if ($Persist) {
     if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk }
     if (-not (Test-Path $UserDisk)) {
