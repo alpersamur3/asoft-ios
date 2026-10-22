@@ -12,9 +12,13 @@
 // It also asks the host: scripts/ipa-server.py (started by the Windows launcher)
 // serves a Windows folder at 10.0.2.2:8765, QEMU's user network address of the
 // host. Each .ipa listed there is fetched into the inbox and its result posted back.
+//
+// At start it sets iOS's time zone to the PC's, which the launcher passes as the
+// boot-arg asoft_tz=Area/City.
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <notify.h>
 #include <sys/socket.h>
@@ -172,6 +176,51 @@ uptime(void)
 		return 0;
 	}
 	return (double)(now.tv_sec - boot.tv_sec) + (now.tv_usec - boot.tv_usec) / 1e6;
+}
+
+// iOS keeps its time zone as the symlink /var/db/timezone/localtime, which timed sets from
+// the cell network or the location; there is neither here, so it stays at the image's
+// US/Pacific. Point it at the zone the boot-arg asoft_tz names, before the apps start.
+static void
+setTimeZone(void)
+{
+	char args[1024] = {0};
+	size_t size = sizeof(args) - 1;
+	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0) {
+		return;
+	}
+	NSString *zone = nil;
+	for (NSString *arg in [[NSString stringWithUTF8String:args] componentsSeparatedByString:@" "]) {
+		if ([arg hasPrefix:@"asoft_tz="]) {
+			zone = [arg substringFromIndex:@"asoft_tz=".length];
+		}
+	}
+	if (zone.length == 0) {
+		return;
+	}
+	NSFileManager *fm = NSFileManager.defaultManager;
+	NSString *link = @"/private/var/db/timezone/localtime";
+	NSString *target = [@"/var/db/timezone/zoneinfo/" stringByAppendingString:zone];
+	if ([zone hasPrefix:@"/"] || [zone containsString:@".."] || ![fm fileExistsAtPath:target]) {
+		say(@"time zone %@: no such zone", zone);
+		return;
+	}
+	NSString *was = [fm destinationOfSymbolicLinkAtPath:link error:nil];
+	if ([was isEqualToString:target]) {
+		return;
+	}
+	// a new link renamed over the old one: never a moment without a time zone
+	NSString *tmp = [link stringByAppendingString:@".asoft"];
+	unlink(tmp.fileSystemRepresentation);
+	if (symlink(target.fileSystemRepresentation, tmp.fileSystemRepresentation) != 0 ||
+	    rename(tmp.fileSystemRepresentation, link.fileSystemRepresentation) != 0) {
+		say(@"time zone %@: %s", zone, strerror(errno));
+		unlink(tmp.fileSystemRepresentation);
+		return;
+	}
+	notify_post("com.apple.system.timezone");
+	say(@"time zone %@ (was %@)", zone, [was stringByReplacingOccurrencesOfString:@"/var/db/timezone/zoneinfo/"
+	                                                                      withString:@""]);
 }
 
 // An install asked for in the first seconds of boot, before lsd and installd ran, never
@@ -339,6 +388,7 @@ int
 main(void)
 {
 	@autoreleasepool {
+		setTimeZone();
 		NSFileManager *fm = NSFileManager.defaultManager;
 		NSString *inbox = [kRoot stringByAppendingPathComponent:@"Inbox"];
 		[fm createDirectoryAtPath:inbox withIntermediateDirectories:YES
