@@ -660,7 +660,7 @@ Based on QEMU v11.1.2 with 0002-0008.
 +        when = g_date_time_new_from_unix_local(sn_tab[i].date_sec);
 +        date = g_date_time_format(when, "%d %b %Y, %H:%M:%S");
 +        text = g_strdup_printf("%s  ·  %.1f GB", date,
-+                               sn_tab[i].vm_state_size / 1e9);
++                               sn_tab[i].vm_state_size / (double)(1 << 30));
 +        label = gtk_label_new(text);
 +        gtk_label_set_xalign(GTK_LABEL(label), 0);
 +        gtk_widget_set_margin_start(label, 10);
