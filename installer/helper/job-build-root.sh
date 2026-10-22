@@ -64,7 +64,8 @@ python3 sweet-root-tweaks.py /mnt/root
 if [ -f asoftinstalld ]; then
     bash asoft-disk.sh installer /mnt/root asoftinstalld
 fi
-bash asoft-disk.sh name /mnt/root "ASoftware iPhone"
+# the device name is a nicety: a disk without it still boots
+bash asoft-disk.sh name /mnt/root "ASoftware iPhone" || echo "ASOFT: warning: device name not set"
 sync
 umount /mnt/root
 # Linux's hfsplus writes past the journal; let fsck_hfs settle the volume

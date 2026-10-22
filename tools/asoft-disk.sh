@@ -126,12 +126,17 @@ add)
     ;;
 name)
     # configd's preferences: ComputerName is what iOS shows as the device name; the host
-    # names (Bonjour, DHCP) get the same name without spaces.
+    # names (Bonjour, DHCP) get the same name without spaces. A root that has not booted
+    # yet has no preferences.plist: configd adds the rest to the one made here.
     python3 -I - $MNT/private/var/preferences/SystemConfiguration/preferences.plist "$1" <<'PY'
-import plistlib, re, sys
+import os, plistlib, re, sys
 path, name = sys.argv[1:3]
-with open(path, 'rb') as f:
-    raw = f.read()
+if os.path.exists(path):
+    with open(path, 'rb') as f:
+        raw = f.read()
+else:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    raw = plistlib.dumps({}, fmt=plistlib.FMT_BINARY)
 prefs = plistlib.loads(raw)
 fmt = plistlib.FMT_BINARY if raw.startswith(b'bplist') else plistlib.FMT_XML
 host = re.sub(r'[^A-Za-z0-9-]+', '-', name).strip('-') or 'iPhone'
