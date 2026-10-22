@@ -14,6 +14,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <notify.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -35,7 +36,17 @@ say(NSString *format, ...)
 	va_start(ap, format);
 	NSString *s = [[NSString alloc] initWithFormat:format arguments:ap];
 	va_end(ap);
-	fprintf(stderr, "sweetinstalld: %s\n", s.UTF8String);
+	// stderr is the console as launchd opened it when it spawned us, early in boot; nothing
+	// written to that descriptor after SpringBoard's startup reached the serial log any more,
+	// so every message opens the console anew.
+	const char *line = [NSString stringWithFormat:@"sweetinstalld: %@\n", s].UTF8String;
+	int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
+	if (fd >= 0) {
+		write(fd, line, strlen(line));
+		close(fd);
+	} else {
+		fputs(line, stderr);
+	}
 }
 
 static NSError *
