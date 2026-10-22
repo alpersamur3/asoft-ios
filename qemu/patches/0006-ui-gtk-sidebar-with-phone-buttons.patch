@@ -1,0 +1,473 @@
+ui/gtk: side bar with phone buttons
+
+sidebar=on puts a column of buttons next to the guest display: Home,
+Lock, Volume + and Volume - (sent as F1, F2, F4 and F3, which ASoftware
+iOS's kernel maps to the phone's buttons), Screenshot (a PNG in
+Pictures/iOS Screenshots or $ASOFT_SHOTS_DIR), a button that opens that
+folder, Install .ipa (copies the chosen files into $ASOFT_IPA_DIR, where
+the guest fetches and installs them, and shows the result it leaves in
+Installed/ or Failed/ there) and Shut down (power-down request; pressed
+again, quit after asking). The buttons never take the keyboard focus.
+Zoom-to-fit (0005) leaves room for the bar; full screen hides it. The
+close button (0003) and Shut down share the power-down state.
+Based on QEMU v11.1.2 with 0002-0005.
+
+--- a/qapi/ui.json
++++ b/qapi/ui.json
+@@ -1344,6 +1344,10 @@
+ # @scale: Set preferred scale of the display.  Defaults to 1.0.
+ #     (Since 10.1)
+ #
++# @sidebar: Show a bar of phone buttons next to the guest display:
++#     Home, Lock, Volume (sent as F1-F4), Screenshot, Install .ipa
++#     and Shut down.  Defaults to "off".  (Since 11.1)
++#
+ # Since: 2.12
+ ##
+ { 'struct'  : 'DisplayGTK',
+@@ -1353,7 +1357,8 @@
+                 '*show-tabs'         : 'bool',
+                 '*show-menubar'      : 'bool',
+                 '*keep-aspect-ratio' : 'bool',
+-                '*scale'             : 'number'  } }
++                '*scale'             : 'number',
++                '*sidebar'           : 'bool'  } }
+ 
+ ##
+ # @DisplayEGLHeadless:
+--- a/include/ui/gtk.h
++++ b/include/ui/gtk.h
+@@ -126,7 +126,19 @@
+     GtkWidget *show_menubar_item;
+ 
+     GtkWidget *vbox;
++    GtkWidget *hbox;
+     GtkWidget *notebook;
++
++    /* sidebar=on: phone buttons next to the guest display */
++    GtkWidget *sidebar;
++    GtkWidget *sidebar_status;
++    GtkWidget *sidebar_power;
++    char *shots_dir;
++    char *ipa_dir;
++    GHashTable *ipas_pending;   /* .ipa name -> time copied (s) */
++    guint ipas_poll;
++    bool powerdown_requested;
++
+     int button_mask;
+     gboolean last_set;
+     int last_x;
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -346,7 +346,7 @@
+     GdkWindow *gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
+     GdkMonitor *monitor;
+     GdkRectangle area, frame;
+-    int width, height, menu = 0, x, y;
++    int width, height, menu = 0, bar = 0, x, y;
+     double scale;
+ 
+     if (!gdk_window || !vc->gfx.ds) {
+@@ -367,12 +367,15 @@
+     if (!vc->window && gtk_widget_get_visible(s->menu_bar)) {
+         menu = gtk_widget_get_allocated_height(s->menu_bar);
+     }
++    if (!vc->window && s->sidebar && gtk_widget_get_visible(s->sidebar)) {
++        gtk_widget_get_preferred_width(s->sidebar, &bar, NULL);
++    }
+     scale = MIN((area.height * WINDOW_FIT_SHARE - frame.height - menu) / height,
+-                (area.width * WINDOW_FIT_SHARE - frame.width) / width);
++                (area.width * WINDOW_FIT_SHARE - frame.width - bar) / width);
+     if (scale <= VC_SCALE_MIN) {
+         return;
+     }
+-    width = width * scale;
++    width = width * scale + bar;
+     height = height * scale + menu;
+     gtk_window_resize(window, width, height);
+ 
+@@ -767,6 +770,332 @@
+     }
+ }
+ 
++/** Side bar **/
++
++/*
++ * sidebar=on: the phone's buttons next to the guest display, for a guest
++ * that takes F1-F4 as Home, Lock (side button), Volume down and Volume up
++ * (ASoftware iOS does). Screenshots go to $ASOFT_SHOTS_DIR, default
++ * Pictures/iOS Screenshots. Install .ipa copies the chosen files into
++ * $ASOFT_IPA_DIR, where the guest fetches them, and shows the result the
++ * guest leaves in Installed/<name>.log or Failed/<name>.log there.
++ */
++#define SIDEBAR_KEY_HOLD_MS 150
++
++static void gd_sidebar_say(GtkDisplayState *s, const char *text)
++{
++    if (s->sidebar_status) {
++        gtk_label_set_text(GTK_LABEL(s->sidebar_status), text);
++    }
++}
++
++/* Ask the guest to power down; the next request (button, close) quits. */
++static void gd_powerdown(GtkDisplayState *s)
++{
++    s->powerdown_requested = true;
++    qemu_system_powerdown_request();
++    if (s->sidebar_power) {
++        gtk_button_set_label(GTK_BUTTON(s->sidebar_power), "Force quit");
++    }
++    gd_sidebar_say(s, "Shutting down... the guest turns QEMU off in "
++                   "about 10 s.");
++}
++
++static void gd_sidebar_key(GtkButton *button, void *opaque)
++{
++    unsigned int key = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(button),
++                                                          "key"));
++
++    /* as QMP send-key does */
++    qemu_input_event_send_key_linux(NULL, key, true);
++    qemu_input_event_send_key_delay(SIDEBAR_KEY_HOLD_MS);
++    qemu_input_event_send_key_linux(NULL, key, false);
++    qemu_input_event_send_key_delay(SIDEBAR_KEY_HOLD_MS);
++}
++
++static void gd_sidebar_screenshot(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    VirtualConsole *vc = gd_vc_find_current(s);
++    g_autoptr(GDateTime) now = g_date_time_new_now_local();
++    g_autofree char *name = NULL, *path = NULL, *said = NULL;
++    g_autoptr(GError) err = NULL;
++    pixman_image_t *rgba;
++    GdkPixbuf *pixbuf;
++    int width, height;
++    gboolean ok;
++
++    if (!vc || vc->type != GD_VC_GFX || !vc->gfx.ds) {
++        gd_sidebar_say(s, "No screen to save yet.");
++        return;
++    }
++    width = surface_width(vc->gfx.ds);
++    height = surface_height(vc->gfx.ds);
++    /* R, G, B, A bytes, as GdkPixbuf wants them */
++    rgba = pixman_image_create_bits(PIXMAN_a8b8g8r8, width, height, NULL,
++                                    width * 4);
++    pixman_image_composite(PIXMAN_OP_SRC, vc->gfx.ds->image, NULL, rgba,
++                           0, 0, 0, 0, 0, 0, width, height);
++    pixbuf = gdk_pixbuf_new_from_data(
++        (const guchar *)pixman_image_get_data(rgba), GDK_COLORSPACE_RGB,
++        TRUE, 8, width, height, pixman_image_get_stride(rgba), NULL, NULL);
++
++    name = g_date_time_format(now, "iOS %Y-%m-%d %H.%M.%S.png");
++    path = g_build_filename(s->shots_dir, name, NULL);
++    g_mkdir_with_parents(s->shots_dir, 0755);
++    ok = gdk_pixbuf_save(pixbuf, path, "png", &err,
++                         "tEXt::Software", "ASoftware iOS Emulator", NULL);
++    g_object_unref(pixbuf);
++    pixman_image_unref(rgba);
++
++    said = ok ? g_strdup_printf("Saved %s", name)
++              : g_strdup_printf("Could not save %s: %s", path, err->message);
++    gd_sidebar_say(s, said);
++}
++
++static void gd_sidebar_open_shots(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    g_autofree char *uri = NULL, *said = NULL;
++    g_autoptr(GError) err = NULL;
++
++    g_mkdir_with_parents(s->shots_dir, 0755);
++    uri = g_filename_to_uri(s->shots_dir, NULL, &err);
++    if (!uri || !gtk_show_uri_on_window(GTK_WINDOW(s->window), uri,
++                                        GDK_CURRENT_TIME, &err)) {
++        said = g_strdup_printf("Could not open %s: %s", s->shots_dir,
++                               err ? err->message : "?");
++        gd_sidebar_say(s, said);
++    }
++}
++
++/* Every 2 s while .ipa files wait: has the guest left a result? */
++static gboolean gd_sidebar_poll_ipas(void *opaque)
++{
++    static const char *const results[] = { "Installed", "Failed" };
++    GtkDisplayState *s = opaque;
++    GHashTableIter iter;
++    gpointer name, since;
++    size_t i;
++
++    g_hash_table_iter_init(&iter, s->ipas_pending);
++    while (g_hash_table_iter_next(&iter, &name, &since)) {
++        for (i = 0; i < ARRAY_SIZE(results); i++) {
++            g_autofree char *log = g_strdup_printf("%s.log", (char *)name);
++            g_autofree char *path = g_build_filename(s->ipa_dir, results[i],
++                                                     log, NULL);
++            g_autofree char *text = NULL, *said = NULL;
++            GStatBuf st;
++
++            if (g_stat(path, &st) == 0 &&
++                st.st_mtime + 1 >= (time_t)GPOINTER_TO_SIZE(since) &&
++                g_file_get_contents(path, &text, NULL, NULL)) {
++                said = g_strdup_printf("%s: %.300s", (char *)name,
++                                       g_strstrip(text));
++                gd_sidebar_say(s, said);
++                g_hash_table_iter_remove(&iter);
++                break;
++            }
++        }
++    }
++    if (g_hash_table_size(s->ipas_pending) == 0) {
++        s->ipas_poll = 0;
++        return G_SOURCE_REMOVE;
++    }
++    return G_SOURCE_CONTINUE;
++}
++
++typedef struct SidebarCopy {
++    GtkDisplayState *s;
++    char *name;
++    time_t started;
++} SidebarCopy;
++
++static void gd_sidebar_copied(GObject *source, GAsyncResult *res,
++                              void *opaque)
++{
++    SidebarCopy *copy = opaque;
++    GtkDisplayState *s = copy->s;
++    g_autoptr(GError) err = NULL;
++    g_autofree char *said = NULL;
++
++    if (!g_file_copy_finish(G_FILE(source), res, &err)) {
++        said = g_strdup_printf("Could not copy %s: %s", copy->name,
++                               err->message);
++    } else {
++        g_hash_table_insert(s->ipas_pending, g_strdup(copy->name),
++                            GSIZE_TO_POINTER((gsize)copy->started));
++        if (!s->ipas_poll) {
++            s->ipas_poll = g_timeout_add_seconds(2, gd_sidebar_poll_ipas, s);
++        }
++        said = g_strdup_printf("Installing %s... the guest picks it up "
++                               "within about 10 s.", copy->name);
++    }
++    gd_sidebar_say(s, said);
++    g_free(copy->name);
++    g_free(copy);
++}
++
++static void gd_sidebar_ipa_chosen(GtkNativeDialog *dialog, gint response,
++                                  void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    GSList *files, *f;
++
++    if (response != GTK_RESPONSE_ACCEPT) {
++        g_object_unref(dialog);
++        return;
++    }
++    g_mkdir_with_parents(s->ipa_dir, 0755);
++    files = gtk_file_chooser_get_files(GTK_FILE_CHOOSER(dialog));
++    for (f = files; f; f = f->next) {
++        SidebarCopy *copy = g_new0(SidebarCopy, 1);
++        g_autoptr(GFile) dest = NULL;
++
++        copy->s = s;
++        copy->name = g_file_get_basename(f->data);
++        copy->started = time(NULL);
++        dest = g_file_new_build_filename(s->ipa_dir, copy->name, NULL);
++        /* off the main loop: an .ipa can be hundreds of MB */
++        g_file_copy_async(f->data, dest, G_FILE_COPY_OVERWRITE,
++                          G_PRIORITY_DEFAULT, NULL, NULL, NULL,
++                          gd_sidebar_copied, copy);
++    }
++    g_slist_free_full(files, g_object_unref);
++    g_object_unref(dialog);
++}
++
++static void gd_sidebar_install(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    GtkFileChooserNative *dialog;
++    GtkFileFilter *filter;
++
++    /* not gtk_dialog_run(): its nested loop would hold the BQL */
++    dialog = gtk_file_chooser_native_new("Install .ipa",
++                                         GTK_WINDOW(s->window),
++                                         GTK_FILE_CHOOSER_ACTION_OPEN,
++                                         "_Install", "_Cancel");
++    gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), TRUE);
++    filter = gtk_file_filter_new();
++    gtk_file_filter_set_name(filter, "iOS apps (*.ipa)");
++    gtk_file_filter_add_pattern(filter, "*.ipa");
++    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
++    g_signal_connect(dialog, "response", G_CALLBACK(gd_sidebar_ipa_chosen), s);
++    gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
++}
++
++static void gd_sidebar_quit_answered(GtkDialog *dialog, gint response,
++                                     void *opaque)
++{
++    gtk_widget_destroy(GTK_WIDGET(dialog));
++    if (response == GTK_RESPONSE_YES) {
++        qmp_quit(NULL);
++    }
++}
++
++static void gd_sidebar_power(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    GtkWidget *dialog;
++
++    if (!s->powerdown_requested) {
++        gd_powerdown(s);
++        return;
++    }
++    dialog = gtk_message_dialog_new(GTK_WINDOW(s->window),
++                                    GTK_DIALOG_DESTROY_WITH_PARENT,
++                                    GTK_MESSAGE_QUESTION, GTK_BUTTONS_YES_NO,
++                                    "Quit QEMU now, without letting the "
++                                    "guest shut down?");
++    g_signal_connect(dialog, "response",
++                     G_CALLBACK(gd_sidebar_quit_answered), s);
++    gtk_widget_show(dialog);
++}
++
++static GtkWidget *gd_sidebar_button(GtkDisplayState *s, const char *label,
++                                    const char *tooltip, GCallback clicked,
++                                    unsigned int key)
++{
++    GtkWidget *button = gtk_button_new_with_label(label);
++
++    /* keep the keyboard focus on the guest display */
++    gtk_widget_set_can_focus(button, FALSE);
++    gtk_widget_set_tooltip_text(button, tooltip);
++    g_object_set_data(G_OBJECT(button), "key", GUINT_TO_POINTER(key));
++    g_signal_connect(button, "clicked", clicked, s);
++    gtk_box_pack_start(GTK_BOX(s->sidebar), button, FALSE, FALSE, 0);
++    return button;
++}
++
++static void gd_sidebar_gap(GtkDisplayState *s)
++{
++    gtk_box_pack_start(GTK_BOX(s->sidebar),
++                       gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
++                       FALSE, FALSE, 4);
++}
++
++static void gd_create_sidebar(GtkDisplayState *s)
++{
++    const char *shots = g_getenv("ASOFT_SHOTS_DIR");
++    const char *pictures = g_get_user_special_dir(G_USER_DIRECTORY_PICTURES);
++    GtkWidget *install, *footer;
++
++    s->shots_dir = shots ? g_strdup(shots)
++        : g_build_filename(pictures ? pictures : g_get_home_dir(),
++                           "iOS Screenshots", NULL);
++    s->ipa_dir = g_strdup(g_getenv("ASOFT_IPA_DIR"));
++    s->ipas_pending = g_hash_table_new_full(g_str_hash, g_str_equal,
++                                            g_free, NULL);
++
++    s->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
++    gtk_container_set_border_width(GTK_CONTAINER(s->sidebar), 8);
++    gd_sidebar_button(s, "Home", "Home (F1)",
++                      G_CALLBACK(gd_sidebar_key), KEY_F1);
++    gd_sidebar_button(s, "Lock", "Side button: lock / wake (F2)",
++                      G_CALLBACK(gd_sidebar_key), KEY_F2);
++    gd_sidebar_button(s, "Volume +", "Volume up (F4)",
++                      G_CALLBACK(gd_sidebar_key), KEY_F4);
++    gd_sidebar_button(s, "Volume −", "Volume down (F3)",
++                      G_CALLBACK(gd_sidebar_key), KEY_F3);
++    gd_sidebar_gap(s);
++    gd_sidebar_button(s, "Screenshot", "Save the screen as a PNG",
++                      G_CALLBACK(gd_sidebar_screenshot), 0);
++    gd_sidebar_button(s, "Screenshots", "Open the screenshots folder",
++                      G_CALLBACK(gd_sidebar_open_shots), 0);
++    gd_sidebar_gap(s);
++    install = gd_sidebar_button(s, "Install .ipa...",
++                                "Copy .ipa files to the guest, which "
++                                "installs them",
++                                G_CALLBACK(gd_sidebar_install), 0);
++    if (!s->ipa_dir) {
++        gtk_widget_set_sensitive(install, FALSE);
++        gtk_widget_set_tooltip_text(install, "ASOFT_IPA_DIR is not set");
++    }
++    gd_sidebar_gap(s);
++    s->sidebar_power = gd_sidebar_button(s, "Shut down",
++                                         "Power the guest down; pressed "
++                                         "again, quit QEMU",
++                                         G_CALLBACK(gd_sidebar_power), 0);
++
++    s->sidebar_status = gtk_label_new(NULL);
++    gtk_label_set_line_wrap(GTK_LABEL(s->sidebar_status), TRUE);
++    gtk_label_set_line_wrap_mode(GTK_LABEL(s->sidebar_status),
++                                 PANGO_WRAP_WORD_CHAR);
++    gtk_label_set_max_width_chars(GTK_LABEL(s->sidebar_status), 14);
++    gtk_label_set_xalign(GTK_LABEL(s->sidebar_status), 0);
++    gtk_label_set_selectable(GTK_LABEL(s->sidebar_status), TRUE);
++    gtk_widget_set_can_focus(s->sidebar_status, FALSE);
++    gtk_box_pack_start(GTK_BOX(s->sidebar), s->sidebar_status,
++                       FALSE, FALSE, 4);
++
++    footer = gtk_label_new(NULL);
++    gtk_label_set_markup(GTK_LABEL(footer),
++                         "<span size='small' foreground='#999999'>"
++                         "ASoftware</span>");
++    gtk_box_pack_end(GTK_BOX(s->sidebar), footer, FALSE, FALSE, 0);
++}
++
+ /** GTK Events **/
+ 
+ /*
+@@ -779,12 +1108,10 @@
+                                 void *opaque)
+ {
+     GtkDisplayState *s = opaque;
+-    static bool powerdown_requested;
+ 
+     if (s->opts->has_window_close && !s->opts->window_close &&
+-        !powerdown_requested) {
+-        powerdown_requested = true;
+-        qemu_system_powerdown_request();
++        !s->powerdown_requested) {
++        gd_powerdown(s);
+         return TRUE;
+     }
+ 
+@@ -1672,6 +1999,9 @@
+     if (!s->full_screen) {
+         gtk_notebook_set_show_tabs(GTK_NOTEBOOK(s->notebook), FALSE);
+         gtk_widget_hide(s->menu_bar);
++        if (s->sidebar) {
++            gtk_widget_hide(s->sidebar);
++        }
+         if (vc->type == GD_VC_GFX) {
+             gtk_widget_set_size_request(vc->gfx.drawing_area, -1, -1);
+         }
+@@ -1684,6 +2014,9 @@
+                     GTK_CHECK_MENU_ITEM(s->show_menubar_item))) {
+             gtk_widget_show(s->menu_bar);
+         }
++        if (s->sidebar) {
++            gtk_widget_show(s->sidebar);
++        }
+         s->full_screen = FALSE;
+         if (vc->type == GD_VC_GFX) {
+             vc->gfx.scale_x = vc->gfx.preferred_scale;
+@@ -2840,8 +3173,15 @@
+ 
+     gd_update_caption(s);
+ 
++    s->hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
++    gtk_box_pack_start(GTK_BOX(s->hbox), s->notebook, TRUE, TRUE, 0);
++    if (opts->u.gtk.has_sidebar && opts->u.gtk.sidebar) {
++        gd_create_sidebar(s);
++        gtk_box_pack_end(GTK_BOX(s->hbox), s->sidebar, FALSE, FALSE, 0);
++    }
++
+     gtk_box_pack_start(GTK_BOX(s->vbox), s->menu_bar, FALSE, TRUE, 0);
+-    gtk_box_pack_start(GTK_BOX(s->vbox), s->notebook, TRUE, TRUE, 0);
++    gtk_box_pack_start(GTK_BOX(s->vbox), s->hbox, TRUE, TRUE, 0);
+ 
+     gtk_container_add(GTK_CONTAINER(s->window), s->vbox);
+ 
