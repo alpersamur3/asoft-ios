@@ -15,8 +15,9 @@ param(
     # to the installed QEMU when the build is not there.
     # 0004 titles the window with -name alone ("ASoftware iOS"); --version says "(ASoftware)"
     [string]$Qemu = "$Work\qemu\v11.1.2-asoft\qemu-system-aarch64.exe",
-    # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake)
-    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0102\kernel.development.sweet",
+    # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake); 0103 sets the
+    # clock from the host's after a pause or a quick boot
+    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0103\kernel.development.sweet",
     # New user disks start from v4. Layers, each an overlay on the one before (never write a layer
     # that others sit on): the base image as built; v2, its LaunchServices database rebuilt with
     # kernel 0099 so wallpaper posters and widgets are registered; v3, asoftinstalld that starts at
@@ -47,6 +48,10 @@ param(
     [switch]$Reset,
     [string]$UserDisk = "$Work\root\ios16-user.qcow2",
     [switch]$Keep,
+    # Quick boot (qemu/patches/0009), with -Persist: closing the window saves the machine's state
+    # (memory and devices, about 3 GB) in $UserDisk, as its snapshot asoft-quick, and the next
+    # start resumes it in seconds. -NoQuickBoot boots iOS every time.
+    [switch]$NoQuickBoot,
     # Drop .ipa files here while iOS runs (or use the side bar's Install .ipa): asoftinstalld (in
     # the v3 disk) fetches them through scripts\ipa-server.py and installs them; results land in
     # Installed\ or Failed\ with a .log
@@ -59,6 +64,14 @@ param(
     [ValidateSet('', '12', '24')] [string]$Clock = ''
 )
 $ErrorActionPreference = 'Stop'
+# A native tool's stderr lines are notes, not failures: Windows PowerShell 5.1 turns them into
+# errors when the script's output is redirected, which 'Stop' would end the script on. Its exit
+# code ($LASTEXITCODE) says how it went.
+function Invoke-Tool {
+    $ErrorActionPreference = 'Continue'
+    $rest = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
+    & $args[0] @rest
+}
 New-Item -ItemType Directory -Force $TmpDir | Out-Null
 $env:TMP = $env:TEMP = $TmpDir
 if (-not (Test-Path $Kernel)) {
@@ -85,21 +98,38 @@ if ($written) {
     if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
 }
 
+# qemu-img of our build (qemu/build-windows.sh), else of an installed QEMU
+$qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
+if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
+
 if ($Persist) {
     if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk }
     if (-not (Test-Path $UserDisk)) {
         # Next to the base image the backing path is relative, so WSL tools (qemu-nbd) open it too
         $backing = if ((Split-Path $UserDisk) -eq (Split-Path $Disk)) { Split-Path $Disk -Leaf } else { $Disk }
-        # qemu-img of our build (qemu/build-windows.sh), else of an installed QEMU
-        $qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
-        if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
-        & $qemuImg create -q -f qcow2 -b $backing -F qcow2 $UserDisk
+        Invoke-Tool $qemuImg create -q -f qcow2 -b $backing -F qcow2 $UserDisk
         if ($LASTEXITCODE) { throw "qemu-img could not create $UserDisk" }
         Write-Host "New user disk $UserDisk (on $Disk)"
     }
     $Disk = $UserDisk
     $Keep = $true
 }
+
+# Quick boot: resume the state the window saved when it was closed, if any (QEMU deletes it once
+# the machine runs). It belongs to the disk as it was then, so a start without it (-NoQuickBoot)
+# drops it first, as tools/asoft-disk.sh does before it writes to the disk.
+$quickBoot = $Persist -and -not $NoQuickBoot -and (Test-Path $Qemu) -and $Display -like 'gtk*'
+$quickSnapshot = 'asoft-quick'
+function Get-QuickState {
+    Invoke-Tool $qemuImg snapshot -l $UserDisk 2>$null | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" }
+}
+$savedState = if ($Persist -and (Test-Path $UserDisk)) { Get-QuickState }
+if ($savedState -and -not $quickBoot) {
+    Invoke-Tool $qemuImg snapshot -d $quickSnapshot $UserDisk
+    $savedState = $null
+    Write-Host 'Dropped the saved state (quick boot is off)'
+}
+if ($quickBoot) { $Display += ',quick-boot=on' }
 
 $repo = Resolve-Path "$PSScriptRoot\.."
 $out = "$Work\runs\win-$(Get-Date -Format yyyyMMdd-HHmmss)"
@@ -151,13 +181,25 @@ try {
         $env:ASOFT_IPA_DIR = $IpaDir   # the side bar's Install .ipa copies there
         Write-Host "Drop .ipa files into $IpaDir to install them"
     }
-    & $python tools\mkadt.py "$out\qemu.adt" --qemu --highmem
-    & $python tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
+    Invoke-Tool $python tools\mkadt.py "$out\qemu.adt" --qemu --highmem
+    Invoke-Tool $python tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
     $qemuArgs = @("$out\payload.bin", "$out\run", '--disk', $Disk, '--smp', $Cpus,
         '--display', $Display, '--qemu-log', 'guest_errors,unimp', '--qmp-tcp', $QmpPort,
         '--name', 'ASoftware iOS')
     if (-not $Keep) { $qemuArgs += '--snapshot' }
-    & $python tools\qemu-sweet.py @qemuArgs
+    if ($savedState) {
+        Write-Host 'Resuming the state saved when the window was closed'
+        Invoke-Tool $python tools\qemu-sweet.py @qemuArgs --loadvm $quickSnapshot
+        # QEMU failed, the state still there as it was: it could not be resumed (another QEMU
+        # build, other options) and the machine never ran. Drop it and boot iOS instead.
+        if ($LASTEXITCODE -and "$(Get-QuickState)" -eq "$savedState") {
+            Write-Host 'The saved state could not be resumed; booting iOS'
+            Invoke-Tool $qemuImg snapshot -d $quickSnapshot $UserDisk
+            Invoke-Tool $python tools\qemu-sweet.py @qemuArgs
+        }
+    } else {
+        Invoke-Tool $python tools\qemu-sweet.py @qemuArgs
+    }
 } finally {
     if ($ipaServer -and -not $ipaServer.HasExited) { Stop-Process -Id $ipaServer.Id -Force }
     Pop-Location
