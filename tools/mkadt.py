@@ -37,7 +37,7 @@ QEMU_UART, QEMU_UART_SIZE = 0x09000000, 0x1000
 QEMU_VIRTIO, QEMU_VIRTIO_SIZE = 0x0a000000, 32 * 0x200
 # QEMU virt's fw_cfg (MMIO, with DMA): the kernel configures ramfb through it
 QEMU_FW_CFG, QEMU_FW_CFG_SIZE = 0x09020000, 0x18
-QEMU_TIMEOUT_SCALE = 100
+QEMU_TIMEOUT_SCALE = 1000
 # QEMU virt's PL031 real-time clock (UTC seconds from the host)
 QEMU_RTC, QEMU_RTC_SIZE = 0x09010000, 0x1000
 # QEMU virt's PL061 GPIO: system_powerdown presses the power key on its line 3
@@ -136,6 +136,8 @@ def build(seed=None, qemu=False, highmem=False):
         # TCG is slow and QEMU's 62.5 MHz timebase makes the tick-based defaults
         # (osfmk/arm64/machine_routines.c: lock 6e6, ticket-lock 3e6) 2.6x shorter
         # than on the phone: scale every machine timeout (osfmk/kern/machine.c).
+        # 1000, not 100: a busy Windows host can stall a vCPU for seconds, and with
+        # 100 the ticket lock (4.8 s) panicked while a build ran next to the VM.
         node('machine-timeouts', [ph(), ('global-scale', u32(QEMU_TIMEOUT_SCALE))])] if qemu else []))
 
     # SWEET SMP: all eight cores in physical-core order (0-5 Cortex-A55,
