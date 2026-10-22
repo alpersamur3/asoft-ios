@@ -47,19 +47,21 @@ BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
 # The iOS userland is the iPhone X (iPhone10,3 / D22AP) IPSW. MobileGestalt
 # derives product type, device class, home-button-less UI, artwork etc. from
-# the root identity and /product of the real D22AP device tree. That tree is
+# the root identity and /product of the real D22AP device tree; without them
+# SpringBoard cannot find its screen's artwork and keeps crashing. That tree is
 # an Apple artifact (kept out of git): extract it from the IPSW with
-#   tools/remotezip.py URL DeviceTree.d22ap.im4p DIR
-#   ipsw img4 im4p extract DIR/Firmware/all_flash/DeviceTree.d22ap.im4p -o d22ap.adt
-D22AP_ADT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt')
+#   tools/ipsw-devicetree.py IPSW d22ap.adt
+# The installer keeps it in its work folder and the launcher names it in
+# ASOFT_DEVICE_TREE; a checkout may have it in research/ipsw-x/ instead.
+D22AP_ADT = os.environ.get('ASOFT_DEVICE_TREE') or \
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '../research/ipsw-x/d22ap.adt')
 
 
 def d22ap_product(path=D22AP_ADT):
     """/product properties of the real D22AP tree, without the syscfg
     placeholders iBoot would fill in (flag bit set) and the node bookkeeping."""
     if not os.path.exists(path):
-        print(f'warning: {path} missing, no /product node', file=sys.stderr)
-        return None
+        raise SystemExit(f'{path} missing: tools/ipsw-devicetree.py IPSW {path} extracts it')
     root, _ = adt.parse(open(path, 'rb').read())
     for c in root.children:
         if dict((k, v) for k, f, v in c.props).get('name') == b'product\0':
