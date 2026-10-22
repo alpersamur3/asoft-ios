@@ -43,18 +43,27 @@ $qemuArgs = @('-M', 'virt', '-cpu', 'cortex-a76', '-smp', $Cpus, '-m', '3G',
 
 $started = Get-Date
 $result = $null
-& $Qemu @qemuArgs 2>&1 | ForEach-Object {
-    $line = "$_"
-    Add-Content -Path $Log -Value $line
-    if ($line -match '^ASOFT: progress (\d+) (.*)$') {
-        $pct = [int]$Matches[1]
-        $elapsed = [int]((Get-Date) - $started).TotalMinutes
-        Write-Progress -Activity 'Building the iOS disk' -Status "$($Matches[2]) ($elapsed min)" -PercentComplete $pct
-    } elseif ($line -match '^ASOFT: done (\d+)') {
-        $result = [int]$Matches[1]
-    } elseif ($line -match '^ASOFT: ') {
-        Write-Host $line
+# One writer for the whole run, shared: something reading the log (a viewer, a tail) must not
+# make a write fail
+$logFile = [IO.File]::Open($Log, 'Append', 'Write', 'ReadWrite')
+$logWriter = New-Object IO.StreamWriter($logFile)
+$logWriter.AutoFlush = $true
+try {
+    & $Qemu @qemuArgs 2>&1 | ForEach-Object {
+        $line = "$_"
+        $logWriter.WriteLine($line)
+        if ($line -match '^ASOFT: progress (\d+) (.*)$') {
+            $pct = [int]$Matches[1]
+            $elapsed = [int]((Get-Date) - $started).TotalMinutes
+            Write-Progress -Activity 'Building the iOS disk' -Status "$($Matches[2]) ($elapsed min)" -PercentComplete $pct
+        } elseif ($line -match '^ASOFT: done (\d+)') {
+            $result = [int]$Matches[1]
+        } elseif ($line -match '^ASOFT: ') {
+            Write-Host $line
+        }
     }
+} finally {
+    $logWriter.Dispose()
 }
 Write-Progress -Activity 'Building the iOS disk' -Completed
 Remove-Item $scratch -ErrorAction SilentlyContinue
