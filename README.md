@@ -32,10 +32,12 @@ first brought this userland up on a Redmi Note 10 Pro, plus our own for QEMU's v
 | --- | --- |
 | **iOS** | Lock and home screen, wallpapers and widgets, Control Center, Settings, Safari with real web pages |
 | **Apps** | Install `.ipa` files from Windows while iOS runs: the side bar's *Install .ipa…* or a folder |
-| **Input** | Mouse as the touchscreen, the PC keyboard as a hardware keyboard, F1-F4 as Home, Lock and volume |
-| **Window** | Phone-shaped, with a side bar in iOS's own dark style; a *Screen off* cover when iOS turns the display off |
+| **Input** | Mouse as the touchscreen, the wheel to scroll, the PC keyboard as a hardware keyboard, text pasted from the PC |
+| **Window** | Phone-shaped, with a side bar in iOS's own dark style: Home, Lock, App switcher, volume, screenshots |
+| **Quick boot** | Closing the window saves iOS as it is; the next start goes on from there in seconds |
+| **States** | Pause and resume, save the whole machine and go back to it later; the clock catches up after either |
 | **Clock** | Your PC's time zone, region format and 12/24-hour clock |
-| **Power** | Closing the window shuts iOS down cleanly; what iOS writes is kept between starts |
+| **Disk** | What iOS writes is kept between starts; *Shut down* turns iOS off cleanly |
 | **Network** | Internet through QEMU's user network |
 
 Not yet: audio, GPU acceleration, the App Store and Apple ID services.
@@ -56,7 +58,8 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 `-Dir`) and resumes where it stopped when run again:
 
 1. the app, our QEMU build and Python
-2. iOS 16.7.16 for the iPhone X, 6.2 GB from Apple (or `-Ipsw` with one you have)
+2. iOS 16.7.16 for the iPhone X, 6.2 GB from Apple (or `-Ipsw` with one you have), and the
+   phone's device tree from it
 3. the iOS disk, built from it by a small Linux VM in QEMU (about 25 min)
 4. iOS's first start, which sets up its app database once (20-30 min)
 5. a desktop shortcut
@@ -73,10 +76,17 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 | **F1** / *Home* | Home (unlock, leave an app) |
 | **F2** / *Lock* | Side button: lock, or wake when the screen is off |
 | **F3** / **F4** | Volume down / up |
+| Wheel | Scrolls: a swipe where the pointer is |
+| *App switcher* | The app switcher (as the swipe up and hold) |
 | Other keys | A hardware keyboard |
-| *Screenshot* | A PNG in `Pictures\iOS Screenshots` |
+| **Ctrl+V** / *Paste text* | Types the PC's clipboard text (letters, digits and symbols of a US keyboard) |
+| **Ctrl+S** / *Screenshot* | A PNG in `Pictures\iOS Screenshots` |
+| **F11** / *Full screen* | Full screen and back |
 | *Install .ipa…* | Installs apps; or drop `.ipa` files into the `ipa` folder |
-| Close the window | Shuts iOS down (about 10 s); close again to quit at once |
+| *Pause* / *Resume* | Stops iOS where it is, or goes on |
+| *Save state* / *Saved states…* | Saves the whole machine (about 3 GB, a few seconds), or goes back to one or deletes it |
+| Close the window | Saves iOS as it is and quits; the next start resumes it |
+| *Shut down* | Turns iOS off cleanly (about 10 s); pressed again, quits at once |
 
 ## Disk space
 
@@ -91,7 +101,7 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 ## How it works
 
 ```
-Windows ── QEMU (virt, TCG, our patches: side bar, phone-shaped window, power key)
+Windows ── QEMU (virt, TCG, our patches: side bar, phone-shaped window, power key, quick boot)
              └─ XNU kernel (ios-sweet + ASoftware patches: virtio disk/net/input, ramfb, AMFI, ...)
                   └─ iOS 16.7.16 userland of the iPhone X, unmodified, on one HFS+ disk
                        └─ asoftinstalld (ours): .ipa installs, time zone, region, clock
@@ -146,10 +156,12 @@ bizim yamalarımız var.
 | --- | --- |
 | **iOS** | Kilit ve ana ekran, duvar kağıtları ve widget'lar, Denetim Merkezi, Ayarlar, gerçek sayfaları açan Safari |
 | **Uygulamalar** | iOS açıkken Windows'tan `.ipa` kurma: kenar çubuğundaki *Install .ipa…* ya da bir klasör |
-| **Giriş** | Fare dokunmatik ekran, PC klavyesi donanım klavyesi, F1-F4 Home, kilit ve ses |
-| **Pencere** | Telefon biçiminde, iOS'un kendi koyu tarzında kenar çubuğu; iOS ekranı kapatınca *Screen off* kapağı |
+| **Giriş** | Fare dokunmatik ekran, tekerlek kaydırma, PC klavyesi donanım klavyesi, PC'den metin yapıştırma |
+| **Pencere** | Telefon biçiminde, iOS'un kendi koyu tarzında kenar çubuğu: Home, kilit, uygulama değiştirici, ses, ekran görüntüsü |
+| **Hızlı açılış** | Pencereyi kapatmak iOS'u olduğu gibi kaydeder; sonraki açılış saniyeler içinde oradan devam eder |
+| **Durumlar** | Duraklatma ve devam, tüm makineyi kaydedip sonra ona dönme; ikisinden sonra da saat kendini düzeltir |
 | **Saat** | PC'nizin saat dilimi, bölge biçimi ve 12/24 saat ayarı |
-| **Güç** | Pencereyi kapatmak iOS'u düzgünce kapatır; iOS'un yazdıkları açılışlar arasında saklanır |
+| **Disk** | iOS'un yazdıkları açılışlar arasında saklanır; *Shut down* iOS'u düzgünce kapatır |
 | **Ağ** | QEMU'nun kullanıcı ağıyla internet |
 
 Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
@@ -170,7 +182,8 @@ Kurulum programı her şeyi tek klasöre koyar (`-Dir` verilmezse `%LOCALAPPDATA
 yeniden çalıştırılınca kaldığı yerden devam eder:
 
 1. uygulama, QEMU derlememiz ve Python
-2. iPhone X için iOS 16.7.16, Apple'dan 6,2 GB (ya da elinizdekiyle `-Ipsw`)
+2. iPhone X için iOS 16.7.16, Apple'dan 6,2 GB (ya da elinizdekiyle `-Ipsw`) ve içinden
+   telefonun cihaz ağacı
 3. iOS diski, QEMU'daki küçük bir Linux VM'i tarafından kurulur (yaklaşık 25 dk)
 4. iOS'un ilk açılışı; uygulama veritabanını bir kez kurar (20-30 dk)
 5. masaüstü kısayolu
@@ -187,10 +200,17 @@ yeniden çalıştırılınca kaldığı yerden devam eder:
 | **F1** / *Home* | Ana ekran (kilidi açar, uygulamadan çıkar) |
 | **F2** / *Lock* | Yan tuş: kilitler, ekran kapalıyken uyandırır |
 | **F3** / **F4** | Ses kıs / aç |
+| Tekerlek | Kaydırır: imlecin olduğu yerde bir kaydırma hareketi |
+| *App switcher* | Uygulama değiştirici (yukarı kaydırıp bekleme gibi) |
 | Diğer tuşlar | Donanım klavyesi |
-| *Screenshot* | `Resimler\iOS Screenshots` içine PNG |
+| **Ctrl+V** / *Paste text* | PC panosundaki metni yazar (ABD klavyesinin harf, rakam ve simgeleri) |
+| **Ctrl+S** / *Screenshot* | `Resimler\iOS Screenshots` içine PNG |
+| **F11** / *Full screen* | Tam ekran ve geri |
 | *Install .ipa…* | Uygulama kurar; ya da `.ipa` dosyalarını `ipa` klasörüne bırakın |
-| Pencereyi kapatmak | iOS'u kapatır (yaklaşık 10 sn); ikinci kez kapatmak hemen çıkar |
+| *Pause* / *Resume* | iOS'u olduğu yerde durdurur ya da devam ettirir |
+| *Save state* / *Saved states…* | Tüm makineyi kaydeder (yaklaşık 3 GB, birkaç saniye), ya da birine döner veya siler |
+| Pencereyi kapatmak | iOS'u olduğu gibi kaydedip çıkar; sonraki açılış oradan devam eder |
+| *Shut down* | iOS'u düzgünce kapatır (yaklaşık 10 sn); ikinci kez basınca hemen çıkar |
 
 ### Disk alanı
 
