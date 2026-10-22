@@ -362,6 +362,10 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
 - `apps/sweetinstalld` (root launchd job, added by `tools/sweet-ipa.sh setup`) installs .ipa files from
   /private/var/mobile/Media/Sweet/Inbox and from http://10.0.2.2:8765 (the host's ipa-server.py) via
   LSApplicationWorkspace; `apps/hello` (Hello.ipa) installs and launches. Workflow `ios-apps.yml`.
+  The job needs `ProcessType: Interactive` (without it launchd starts it as a background process and its
+  xpcproxy starves for 2.5-3.5 min during boot); it waits for `com.apple.springboard.finishedstartup`
+  before the first install (one sent before lsd/installd ran never returned) and reopens /dev/console per
+  message (an early-opened console fd stopped reaching the serial log after SpringBoard's startup).
 - Host-side details (disk layers, launcher, benchmarks) are in the parent project's PROGRESS.md.
 
 ## Layout
