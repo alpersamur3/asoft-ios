@@ -23,7 +23,7 @@ jobs:
           CC="xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK -miphoneos-version-min=16.0 -fobjc-arc -O2"
           mkdir -p out/Payload/Hello.app
 
-          $CC apps/sweetinstalld/main.m -framework Foundation -framework MobileCoreServices -o out/sweetinstalld
+          $CC apps/sweetinstalld/main.m -framework Foundation -framework MobileCoreServices -lz -o out/sweetinstalld
           codesign -f -s - --entitlements apps/sweetinstalld/entitlements.plist out/sweetinstalld
 
           $CC apps/hello/main.m -framework UIKit -framework Foundation -o out/Payload/Hello.app/Hello
