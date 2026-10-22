@@ -23,7 +23,8 @@ for QEMU's virtual hardware.
 | Apps | `.ipa` files dropped into a Windows folder install while iOS runs (`asoftinstalld`) |
 | Power | Closing the window shuts iOS down cleanly (sync, unmount, power off) |
 | Storage | What iOS writes is kept in a per-user disk layered on the built image |
-| Window | Sized to the phone's shape, with a side bar: Home, Lock, Volume, Screenshot, Install .ipa, Shut down |
+| Window | Sized to the phone's shape, with a side bar: Home, Lock/Wake, Volume, Screenshot, Install .ipa, Shut down; a Screen off cover while iOS has the display off |
+| Clock | The PC's time zone; the lock screen does not dim or lock by itself |
 
 Not yet: audio, GPU acceleration, the App Store and other Apple services.
 
@@ -34,8 +35,8 @@ in one work folder (`ASOFT_WORK`, default `work\` in the repo):
 
 | In the work folder | What |
 | --- | --- |
-| `qemu\v11.1.2-asoft\` | Our QEMU build (`qemu/build-windows.sh`, or the `qemu-win` workflow) |
-| `root\ios16-root-20H392-v3.qcow2` | The iOS disk, built from the IPSW |
+| `qemu\v11.1.2-asoft\` | Our QEMU build with qemu-img (`qemu/build-windows.sh`, or the `qemu-win` workflow) |
+| `root\ios16-root-20H392-v4.qcow2` | The iOS disk, built from the IPSW |
 | `root\ios16-user.qcow2` | What iOS writes; created on first start, `-Reset` starts over |
 | `ipa\` | Drop `.ipa` files here while iOS runs |
 | `runs\` | Kernel logs of each start |

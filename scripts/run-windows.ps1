@@ -15,12 +15,13 @@ param(
     # to the installed QEMU when the build is not there.
     # 0004 titles the window with -name alone ("ASoftware iOS"); --version says "(ASoftware)"
     [string]$Qemu = "$Work\qemu\v11.1.2-asoft\qemu-system-aarch64.exe",
-    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0101\kernel.development.sweet",
-    # New user disks start from v3. Layers, each an overlay on the one before (never write a layer
+    # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake)
+    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0102\kernel.development.sweet",
+    # New user disks start from v4. Layers, each an overlay on the one before (never write a layer
     # that others sit on): the base image as built; v2, its LaunchServices database rebuilt with
     # kernel 0099 so wallpaper posters and widgets are registered; v3, asoftinstalld that starts at
-    # boot (PROGRESS.md)
-    [string]$Disk = "$Work\root\ios16-root-20H392-v3.qcow2",
+    # boot; v4, the asoftinstalld that also sets the time zone and keeps the display from dimming
+    [string]$Disk = "$Work\root\ios16-root-20H392-v4.qcow2",
     # gl=on: the GPU scales the 1080x2400 frame; plain gtk scales it on the QEMU main loop and
     # made the whole boot ~3.4x slower (scripts/dev/bench.py, 2026-10-21)
     # show-cursor: QEMU hides the host pointer over an absolute (tablet) input and expects the
@@ -46,7 +47,9 @@ param(
     # Drop .ipa files here while iOS runs (or use the side bar's Install .ipa): asoftinstalld (in
     # the v3 disk) fetches them through scripts\ipa-server.py and installs them; results land in
     # Installed\ or Failed\ with a .log
-    [string]$IpaDir = "$Work\ipa"
+    [string]$IpaDir = "$Work\ipa",
+    # iOS's time zone as an IANA name (Europe/Istanbul); default the PC's. asoftinstalld sets it
+    [string]$TimeZone = ''
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $TmpDir | Out-Null
@@ -71,7 +74,10 @@ if ($Persist) {
     if (-not (Test-Path $UserDisk)) {
         # Next to the base image the backing path is relative, so WSL tools (qemu-nbd) open it too
         $backing = if ((Split-Path $UserDisk) -eq (Split-Path $Disk)) { Split-Path $Disk -Leaf } else { $Disk }
-        & 'C:\Program Files\qemu\qemu-img.exe' create -q -f qcow2 -b $backing -F qcow2 $UserDisk
+        # qemu-img of our build (qemu/build-windows.sh), else of an installed QEMU
+        $qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
+        if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
+        & $qemuImg create -q -f qcow2 -b $backing -F qcow2 $UserDisk
         if ($LASTEXITCODE) { throw "qemu-img could not create $UserDisk" }
         Write-Host "New user disk $UserDisk (on $Disk)"
     }
@@ -89,6 +95,23 @@ $bootArgs = "debug=0xc serial=3 cpus=$Cpus keepsyms=1 -enable_kprintf_spam -nopr
     # launchd kills an extension that has not checked in within a few seconds; under emulation the
     # default wallpaper's poster extension needs longer (it decodes HEIC images in software)
     "launchd_disable_all_timeouts=1 $ExtraArgs"
+if (-not $TimeZone) {
+    # The PC's zone, Windows ID to IANA name through the ICU that comes with Windows 10 1903+
+    try {
+        Add-Type -Namespace Asoft -Name Icu -MemberDefinition @'
+[DllImport("icu.dll", CharSet = CharSet.Unicode)]
+public static extern int ucal_getTimeZoneIDForWindowsID(string winid, int len, string region,
+    System.Text.StringBuilder id, int capacity, ref int status);
+'@
+        $id = New-Object System.Text.StringBuilder 64
+        $status = 0
+        $n = [Asoft.Icu]::ucal_getTimeZoneIDForWindowsID([TimeZoneInfo]::Local.Id, -1, $null, $id, 64, [ref]$status)
+        if ($status -le 0 -and $n -gt 0) { $TimeZone = $id.ToString(0, $n) }
+    } catch {
+        Write-Host "PC time zone not found ($($_.Exception.Message)); iOS keeps its own"
+    }
+}
+if ($TimeZone -match '^[A-Za-z0-9_+\-/]+$') { $bootArgs += " asoft_tz=$TimeZone" }
 
 Push-Location $repo
 $ipaServer = $null
