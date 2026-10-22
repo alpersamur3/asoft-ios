@@ -1,16 +1,49 @@
-ui/gtk: ASoftware's look: logo, window icon, a dark side bar
+ui/gtk: ASoftware's look: logo, window icon, side bar in iOS's dark style
 
 The window icon is asoftware.png next to the executable (ASoftware's
 logo; the QEMU icon when it is missing). With sidebar=on the side bar
-gets its own dark style (rounded buttons, Install .ipa as the accent,
-Shut down red under the pointer), the logo and name at its top, and GTK
-prefers its dark theme for menus and dialogs. The Screen off cover (0007)
-shows the logo too.
+follows the dark style of the iOS it shows: black, captioned groups of
+rows as in Settings (Home and the keys that do the same on the right),
+Install .ipa in blue and Shut down in red; the window and the Screen off
+cover (0007, with the logo) are black, GTK prefers its dark theme for
+menus and dialogs, and on Windows the title bar turns dark too
+(DwmSetWindowAttribute, looked up at run time).
 Based on QEMU v11.1.2 with 0002-0007.
 
 --- a/ui/gtk.c
 +++ b/ui/gtk.c
-@@ -862,27 +862,39 @@
+@@ -789,13 +789,20 @@
+     }
+ }
+ 
++/* A side bar row's name (gd_sidebar_button keeps its label) */
++static void gd_sidebar_set_label(GtkWidget *button, const char *text)
++{
++    gtk_label_set_text(GTK_LABEL(g_object_get_data(G_OBJECT(button), "name")),
++                       text);
++}
++
+ /* Ask the guest to power down; the next request (button, close) quits. */
+ static void gd_powerdown(GtkDisplayState *s)
+ {
+     s->powerdown_requested = true;
+     qemu_system_powerdown_request();
+     if (s->sidebar_power) {
+-        gtk_button_set_label(GTK_BUTTON(s->sidebar_power), "Force quit");
++        gd_sidebar_set_label(s->sidebar_power, "Force quit");
+     }
+     gd_sidebar_say(s, "Shutting down... the guest turns QEMU off in "
+                    "about 10 s.");
+@@ -840,7 +847,7 @@
+     }
+     cover = off && s->guest_display_armed;
+     gtk_widget_set_visible(s->screen_off, cover);
+-    gtk_button_set_label(GTK_BUTTON(s->sidebar_lock), cover ? "Wake" : "Lock");
++    gd_sidebar_set_label(s->sidebar_lock, cover ? "Wake" : "Lock");
+     gtk_widget_set_tooltip_text(s->sidebar_lock,
+                                 cover ? "Side button: wake (F2)"
+                                       : "Side button: lock (F2)");
+@@ -862,27 +869,39 @@
      return TRUE;
  }
  
@@ -27,7 +60,7 @@ Based on QEMU v11.1.2 with 0002-0007.
      gtk_widget_set_name(s->screen_off, "screen-off");
      gtk_css_provider_load_from_data(css, "#screen-off { background-color: "
 -                                    "#101010; }", -1, NULL);
-+                                    "#11141c; }", -1, NULL);
++                                    "#000000; }", -1, NULL);
      gtk_style_context_add_provider(gtk_widget_get_style_context(s->screen_off),
                                     GTK_STYLE_PROVIDER(css),
                                     GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -36,15 +69,15 @@ Based on QEMU v11.1.2 with 0002-0007.
 +    if (logo) {
 +        GtkWidget *image = gtk_image_new_from_pixbuf(logo);
 +
-+        gtk_widget_set_opacity(image, 0.55);
++        gtk_widget_set_opacity(image, 0.5);
 +        gtk_box_pack_start(GTK_BOX(box), image, FALSE, FALSE, 0);
 +    }
      gtk_label_set_markup(GTK_LABEL(label),
 -                         "<span foreground='#bbbbbb' size='x-large'>"
-+                         "<span foreground='#c9cedb' size='x-large'>"
++                         "<span foreground='#ffffff' size='x-large'>"
                           "Screen off</span>\n\n"
 -                         "<span foreground='#888888'>Click here, or press "
-+                         "<span foreground='#7f889c'>Click here, or press "
++                         "<span foreground='#8e8e93'>Click here, or press "
                           "Wake or Home</span>");
      gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
 -    gtk_container_add(GTK_CONTAINER(s->screen_off), label);
@@ -55,13 +88,15 @@ Based on QEMU v11.1.2 with 0002-0007.
      /* shown by gd_guest_display_update only, not by gtk_widget_show_all */
      gtk_widget_set_no_show_all(s->screen_off, TRUE);
      g_signal_connect(s->screen_off, "button-press-event",
-@@ -1092,6 +1104,42 @@
+@@ -1092,33 +1111,101 @@
      gtk_widget_show(dialog);
  }
  
+-static GtkWidget *gd_sidebar_button(GtkDisplayState *s, const char *label,
 +/*
 + * ASoftware's look: its logo (asoftware.png next to the executable) as the window
-+ * icon and atop the side bar, and a dark side bar of its own.
++ * icon and atop the side bar, which follows the dark style of the iOS it shows:
++ * black, rows grouped as in Settings, an action in blue and power in red.
 + */
 +static GdkPixbuf *gd_asoft_logo(int size)
 +{
@@ -76,43 +111,103 @@ Based on QEMU v11.1.2 with 0002-0007.
 +    return gdk_pixbuf_new_from_file_at_size(path, size, size, NULL);
 +}
 +
++/* iOS's dark system colors: grouped background, separator, labels, blue, red */
 +static const char asoft_sidebar_css[] =
-+    "#asoft-sidebar { background-color: #161a24; padding: 10px; }"
-+    "#asoft-sidebar button { background-image: none; background-color: #252b3a;"
-+    "  color: #e6e9f0; border: 1px solid #2f3648; border-radius: 9px;"
-+    "  padding: 6px 10px; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none; }"
-+    "#asoft-sidebar button label { color: #e6e9f0; }"
-+    "#asoft-sidebar button:hover { background-color: #303850; border-color: #3a4360; }"
-+    "#asoft-sidebar button:active { background-color: #3a4460; }"
-+    "#asoft-sidebar button:disabled { background-color: #1d2230; border-color: #232838; }"
-+    "#asoft-sidebar button:disabled label { color: #5b6377; }"
-+    "#asoft-sidebar button.accent { background-color: #3d7bf5; border-color: #4a86f7; }"
-+    "#asoft-sidebar button.accent:hover { background-color: #5590f8; }"
-+    "#asoft-sidebar button.accent:disabled { background-color: #1d2230; border-color: #232838; }"
-+    "#asoft-sidebar button.danger:hover { background-color: #b8343d; border-color: #c9434c; }"
-+    "#asoft-sidebar separator { background-color: #262c3b; min-height: 1px; }"
-+    "#asoft-sidebar .brand { color: #f2f4f8; font-weight: bold; font-size: 13px; }"
-+    "#asoft-sidebar .subtitle { color: #8a93a8; font-size: 11px; }"
-+    "#asoft-sidebar .status { color: #a3abbd; font-size: 11px; }";
++    "window.background, #asoft-sidebar { background-color: #000000; }"
++    "#asoft-sidebar { padding: 14px 12px; }"
++    "#asoft-sidebar .brand { color: #ffffff; font-weight: 600; font-size: 14px; }"
++    "#asoft-sidebar .subtitle { color: #8e8e93; font-size: 11px; }"
++    "#asoft-sidebar .caption { color: #8e8e93; font-size: 10px; margin: 14px 12px 5px 12px; }"
++    "#asoft-sidebar .group { background-color: #1c1c1e; border-radius: 10px; }"
++    "#asoft-sidebar .group button { background-image: none; background-color: transparent;"
++    "  border: none; border-radius: 0; box-shadow: none; text-shadow: none;"
++    "  -gtk-icon-shadow: none; padding: 8px 12px; min-height: 0; }"
++    "#asoft-sidebar .group button + button { border-top: 1px solid #38383a; }"
++    "#asoft-sidebar .group button:first-child { border-radius: 10px 10px 0 0; }"
++    "#asoft-sidebar .group button:last-child { border-radius: 0 0 10px 10px; }"
++    "#asoft-sidebar .group button:only-child { border-radius: 10px; }"
++    "#asoft-sidebar .group button:hover { background-color: #2c2c2e; }"
++    "#asoft-sidebar .group button:active { background-color: #3a3a3c; }"
++    "#asoft-sidebar .group .name { color: #ffffff; font-size: 13px; }"
++    "#asoft-sidebar .group .hint { color: #8e8e93; font-size: 12px; }"
++    "#asoft-sidebar .group button.action .name { color: #0a84ff; }"
++    "#asoft-sidebar .group button.destructive .name { color: #ff453a; }"
++    "#asoft-sidebar .group button:disabled .name,"
++    "#asoft-sidebar .group button:disabled .hint { color: #48484a; }"
++    "#asoft-sidebar .status { color: #8e8e93; font-size: 11px; margin: 12px 6px 0 6px; }";
 +
- static GtkWidget *gd_sidebar_button(GtkDisplayState *s, const char *label,
++/* A captioned group of rows, as in iOS Settings */
++static GtkWidget *gd_sidebar_group(GtkDisplayState *s, const char *caption)
++{
++    GtkWidget *label = gtk_label_new(caption);
++    GtkWidget *group = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
++
++    gtk_label_set_xalign(GTK_LABEL(label), 0);
++    gtk_style_context_add_class(gtk_widget_get_style_context(label), "caption");
++    gtk_style_context_add_class(gtk_widget_get_style_context(group), "group");
++    gtk_box_pack_start(GTK_BOX(s->sidebar), label, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(s->sidebar), group, FALSE, FALSE, 0);
++    return group;
++}
++
++/* A row: its name on the left, the key that does the same (if any) on the right */
++static GtkWidget *gd_sidebar_button(GtkDisplayState *s, GtkWidget *group,
++                                    const char *label, const char *hint,
                                      const char *tooltip, GCallback clicked,
                                      unsigned int key)
-@@ -1118,7 +1166,9 @@
+ {
+-    GtkWidget *button = gtk_button_new_with_label(label);
++    GtkWidget *button = gtk_button_new();
++    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
++    GtkWidget *name = gtk_label_new(label);
++
++    gtk_label_set_xalign(GTK_LABEL(name), 0);
++    gtk_style_context_add_class(gtk_widget_get_style_context(name), "name");
++    gtk_box_pack_start(GTK_BOX(row), name, TRUE, TRUE, 0);
++    if (hint) {
++        GtkWidget *keys = gtk_label_new(hint);
++
++        gtk_style_context_add_class(gtk_widget_get_style_context(keys), "hint");
++        gtk_box_pack_end(GTK_BOX(row), keys, FALSE, FALSE, 0);
++    }
++    gtk_container_add(GTK_CONTAINER(button), row);
++    g_object_set_data(G_OBJECT(button), "name", name);
+ 
+     /* keep the keyboard focus on the guest display */
+     gtk_widget_set_can_focus(button, FALSE);
+     gtk_widget_set_tooltip_text(button, tooltip);
+     g_object_set_data(G_OBJECT(button), "key", GUINT_TO_POINTER(key));
+     g_signal_connect(button, "clicked", clicked, s);
+-    gtk_box_pack_start(GTK_BOX(s->sidebar), button, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(group), button, FALSE, FALSE, 0);
+     return button;
+ }
+ 
+-static void gd_sidebar_gap(GtkDisplayState *s)
+-{
+-    gtk_box_pack_start(GTK_BOX(s->sidebar),
+-                       gtk_separator_new(GTK_ORIENTATION_HORIZONTAL),
+-                       FALSE, FALSE, 4);
+-}
+-
+ static void gd_create_sidebar(GtkDisplayState *s)
  {
      const char *shots = g_getenv("ASOFT_SHOTS_DIR");
      const char *pictures = g_get_user_special_dir(G_USER_DIRECTORY_PICTURES);
 -    GtkWidget *install, *footer;
-+    GtkWidget *install, *header, *names, *brand, *subtitle;
++    GtkWidget *group, *install, *header, *names, *brand, *subtitle;
 +    GtkCssProvider *css = gtk_css_provider_new();
-+    g_autoptr(GdkPixbuf) logo = gd_asoft_logo(40);
++    g_autoptr(GdkPixbuf) logo = gd_asoft_logo(38);
  
      s->shots_dir = shots ? g_strdup(shots)
          : g_build_filename(pictures ? pictures : g_get_home_dir(),
-@@ -1127,8 +1177,38 @@
+@@ -1127,53 +1214,120 @@
      s->ipas_pending = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
  
+-    s->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+-    gtk_container_set_border_width(GTK_CONTAINER(s->sidebar), 8);
+-    gd_sidebar_button(s, "Home", "Home (F1)",
 +    /* dark menus and dialogs to go with the side bar */
 +    g_object_set(gtk_settings_get_default(),
 +                 "gtk-application-prefer-dark-theme", TRUE, NULL);
@@ -121,20 +216,20 @@ Based on QEMU v11.1.2 with 0002-0007.
 +        GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 +    g_object_unref(css);
 +
-     s->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
--    gtk_container_set_border_width(GTK_CONTAINER(s->sidebar), 8);
++    s->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 +    gtk_widget_set_name(s->sidebar, "asoft-sidebar");    /* padding in its CSS */
++    gtk_widget_set_size_request(s->sidebar, 184, -1);
 +
 +    /* logo and name */
-+    header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
++    header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
 +    if (logo) {
 +        gtk_box_pack_start(GTK_BOX(header), gtk_image_new_from_pixbuf(logo),
 +                           FALSE, FALSE, 0);
 +    }
-+    names = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
++    names = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
 +    gtk_widget_set_valign(names, GTK_ALIGN_CENTER);
 +    brand = gtk_label_new("ASoftware");
-+    subtitle = gtk_label_new("iOS 16");
++    subtitle = gtk_label_new("iOS 16.7.16 · iPhone X");
 +    gtk_label_set_xalign(GTK_LABEL(brand), 0);
 +    gtk_label_set_xalign(GTK_LABEL(subtitle), 0);
 +    gtk_style_context_add_class(gtk_widget_get_style_context(brand), "brand");
@@ -143,47 +238,111 @@ Based on QEMU v11.1.2 with 0002-0007.
 +    gtk_box_pack_start(GTK_BOX(names), brand, FALSE, FALSE, 0);
 +    gtk_box_pack_start(GTK_BOX(names), subtitle, FALSE, FALSE, 0);
 +    gtk_box_pack_start(GTK_BOX(header), names, FALSE, FALSE, 0);
-+    gtk_box_pack_start(GTK_BOX(s->sidebar), header, FALSE, FALSE, 4);
-+    gd_sidebar_gap(s);
++    gtk_box_pack_start(GTK_BOX(s->sidebar), header, FALSE, FALSE, 0);
 +
-     gd_sidebar_button(s, "Home", "Home (F1)",
++    group = gd_sidebar_group(s, "BUTTONS");
++    gd_sidebar_button(s, group, "Home", "F1", "Home (F1)",
                        G_CALLBACK(gd_sidebar_key), KEY_F1);
-     s->sidebar_lock = gd_sidebar_button(s, "Lock", "Side button: lock (F2)",
-@@ -1147,6 +1227,7 @@
+-    s->sidebar_lock = gd_sidebar_button(s, "Lock", "Side button: lock (F2)",
++    s->sidebar_lock = gd_sidebar_button(s, group, "Lock", "F2",
++                                        "Side button: lock (F2)",
+                                         G_CALLBACK(gd_sidebar_key), KEY_F2);
+-    gd_sidebar_button(s, "Volume +", "Volume up (F4)",
++    gd_sidebar_button(s, group, "Volume up", "F4", "Volume up (F4)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F4);
+-    gd_sidebar_button(s, "Volume −", "Volume down (F3)",
++    gd_sidebar_button(s, group, "Volume down", "F3", "Volume down (F3)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F3);
+-    gd_sidebar_gap(s);
+-    gd_sidebar_button(s, "Screenshot", "Save the screen as a PNG",
++
++    group = gd_sidebar_group(s, "SCREEN");
++    gd_sidebar_button(s, group, "Screenshot", NULL, "Save the screen as a PNG",
+                       G_CALLBACK(gd_sidebar_screenshot), 0);
+-    gd_sidebar_button(s, "Screenshots", "Open the screenshots folder",
++    gd_sidebar_button(s, group, "Screenshots folder", NULL,
++                      "Open the folder the screenshots go to",
+                       G_CALLBACK(gd_sidebar_open_shots), 0);
+-    gd_sidebar_gap(s);
+-    install = gd_sidebar_button(s, "Install .ipa...",
++
++    group = gd_sidebar_group(s, "APPS");
++    install = gd_sidebar_button(s, group, "Install .ipa…", NULL,
                                  "Copy .ipa files to the guest, which "
                                  "installs them",
                                  G_CALLBACK(gd_sidebar_install), 0);
-+    gtk_style_context_add_class(gtk_widget_get_style_context(install), "accent");
++    gtk_style_context_add_class(gtk_widget_get_style_context(install), "action");
      if (!s->ipa_dir) {
          gtk_widget_set_sensitive(install, FALSE);
          gtk_widget_set_tooltip_text(install, "ASOFT_IPA_DIR is not set");
-@@ -1156,6 +1237,8 @@
+     }
+-    gd_sidebar_gap(s);
+-    s->sidebar_power = gd_sidebar_button(s, "Shut down",
++
++    group = gd_sidebar_group(s, "POWER");
++    s->sidebar_power = gd_sidebar_button(s, group, "Shut down", NULL,
                                           "Power the guest down; pressed "
                                           "again, quit QEMU",
                                           G_CALLBACK(gd_sidebar_power), 0);
 +    gtk_style_context_add_class(gtk_widget_get_style_context(s->sidebar_power),
-+                                "danger");
++                                "destructive");
  
      s->sidebar_status = gtk_label_new(NULL);
      gtk_label_set_line_wrap(GTK_LABEL(s->sidebar_status), TRUE);
-@@ -1165,14 +1248,10 @@
+     gtk_label_set_line_wrap_mode(GTK_LABEL(s->sidebar_status),
+                                  PANGO_WRAP_WORD_CHAR);
+-    gtk_label_set_max_width_chars(GTK_LABEL(s->sidebar_status), 14);
++    gtk_label_set_max_width_chars(GTK_LABEL(s->sidebar_status), 18);
      gtk_label_set_xalign(GTK_LABEL(s->sidebar_status), 0);
      gtk_label_set_selectable(GTK_LABEL(s->sidebar_status), TRUE);
      gtk_widget_set_can_focus(s->sidebar_status, FALSE);
 +    gtk_style_context_add_class(gtk_widget_get_style_context(s->sidebar_status),
 +                                "status");
      gtk_box_pack_start(GTK_BOX(s->sidebar), s->sidebar_status,
-                        FALSE, FALSE, 4);
--
+-                       FALSE, FALSE, 4);
++                       FALSE, FALSE, 0);
++}
++
++#ifdef GDK_WINDOWING_WIN32
++/*
++ * A dark title bar to go with the side bar: Windows 10 1809 and later take
++ * DWMWA_USE_IMMERSIVE_DARK_MODE (20), Windows 11 also a caption color (35) and
++ * its text color (36). Looked up at run time: dwmapi is not linked.
++ */
++static void gd_win32_dark_title(GtkWidget *window)
++{
++    HRESULT (WINAPI *set_attribute)(HWND, DWORD, LPCVOID, DWORD);
++    HMODULE dwmapi = LoadLibraryA("dwmapi.dll");
++    GdkWindow *gdk_window = gtk_widget_get_window(window);
++    BOOL dark = TRUE;
++    COLORREF caption = RGB(0, 0, 0), text = RGB(255, 255, 255);
++    HWND hwnd;
+ 
 -    footer = gtk_label_new(NULL);
 -    gtk_label_set_markup(GTK_LABEL(footer),
 -                         "<span size='small' foreground='#999999'>"
 -                         "ASoftware</span>");
 -    gtk_box_pack_end(GTK_BOX(s->sidebar), footer, FALSE, FALSE, 0);
++    if (!dwmapi || !gdk_window) {
++        return;
++    }
++    set_attribute = (void *)GetProcAddress(dwmapi, "DwmSetWindowAttribute");
++    if (!set_attribute) {
++        return;
++    }
++    hwnd = gdk_win32_window_get_handle(gdk_window);
++    set_attribute(hwnd, 20, &dark, sizeof(dark));
++    set_attribute(hwnd, 35, &caption, sizeof(caption));
++    set_attribute(hwnd, 36, &text, sizeof(text));
++    /* redraw the frame with them */
++    SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
++                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
  }
++#endif
  
  /** GTK Events **/
-@@ -3238,7 +3317,15 @@
+ 
+@@ -3238,7 +3392,15 @@
      qemu_add_mouse_mode_change_notifier(&s->mouse_mode_notifier);
      s->vmse = qemu_add_vm_change_state_handler(gd_change_runstate, s);
  
@@ -200,3 +359,15 @@ Based on QEMU v11.1.2 with 0002-0007.
  
      gd_create_menus(s, opts);
  
+@@ -3271,6 +3433,11 @@
+     gtk_container_add(GTK_CONTAINER(s->window), s->vbox);
+ 
+     gtk_widget_show_all(s->window);
++#ifdef GDK_WINDOWING_WIN32
++    if (s->sidebar) {
++        gd_win32_dark_title(s->window);
++    }
++#endif
+ 
+     for (idx = 0; idx < s->vcs->len; idx++) {
+         VirtualConsole *v = g_ptr_array_index(s->vcs, idx);
