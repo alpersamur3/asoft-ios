@@ -251,6 +251,9 @@ def main():
     ap.add_argument('--qmp-tcp', type=int, metavar='PORT',
                     help='with --display: QMP on 127.0.0.1:PORT (e.g. for screendump)')
     ap.add_argument('--name', help='QEMU -name: the window title ("QEMU (NAME)"; just NAME with qemu/patches/0004)')
+    ap.add_argument('--loadvm', metavar='SNAPSHOT',
+                    help="with a qcow2 --disk: resume the machine state saved in it (QEMU -loadvm), "
+                         "e.g. qemu/patches/0009's quick boot, asoft-quick")
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
                     help="QEMU -d items for qemu.log (default: int,guest_errors,unimp; 'int' is very slow for a full iOS boot)")
     a = ap.parse_args()
@@ -340,6 +343,8 @@ def main():
                           + (f',aio={a.disk_aio}' if a.disk_aio else '')
                           + (',snapshot=on' if a.snapshot else ''),
                 '-device', 'virtio-blk-device,drive=root']
+    if a.loadvm:
+        cmd += ['-loadvm', a.loadvm]
     if a.gdb:
         cmd += ['-S', '-gdb', 'tcp::1234']
 
