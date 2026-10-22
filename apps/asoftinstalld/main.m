@@ -14,7 +14,7 @@
 // host. Each .ipa listed there is fetched into the inbox and its result posted back.
 //
 // At start it sets iOS's time zone to the PC's, which the launcher passes as the
-// boot-arg asoft_tz=Area/City.
+// boot-arg asoft_tz=Area/City, and keeps SpringBoard from dimming and locking.
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #include <arpa/inet.h>
@@ -223,6 +223,35 @@ setTimeZone(void)
 	                                                                      withString:@""]);
 }
 
+// SpringBoard dims the lock screen and asks for the display off seconds after boot; the
+// kernel keeps the display on (sweetfb_keepon), so the dimmed frame stayed until a key woke
+// iOS. The emulated battery always charges: never dim or lock on power. SpringBoard reads
+// its defaults when it launches, well after us (tools/asoft-disk.sh nodim does the same
+// offline).
+static void
+keepDisplayOn(void)
+{
+	CFStringRef domain = CFSTR("com.apple.springboard");
+	CFStringRef user = CFSTR("mobile");
+	BOOL changed = NO;
+	for (NSString *key in @[@"SBDontDimOrLockOnAC", @"SBDisableAutoDim"]) {
+		CFPropertyListRef value = CFPreferencesCopyValue((__bridge CFStringRef)key, domain, user,
+		    kCFPreferencesAnyHost);
+		if (value != kCFBooleanTrue) {
+			CFPreferencesSetValue((__bridge CFStringRef)key, kCFBooleanTrue, domain, user,
+			    kCFPreferencesAnyHost);
+			changed = YES;
+		}
+		if (value) {
+			CFRelease(value);
+		}
+	}
+	if (changed) {
+		CFPreferencesSynchronize(domain, user, kCFPreferencesAnyHost);
+		say(@"SpringBoard: no dimming or auto-lock on power");
+	}
+}
+
 // An install asked for in the first seconds of boot, before lsd and installd ran, never
 // returned. Wait until SpringBoard has finished starting up; when we start later than that
 // (launchd restarted us), kReadyUptime after boot is enough.
@@ -389,6 +418,7 @@ main(void)
 {
 	@autoreleasepool {
 		setTimeZone();
+		keepDisplayOn();
 		NSFileManager *fm = NSFileManager.defaultManager;
 		NSString *inbox = [kRoot stringByAppendingPathComponent:@"Inbox"];
 		[fm createDirectoryAtPath:inbox withIntermediateDirectories:YES
