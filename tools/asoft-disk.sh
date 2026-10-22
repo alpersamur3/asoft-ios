@@ -23,6 +23,8 @@
 set -euo pipefail
 cmd=${1:-}; disk=${2:-}
 [ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,9p' "$0"; exit 2; }
+# qcow2 only: anything else (a mistyped argument) would be attached as a raw disk
+[ "$(head -c 4 "$disk" | od -An -tx1 | tr -d ' \n')" = 514649fb ] || { echo "$disk: not a qcow2 image" >&2; exit 2; }
 shift 2
 MNT=/mnt/asoft-disk
 DEV=/dev/nbd2

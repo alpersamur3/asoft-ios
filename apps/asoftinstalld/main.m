@@ -270,11 +270,21 @@ setClock(NSString *clock)
 	return YES;
 }
 
+// Processes keep the locale they have read, and SpringBoard starts before us: these make
+// CoreFoundation read it again, as Settings does after changing the clock.
+static void
+postLocaleChanged(void)
+{
+	notify_post("AppleTimePreferencesChangedNotification");
+	notify_post("AppleDatePreferencesChangedNotification");
+	notify_post("AppleNumberPreferencesChangedNotification");
+}
+
 // The PC's settings, from the Windows launcher's boot-args asoft_tz (time zone, Area/City),
 // asoft_region (region, TR) and asoft_clock (24 or 12). Each is applied only when it differs
 // from what was applied last (Host.plist next to the inbox): a change made in iOS's Settings
-// stays until the PC's own setting changes. Before the apps start, so they read the new ones.
-static void
+// stays until the PC's own setting changes. Returns whether the region or clock changed.
+static BOOL
 applyHostSettings(void)
 {
 	NSString *path = [kRoot stringByAppendingPathComponent:@"Host.plist"];
@@ -282,18 +292,18 @@ applyHostSettings(void)
 	    ?: [NSMutableDictionary dictionary];
 	NSDictionary<NSString *, NSString *> *args = @{@"TimeZone": @"asoft_tz", @"Region": @"asoft_region",
 	                                               @"Clock": @"asoft_clock"};
-	BOOL changed = NO;
+	BOOL changed = NO, locale = NO;
 	for (NSString *key in args) {
 		NSString *value = bootArg(args[key]);
 		if (value.length == 0 || [applied[key] isEqual:value]) {
 			continue;
 		}
-		BOOL ok = [key isEqualToString:@"TimeZone"] ? setTimeZone(value)
-		        : [key isEqualToString:@"Region"]   ? setRegion(value)
-		                                            : setClock(value);
+		BOOL zone = [key isEqualToString:@"TimeZone"];
+		BOOL ok = zone ? setTimeZone(value) : [key isEqualToString:@"Region"] ? setRegion(value) : setClock(value);
 		if (ok) {
 			applied[key] = value;
 			changed = YES;
+			locale |= !zone;
 		}
 	}
 	if (changed) {
@@ -302,6 +312,10 @@ applyHostSettings(void)
 		                                          attributes:nil error:nil];
 		[applied writeToFile:path atomically:YES];
 	}
+	if (locale) {
+		postLocaleChanged();
+	}
+	return locale;
 }
 
 // SpringBoard dims the lock screen and asks for the display off seconds after boot; the
@@ -498,7 +512,7 @@ int
 main(void)
 {
 	@autoreleasepool {
-		applyHostSettings();
+		BOOL localeChanged = applyHostSettings();
 		keepDisplayOn();
 		NSFileManager *fm = NSFileManager.defaultManager;
 		NSString *inbox = [kRoot stringByAppendingPathComponent:@"Inbox"];
@@ -507,6 +521,9 @@ main(void)
 		NSMutableDictionary<NSString *, NSNumber *> *attempts = [NSMutableDictionary dictionary];
 		NSMutableSet<NSString *> *fromHost = [NSMutableSet set];
 		waitForSpringBoard();
+		if (localeChanged) {
+			postLocaleChanged();    // again, for what SpringBoard set up while it started
+		}
 		say(@"watching %@ and http://%s:%u/list", inbox, kHost, kPort);
 		for (;;) {
 			@autoreleasepool {
