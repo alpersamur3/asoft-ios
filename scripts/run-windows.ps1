@@ -30,8 +30,9 @@ param(
     # guest to draw one; iOS draws none, so without it you cannot see where you click.
     # window-close=off with our QEMU (0003): closing the window presses the power key and iOS
     # syncs, unmounts and turns QEMU off (kernel 0100, ~10 s); closing it again quits at once.
-    # sidebar=on (0006): Home, Lock, Volume, Screenshot, Install .ipa, Shut down beside the screen
-    [string]$Display = 'gtk,gl=on,show-cursor=on,window-close=off,sidebar=on',
+    # sidebar=on (0006): Home, Lock, Volume, Screenshot, Install .ipa, Shut down beside the screen.
+    # show-menubar=off: the side bar has what QEMU's menus offered here (Ctrl+Alt+M shows them)
+    [string]$Display = 'gtk,gl=on,show-cursor=on,window-close=off,sidebar=on,show-menubar=off',
     # keepon: no auto-lock blackout. Keys in the window: F1 Home, F2 side button, F3/F4 volume, every
     # other key a hardware keyboard (kernel 0096+); mouse = touch
     [string]$ExtraArgs = 'sweetfb_noconsole=1 sweetfb_keepon=1',

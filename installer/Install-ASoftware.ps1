@@ -53,7 +53,7 @@ if ($free -lt 25GB -and -not (Test-Path "$work\root\ios16-base.qcow2")) {
 Step '1/6 App files'
 if ($src.Path -ne (Resolve-Path $Dir).Path) {
     foreach ($item in 'Start-iOS.cmd', 'LICENSE', 'README.md') { Copy-Item "$src\$item" $Dir -Force }
-    foreach ($folder in 'scripts', 'tools') {
+    foreach ($folder in 'scripts', 'tools', 'assets') {
         robocopy "$src\$folder" "$Dir\$folder" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null
     }
     New-Item -ItemType Directory -Force "$Dir\installer\helper\out", "$Dir\xnu" | Out-Null
@@ -153,7 +153,7 @@ if (-not $NoShortcut) {
     $link = $shell.CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\ASoftware iOS.lnk")
     $link.TargetPath = "$Dir\Start-iOS.cmd"
     $link.WorkingDirectory = $Dir
-    $link.IconLocation = "$qemu,0"
+    $link.IconLocation = "$Dir\assets\logo.ico,0"
     $link.Description = 'ASoftware iOS: iOS 16 in a window'
     $link.Save()
     Write-Host 'Desktop shortcut: ASoftware iOS'

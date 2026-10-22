@@ -2,10 +2,11 @@
 # Helper job build-root: the iOS root disk, ready to boot, from an IPSW.
 #
 # Disks, by virtio serial: ipsw (the .ipsw file itself, read-only), root (the disk to
-# build, 16 GiB), scratch (room for the images the zip deflated, 3 GiB for 20H392).
-# An image stored in the zip is read in place through a loop device over its bytes;
-# a deflated one is inflated into scratch (a small one into RAM). Then the same steps
-# as on Linux: tools/mkiosroot.sh, tools/sweet-root-tweaks.py, asoftinstalld
+# build, 16 GiB), scratch (room for the three disk images, 7.5 GB for 20H392). The
+# images are unpacked from the zip into files on scratch: apfs-fuse reads a UDIF
+# image's trailer from the last 512 bytes of the file, and a loop device over the
+# image's bytes inside the zip cannot end in the middle of a sector. Then the same
+# steps as on Linux: tools/mkiosroot.sh, tools/sweet-root-tweaks.py, asoftinstalld
 # (tools/asoft-disk.sh installer) and the device name.
 set -euo pipefail
 cd /asoft
@@ -22,35 +23,29 @@ disk() {
 ipsw=$(disk ipsw) root=$(disk root) scratch=$(disk scratch)
 
 progress 1 "reading the IPSW"
-declare -A off size stored
-while read -r role o s st _; do
-    off[$role]=$o size[$role]=$s stored[$role]=$st
+declare -A size
+while read -r role _ s _ _; do
+    size[$role]=$s
 done < <(python3 ipsw-members.py "$ipsw")
 
-scratch_used=0
-image() {    # image ROLE: sets $path to something holding that image's bytes
-    local role=$1
-    if [ "${stored[$role]}" = 1 ]; then
-        path=$(losetup -r -f --show -o "${off[$role]}" --sizelimit "${size[$role]}" "$ipsw")
-    elif [ "${size[$role]}" -lt $((256 << 20)) ]; then
-        path=/tmp/$role.dmg
-        python3 ipsw-members.py "$ipsw" "$role" "$path"
-    else
-        progress 3 "unpacking $role ($((size[$role] >> 20)) MB)"
-        path=$(losetup -f --show -o "$scratch_used" --sizelimit "${size[$role]}" "$scratch")
-        python3 ipsw-members.py "$ipsw" "$role" "$path"
-        scratch_used=$(( (scratch_used + size[$role] + (1 << 20) - 1) >> 20 << 20 ))
-    fi
+# no journal: nothing on scratch outlives this job
+mkfs.ext4 -q -F -O ^has_journal "$scratch"
+mkdir -p /mnt/scratch
+mount "$scratch" /mnt/scratch
+image() {    # image ROLE PERCENT: unpack it to /mnt/scratch/ROLE.dmg
+    progress "$2" "unpacking $1 ($((size[$1] >> 20)) MB)"
+    python3 ipsw-members.py "$ipsw" "$1" "/mnt/scratch/$1.dmg"
 }
-image OS;       os=$path
-image SystemOS; sysos=$path
-image AppOS;    appos=$path
+image OS 2
+image SystemOS 6
+image AppOS 9
+os=/mnt/scratch/OS.dmg sysos=/mnt/scratch/SystemOS.dmg appos=/mnt/scratch/AppOS.dmg
 
 # The copy is most of the time: report how far it is from the new volume's use
 # (about 12.5 GB for 20H392)
 (
     while sleep 30; do
-        used=$(df -k 2>/dev/null | awk -v d="$root" '$1 == d { print $3 }')
+        used=$(df -k --output=source,used 2>/dev/null | sed -n "s#^$root  *##p")
         [ -n "$used" ] || continue
         pct=$((10 + used * 80 / (12500 * 1024)))
         progress $((pct > 90 ? 90 : pct)) "copying iOS ($((used >> 10)) MB)"
@@ -60,6 +55,7 @@ watcher=$!
 progress 10 "copying iOS"
 bash mkiosroot.sh "$os" "$sysos" "$appos" "$root"
 kill $watcher 2>/dev/null || true
+umount /mnt/scratch
 
 progress 92 "setting iOS up"
 mkdir -p /mnt/root
@@ -71,5 +67,6 @@ fi
 bash asoft-disk.sh name /mnt/root "ASoftware iPhone"
 sync
 umount /mnt/root
-fsck.hfsplus -f -n "$root"
+# Linux's hfsplus writes past the journal; let fsck_hfs settle the volume
+fsck.hfsplus -f -y "$root" | tail -2 || true
 progress 100 "iOS disk ready"

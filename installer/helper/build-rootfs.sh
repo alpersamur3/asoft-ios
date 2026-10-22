@@ -14,9 +14,9 @@ mirror=http://ports.ubuntu.com/ubuntu-ports
 work=$out/rootfs-build
 mkdir -p "$work"
 
-# What the jobs run: shells and core tools, HFS+ tools, rsync, Python (the iOS root
+# What the jobs run: shells and core tools, HFS+ and ext4 (scratch) tools, rsync, Python (the iOS root
 # tweaks and plist edits), FUSE 3 for apfs-fuse, busybox for the odd extra tool.
-runtime=bash,dash,coreutils,util-linux,mount,findutils,grep,sed,gzip,hfsprogs,rsync,python3,fuse3,libfuse3-3,zlib1g,libbz2-1.0,libstdc++6,busybox-static
+runtime=bash,dash,coreutils,util-linux,mount,findutils,grep,sed,gzip,hfsprogs,e2fsprogs,rsync,python3,fuse3,libfuse3-3,zlib1g,libbz2-1.0,libstdc++6,busybox-static
 # Headers and libraries apfs-fuse builds against (its sysroot)
 devel=libc6-dev,libstdc++-13-dev,libfuse3-dev,zlib1g-dev,libbz2-dev,libattr1-dev
 

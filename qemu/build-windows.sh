@@ -63,5 +63,7 @@ mkdir -p "$DIST"/share/glib-2.0/schemas "$DIST"/lib
 cp /ucrt64/share/glib-2.0/schemas/gschemas.compiled "$DIST"/share/glib-2.0/schemas/
 cp -r /ucrt64/lib/gdk-pixbuf-2.0 "$DIST"/lib/
 cp "$SRC"/COPYING "$SRC"/LICENSE "$PATCHES"/*.patch "$DIST"/
+# the window icon and side bar logo (patches/0008)
+cp "$PATCHES"/../../assets/logo-256.png "$DIST"/asoftware.png
 echo "QEMU $QEMU_REF ($(git -C "$SRC" rev-parse HEAD)), patched, local build" > "$DIST"/BUILD.txt
 "$DIST"/qemu-system-aarch64.exe --version | head -1

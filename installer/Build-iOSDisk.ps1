@@ -19,10 +19,10 @@ foreach ($f in $Ipsw, $Qemu, $qemuImg, "$Helper\Image.gz", "$Helper\initrd.gz") 
     if (-not (Test-Path $f)) { throw "missing: $f" }
 }
 
-# The new disk, and scratch room for the images the IPSW's zip deflated (2.7 GB for 20H392)
+# The new disk, and scratch room to unpack the IPSW's three disk images into (7.5 GB for 20H392)
 $scratch = "$Out.scratch.qcow2"
 & $qemuImg create -q -f qcow2 $Out 16G
-& $qemuImg create -q -f qcow2 $scratch 4G
+& $qemuImg create -q -f qcow2 $scratch 10G
 if ($LASTEXITCODE) { throw 'qemu-img failed' }
 
 # A comma in a -drive file name must be doubled (IPSW names have one: iPhone10,3_...)
