@@ -23,7 +23,7 @@ for QEMU's virtual hardware.
 | Apps | `.ipa` files dropped into a Windows folder install while iOS runs (`asoftinstalld`) |
 | Power | Closing the window shuts iOS down cleanly (sync, unmount, power off) |
 | Storage | What iOS writes is kept in a per-user disk layered on the built image |
-| Window | Sized to the phone's shape |
+| Window | Sized to the phone's shape, with a side bar: Home, Lock, Volume, Screenshot, Install .ipa, Shut down |
 
 Not yet: audio, GPU acceleration, the App Store and other Apple services.
 
@@ -60,7 +60,7 @@ sets all of this up is planned; until then the pieces are built as below.
 | Path | What |
 | --- | --- |
 | `xnu/patches/` | Patches on Apple's XNU: 0001-0081 from ios-sweet (the phone's drivers, inactive under QEMU), 0082 on for QEMU (PL011 console, virtio block/net/input, ramfb display, AMFI, power key, ...) |
-| `qemu/` | Patches on QEMU 11.1.2 (redraw rate, close button powers iOS down, window title, phone-shaped window) and the Windows build script |
+| `qemu/` | Patches on QEMU 11.1.2 (redraw rate, close button powers iOS down, window title, phone-shaped window, side bar) and the Windows build script |
 | `tools/` | Device tree (`mkadt.py`), boot payload (`mkpayload.py`), QEMU launcher (`qemu-sweet.py`), iOS root builder, disk tool (`asoft-disk.sh`) |
 | `apps/` | Our iOS programs: `asoftinstalld` (installs .ipa files) and a test app |
 | `scripts/` | Windows launcher, .ipa server, WSL disk build; `dev/` holds benchmark and debugging tools |

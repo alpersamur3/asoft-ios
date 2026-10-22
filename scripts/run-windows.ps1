@@ -27,7 +27,8 @@ param(
     # guest to draw one; iOS draws none, so without it you cannot see where you click.
     # window-close=off with our QEMU (0003): closing the window presses the power key and iOS
     # syncs, unmounts and turns QEMU off (kernel 0100, ~10 s); closing it again quits at once.
-    [string]$Display = 'gtk,gl=on,show-cursor=on,window-close=off',
+    # sidebar=on (0006): Home, Lock, Volume, Screenshot, Install .ipa, Shut down beside the screen
+    [string]$Display = 'gtk,gl=on,show-cursor=on,window-close=off,sidebar=on',
     # keepon: no auto-lock blackout. Keys in the window: F1 Home, F2 side button, F3/F4 volume, every
     # other key a hardware keyboard (kernel 0096+); mouse = touch
     [string]$ExtraArgs = 'sweetfb_noconsole=1 sweetfb_keepon=1',
@@ -42,11 +43,10 @@ param(
     [switch]$Reset,
     [string]$UserDisk = "$Work\root\ios16-user.qcow2",
     [switch]$Keep,
-    # Drop .ipa files here while iOS runs: asoftinstalld (in the v3 disk) fetches them through
-    # scripts\ipa-server.py and installs them; results land in Installed\ or Failed\ with a .log
-    [string]$IpaDir = "$Work\ipa",
-    # Without the control window (scripts\control-panel.py: buttons, screenshot, Install .ipa, Shut down)
-    [switch]$NoPanel
+    # Drop .ipa files here while iOS runs (or use the side bar's Install .ipa): asoftinstalld (in
+    # the v3 disk) fetches them through scripts\ipa-server.py and installs them; results land in
+    # Installed\ or Failed\ with a .log
+    [string]$IpaDir = "$Work\ipa"
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $TmpDir | Out-Null
@@ -62,7 +62,8 @@ if (-not (Test-Path $Kernel)) {
 if (Test-Path $Qemu) {
     $env:QEMU_SYSTEM_AARCH64 = $Qemu   # read by tools\qemu-sweet.py
 } else {
-    $Display = $Display -replace ',window-close=off', ''   # a stock QEMU would ignore the close button
+    # a stock QEMU has neither option
+    $Display = $Display -replace ',window-close=off', '' -replace ',sidebar=on', ''
 }
 
 if ($Persist) {
@@ -90,18 +91,15 @@ $bootArgs = "debug=0xc serial=3 cpus=$Cpus keepsyms=1 -enable_kprintf_spam -nopr
     "launchd_disable_all_timeouts=1 $ExtraArgs"
 
 Push-Location $repo
-$ipaServer = $panel = $null
+$ipaServer = $null
 try {
     # python.exe itself, not the py launcher, so that stopping it stops the script
     $python = py -3.12 -c 'import sys; print(sys.executable)'
     if ($IpaDir) {
         $ipaServer = Start-Process $python -WindowStyle Hidden -PassThru `
             -ArgumentList "`"$PSScriptRoot\ipa-server.py`"", '--dir', "`"$IpaDir`""
+        $env:ASOFT_IPA_DIR = $IpaDir   # the side bar's Install .ipa copies there
         Write-Host "Drop .ipa files into $IpaDir to install them"
-    }
-    if (-not $NoPanel) {
-        $panel = Start-Process (Join-Path (Split-Path $python) 'pythonw.exe') -PassThru `
-            -ArgumentList "`"$PSScriptRoot\control-panel.py`"", '--port', $QmpPort, '--ipa-dir', "`"$IpaDir`""
     }
     py -3.12 tools\mkadt.py "$out\qemu.adt" --qemu --highmem
     py -3.12 tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
@@ -111,7 +109,7 @@ try {
     if (-not $Keep) { $qemuArgs += '--snapshot' }
     py -3.12 tools\qemu-sweet.py @qemuArgs
 } finally {
-    foreach ($p in $ipaServer, $panel) { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force } }
+    if ($ipaServer -and -not $ipaServer.HasExited) { Stop-Process -Id $ipaServer.Id -Force }
     Pop-Location
 }
 Write-Host "Kernel log: $out\run\serial.txt"
