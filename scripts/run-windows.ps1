@@ -21,7 +21,9 @@ param(
     # that others sit on): the base image as built; v2, its LaunchServices database rebuilt with
     # kernel 0099 so wallpaper posters and widgets are registered; v3, asoftinstalld that starts at
     # boot; v4, the asoftinstalld that also sets the time zone and keeps the display from dimming
-    [string]$Disk = "$Work\root\ios16-root-20H392-v4.qcow2",
+    # The installer's disk is ios16-base.qcow2 (installer/Install-ASoftware.ps1).
+    [string]$Disk = $(if (Test-Path "$Work\root\ios16-base.qcow2") { "$Work\root\ios16-base.qcow2" }
+                      else { "$Work\root\ios16-root-20H392-v4.qcow2" }),
     # gl=on: the GPU scales the 1080x2400 frame; plain gtk scales it on the QEMU main loop and
     # made the whole boot ~3.4x slower (scripts/dev/bench.py, 2026-10-21)
     # show-cursor: QEMU hides the host pointer over an absolute (tablet) input and expects the
@@ -129,21 +131,23 @@ $bootArgs += " asoft_clock=$Clock"
 Push-Location $repo
 $ipaServer = $null
 try {
-    # python.exe itself, not the py launcher, so that stopping it stops the script
-    $python = py -3.12 -c 'import sys; print(sys.executable)'
+    # The Python the installer put next to the app, else an installed 3.12; python.exe
+    # itself, not the py launcher, so that stopping it stops the script
+    $python = "$PSScriptRoot\..\python\python.exe"
+    if (-not (Test-Path $python)) { $python = py -3.12 -c 'import sys; print(sys.executable)' }
     if ($IpaDir) {
         $ipaServer = Start-Process $python -WindowStyle Hidden -PassThru `
             -ArgumentList "`"$PSScriptRoot\ipa-server.py`"", '--dir', "`"$IpaDir`""
         $env:ASOFT_IPA_DIR = $IpaDir   # the side bar's Install .ipa copies there
         Write-Host "Drop .ipa files into $IpaDir to install them"
     }
-    py -3.12 tools\mkadt.py "$out\qemu.adt" --qemu --highmem
-    py -3.12 tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
+    & $python tools\mkadt.py "$out\qemu.adt" --qemu --highmem
+    & $python tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
     $qemuArgs = @("$out\payload.bin", "$out\run", '--disk', $Disk, '--smp', $Cpus,
         '--display', $Display, '--qemu-log', 'guest_errors,unimp', '--qmp-tcp', $QmpPort,
         '--name', 'ASoftware iOS')
     if (-not $Keep) { $qemuArgs += '--snapshot' }
-    py -3.12 tools\qemu-sweet.py @qemuArgs
+    & $python tools\qemu-sweet.py @qemuArgs
 } finally {
     if ($ipaServer -and -not $ipaServer.HasExited) { Stop-Process -Id $ipaServer.Id -Force }
     Pop-Location

@@ -1,0 +1,38 @@
+#!/bin/sh
+# ASoftware helper VM: a small Linux that QEMU starts to do what Windows cannot, like
+# building the iOS disk from an IPSW. The job comes on the kernel command line
+# (asoft.job=NAME, runs /asoft/job-NAME.sh); disks are found by their virtio serial
+# (-device virtio-blk-device,serial=ipsw). Everything is logged to the serial console:
+# "ASOFT: progress N text" lines, then "ASOFT: done 0" (or another exit code), and the
+# VM powers off.
+export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu
+export HOME=/root LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null
+# devtmpfs has no /dev/fd (bash's process substitution) or /dev/std*
+ln -sf /proc/self/fd /dev/fd
+ln -sf /proc/self/fd/0 /dev/stdin
+ln -sf /proc/self/fd/1 /dev/stdout
+ln -sf /proc/self/fd/2 /dev/stderr
+mount -t tmpfs tmp /tmp
+mount -t tmpfs run /run
+mkdir -p /root
+
+job=$(sed -n 's/.*asoft\.job=\([^ ]*\).*/\1/p' /proc/cmdline)
+echo "ASOFT: helper up, job ${job:-none}, $(nproc) CPUs, $(sed -n 's/MemTotal: *//p' /proc/meminfo)"
+if [ -x "/asoft/job-$job.sh" ]; then
+    "/asoft/job-$job.sh"
+    rc=$?
+elif [ "$job" = shell ]; then
+    sh
+    rc=$?
+else
+    echo "ASOFT: no such job: $job"
+    rc=2
+fi
+sync
+echo "ASOFT: done $rc"
+echo o > /proc/sysrq-trigger
+sleep 5

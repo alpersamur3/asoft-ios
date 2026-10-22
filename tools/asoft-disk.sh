@@ -7,6 +7,9 @@
 #   asoft-disk.sh name      DISK.qcow2 "NAME"         the device name (Settings > General > About > Name)
 #   asoft-disk.sh nodim     DISK.qcow2                no lock screen dimming or auto-lock (always on power)
 #
+# DISK may also be the directory where an iOS root is mounted read-write (the ASoftware
+# helper VM, which has it mounted already).
+#
 # At the next boot asoftinstalld installs every inbox .ipa through installd and
 # logs to the console ("asoftinstalld: ..." in serial.txt). installer puts the daemon
 # at /usr/libexec/asoftinstalld and adds its job to launchd's job cache,
@@ -22,9 +25,7 @@
 # Copyright (c) 2026 ASoftware. MIT License, see LICENSE.
 set -euo pipefail
 cmd=${1:-}; disk=${2:-}
-[ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,9p' "$0"; exit 2; }
-# qcow2 only: anything else (a mistyped argument) would be attached as a raw disk
-[ "$(head -c 4 "$disk" | od -An -tx1 | tr -d ' \n')" = 514649fb ] || { echo "$disk: not a qcow2 image" >&2; exit 2; }
+[ -n "$cmd" ] && { [ -f "$disk" ] || [ -d "$disk" ]; } || { sed -n '2,12p' "$0"; exit 2; }
 shift 2
 MNT=/mnt/asoft-disk
 DEV=/dev/nbd2
@@ -33,27 +34,33 @@ OLD_ROOT=/private/var/mobile/Media/Sweet
 JOB=com.asoftware.installd
 OLD_JOB=com.sweet.installd
 
-grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null ||
-    { echo "no hfsplus driver (WSL: build and load it first)" >&2; exit 1; }
-modprobe nbd max_part=8 2>/dev/null || true
-mkdir -p $MNT
-ro=; [ "$cmd" = list ] && ro=--read-only
-qemu-nbd $ro --connect=$DEV "$disk"
-trap 'mountpoint -q $MNT && umount $MNT; qemu-nbd --disconnect $DEV >/dev/null' EXIT
-sleep 1
+if [ -d "$disk" ]; then
+    MNT=$(realpath "$disk")
+    [ -d "$MNT/System/Library/xpc" ] || { echo "$disk: not an iOS root" >&2; exit 2; }
+else
+    # qcow2 only: anything else (a mistyped argument) would be attached as a raw disk
+    [ "$(head -c 4 "$disk" | od -An -tx1 | tr -d ' \n')" = 514649fb ] || { echo "$disk: not a qcow2 image" >&2; exit 2; }
+    grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null ||
+        { echo "no hfsplus driver (WSL: build and load it first)" >&2; exit 1; }
+    modprobe nbd max_part=8 2>/dev/null || true
+    mkdir -p $MNT
+    ro=; [ "$cmd" = list ] && ro=--read-only
+    qemu-nbd $ro --connect=$DEV "$disk"
+    trap 'mountpoint -q $MNT && umount $MNT; qemu-nbd --disconnect $DEV >/dev/null' EXIT
+    sleep 1
 
-if [ "$cmd" = list ]; then
-    mount -t hfsplus -o ro $DEV $MNT
-    for d in Inbox Installed Failed; do
-        echo "== $d"
-        ls -la "$MNT$ROOT/$d" 2>/dev/null | grep -v '^total\|\.$' || true
-        cat "$MNT$ROOT/$d"/*.log 2>/dev/null || true
-    done
-    exit 0
-fi
+    if [ "$cmd" = list ]; then
+        mount -t hfsplus -o ro $DEV $MNT
+        for d in Inbox Installed Failed; do
+            echo "== $d"
+            ls -la "$MNT$ROOT/$d" 2>/dev/null | grep -v '^total\|\.$' || true
+            cat "$MNT$ROOT/$d"/*.log 2>/dev/null || true
+        done
+        exit 0
+    fi
 
-# Clean volume with an empty journal, or replay the journal first.
-python3 -I - "$DEV" <<'PY' || fsck.hfsplus -fy $DEV
+    # Clean volume with an empty journal, or replay the journal first.
+    python3 -I - "$DEV" <<'PY' || fsck.hfsplus -fy $DEV
 import struct, sys
 f = open(sys.argv[1], 'rb')
 f.seek(1024); vh = f.read(512)
@@ -67,7 +74,8 @@ order = '>' if jh[:4] == b'JNLx' else '<'      # the journal header is in its wr
 start, end = struct.unpack(order + 'QQ', jh[8:24])
 sys.exit(0 if start == end else 1)
 PY
-mount -t hfsplus -o rw,force $DEV $MNT
+    mount -t hfsplus -o rw,force $DEV $MNT
+fi
 
 case $cmd in
 installer)

@@ -6,3 +6,5 @@ xnu/out-*/
 # third-party and Apple sources fetched for reading
 research/
 __pycache__/
+# the helper VM image (installer/helper/build-*.sh)
+installer/helper/out/
