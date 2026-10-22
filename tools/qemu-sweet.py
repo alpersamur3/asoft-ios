@@ -365,7 +365,7 @@ def main():
                 time.sleep(0.2)
             if a.live_serial:
                 stream_serial_file(serial_file, serial_pos)
-            return 0
+            return p.returncode     # e.g. 1 when -loadvm could not resume the state
 
         t0 = time.time()
         while p.poll() is None and time.time() - t0 < a.secs:

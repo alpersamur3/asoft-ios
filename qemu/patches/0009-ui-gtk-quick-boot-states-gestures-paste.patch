@@ -1,0 +1,870 @@
+ui/gtk: quick boot, saved states, pause, gestures, pasted text
+
+For the ASoftware side bar (0006-0008):
+- quick-boot=on: closing the window saves the machine as the internal
+  snapshot "asoft-quick" (a Saving cover meanwhile) and quits. Started
+  with -loadvm asoft-quick it resumes and deletes that snapshot once it
+  runs, so a state is never resumed twice. A failed save shuts the guest
+  down instead. (A migration to a file would keep the window drawing,
+  but QEMU's file: migration does not work on Windows.)
+- STATE: Pause/Resume (a Paused cover; a click on it goes on), Save state
+  (internal snapshot "state-<time>", with a Saving cover), Saved states...
+  (restore or delete one).
+- App switcher: a touch gesture up from the bottom edge, held still.
+- The mouse wheel swipes where the pointer is: iOS has no wheel.
+- Paste text (Ctrl+V): the PC clipboard typed on the guest keyboard, a
+  US layout, printable ASCII; Ctrl+S screenshot, F11 full screen.
+Based on QEMU v11.1.2 with 0002-0008.
+
+--- a/qapi/ui.json
++++ b/qapi/ui.json
+@@ -1348,6 +1348,11 @@
+ #     Home, Lock, Volume (sent as F1-F4), Screenshot, Install .ipa
+ #     and Shut down.  Defaults to "off".  (Since 11.1)
+ #
++# @quick-boot: Closing the window saves the machine as the internal
++#     snapshot "asoft-quick" and quits; once a machine started with
++#     -loadvm asoft-quick runs, that snapshot is deleted, so a state
++#     is never resumed twice.  Defaults to "off".  (Since 11.1)
++#
+ # Since: 2.12
+ ##
+ { 'struct'  : 'DisplayGTK',
+@@ -1358,7 +1363,8 @@
+                 '*show-menubar'      : 'bool',
+                 '*keep-aspect-ratio' : 'bool',
+                 '*scale'             : 'number',
+-                '*sidebar'           : 'bool'  } }
++                '*sidebar'           : 'bool',
++                '*quick-boot'        : 'bool'  } }
+ 
+ ##
+ # @DisplayEGLHeadless:
+--- a/include/ui/gtk.h
++++ b/include/ui/gtk.h
+@@ -141,6 +141,29 @@
+     bool guest_display_off;
+     bool guest_display_was_off;
+     bool guest_display_armed;   /* on again after the off while booting */
++
++    /* quick boot and saved states (0009) */
++    bool quick_boot;            /* closing the window saves the state */
++    bool quick_cleared;
++    bool snapshot_busy;         /* a state is being saved or restored */
++    GtkWidget *sidebar_pause;
++    /* a cover over the guest display while it is paused or being saved */
++    GtkWidget *busy;
++    GtkWidget *busy_spinner;
++    GtkWidget *busy_title;
++    GtkWidget *busy_text;
++
++    /* touch gestures the side bar makes: app switcher, wheel as swipes */
++    GQueue *gesture;            /* of GdGestureStep */
++    guint gesture_timer;
++    bool gesture_down;          /* the gesture's finger touches */
++    bool mouse_down;            /* the real button: no gesture then */
++    double wheel_pending;       /* wheel steps not yet swiped, + = down */
++
++    /* text pasted from the PC, typed one character at a time */
++    char *paste;
++    size_t paste_pos;
++    guint paste_timer;
+     char *shots_dir;
+     char *ipa_dir;
+     GHashTable *ipas_pending;   /* .ipa name -> time copied (s) */
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -59,6 +59,9 @@
+ #include "ui/input.h"
+ #include "system/runstate.h"
+ #include "system/system.h"
++#include "migration/snapshot.h"
++#include "block/snapshot.h"
++#include "block/graph-lock.h"
+ #include "keymaps.h"
+ #include "chardev/char.h"
+ #include "qom/object.h"
+@@ -742,11 +745,23 @@
+ 
+ /** QEMU Events **/
+ 
++static gboolean gd_quick_clear(void *opaque);
++static void gd_sidebar_set_label(GtkWidget *button, const char *text);
++static void gd_busy_idle(GtkDisplayState *s);
++
+ static void gd_change_runstate(void *opaque, bool running, RunState state)
+ {
+     GtkDisplayState *s = opaque;
+ 
+     gd_update_caption(s);
++    if (s->sidebar_pause && (running || state == RUN_STATE_PAUSED)) {
++        gd_sidebar_set_label(s->sidebar_pause, running ? "Pause" : "Resume");
++        gd_busy_idle(s);            /* "Paused" on the screen, or nothing */
++    }
++    if (running && s->quick_boot && !s->quick_cleared) {
++        s->quick_cleared = true;
++        g_idle_add(gd_quick_clear, s);
++    }
+ }
+ 
+ static void gd_mouse_mode_change(Notifier *notify, void *data)
+@@ -1111,6 +1126,601 @@
+     gtk_widget_show(dialog);
+ }
+ 
++/** Side bar: gestures, pasted text, pause, saved states (qemu/patches/0009) **/
++
++/*
++ * Touch gestures made on the guest's tablet, for what a mouse cannot do: a
++ * queue of steps (where the finger is, as fractions of the guest display,
++ * whether it touches, how long until the next step) played from a timer.
++ */
++typedef struct GdGestureStep {
++    double x, y;
++    bool down;
++    guint ms;
++} GdGestureStep;
++
++static void gd_gesture_add(GtkDisplayState *s, double x, double y, bool down,
++                           guint ms)
++{
++    GdGestureStep *step = g_new(GdGestureStep, 1);
++
++    *step = (GdGestureStep){ CLAMP(x, 0, 0.999), CLAMP(y, 0, 0.999), down, ms };
++    if (!s->gesture) {
++        s->gesture = g_queue_new();
++    }
++    g_queue_push_tail(s->gesture, step);
++}
++
++static void gd_gesture_send(GtkDisplayState *s, double x, double y, bool down)
++{
++    VirtualConsole *vc = gd_vc_find_current(s);
++    int width, height;
++
++    if (!vc || vc->type != GD_VC_GFX || !vc->gfx.ds) {
++        return;
++    }
++    width = surface_width(vc->gfx.ds);
++    height = surface_height(vc->gfx.ds);
++    qemu_input_queue_abs(vc->gfx.dcl.con, INPUT_AXIS_X, x * width, 0, width);
++    qemu_input_queue_abs(vc->gfx.dcl.con, INPUT_AXIS_Y, y * height, 0, height);
++    if (down != s->gesture_down) {
++        qemu_input_queue_btn(vc->gfx.dcl.con, INPUT_BUTTON_LEFT, down);
++        s->gesture_down = down;
++    }
++    qemu_input_event_sync();
++}
++
++static void gd_wheel_swipe(GtkDisplayState *s);
++
++static gboolean gd_gesture_tick(void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    GdGestureStep *step = g_queue_pop_head(s->gesture);
++
++    s->gesture_timer = 0;
++    if (!step) {
++        gd_wheel_swipe(s);          /* wheel steps that came in meanwhile */
++        return G_SOURCE_REMOVE;
++    }
++    gd_gesture_send(s, step->x, step->y, step->down);
++    s->gesture_timer = g_timeout_add(MAX(step->ms, 1), gd_gesture_tick, s);
++    g_free(step);
++    return G_SOURCE_REMOVE;
++}
++
++static void gd_gesture_run(GtkDisplayState *s)
++{
++    if (!s->gesture_timer && s->gesture && !g_queue_is_empty(s->gesture)) {
++        s->gesture_timer = g_timeout_add(1, gd_gesture_tick, s);
++    }
++}
++
++/* The real mouse button goes down: the gesture under way stops, lifted. */
++static void gd_gesture_abort(GtkDisplayState *s)
++{
++    if (s->gesture) {
++        g_queue_clear_full(s->gesture, g_free);
++    }
++    if (s->gesture_timer) {
++        g_source_remove(s->gesture_timer);
++        s->gesture_timer = 0;
++    }
++    if (s->gesture_down) {
++        VirtualConsole *vc = gd_vc_find_current(s);
++
++        if (vc && vc->type == GD_VC_GFX) {
++            qemu_input_queue_btn(vc->gfx.dcl.con, INPUT_BUTTON_LEFT, false);
++            qemu_input_event_sync();
++        }
++        s->gesture_down = false;
++    }
++    s->wheel_pending = 0;
++}
++
++/*
++ * The mouse wheel as a touch swipe where the pointer is: iOS has no wheel.
++ * A wheel step moves the content WHEEL_SWIPE_STEP of the display; the swipe
++ * starts away from the edges, where a touch would be an edge gesture.
++ */
++#define WHEEL_SWIPE_STEP 0.06
++
++static void gd_wheel_swipe(GtkDisplayState *s)
++{
++    VirtualConsole *vc = gd_vc_find_current(s);
++    double x, y, y1, dist;
++    int i;
++
++    if (s->gesture_timer || s->mouse_down || s->wheel_pending == 0 ||
++        !vc || vc->type != GD_VC_GFX || !vc->gfx.ds) {
++        return;
++    }
++    dist = CLAMP(s->wheel_pending * WHEEL_SWIPE_STEP, -0.4, 0.4);
++    s->wheel_pending = 0;
++    x = CLAMP((double)s->last_x / surface_width(vc->gfx.ds), 0.08, 0.92);
++    y = CLAMP((double)s->last_y / surface_height(vc->gfx.ds), 0.1, 0.9);
++    /* wheel down shows what is below: the finger moves up */
++    y1 = y - dist;
++    if (y1 < 0.1) {
++        y += 0.1 - y1;
++        y1 = 0.1;
++    } else if (y1 > 0.9) {
++        y -= y1 - 0.9;
++        y1 = 0.9;
++    }
++    gd_gesture_add(s, x, y, true, 16);
++    for (i = 1; i <= 8; i++) {
++        gd_gesture_add(s, x, y + (y1 - y) * i / 8, true, 16);
++    }
++    gd_gesture_add(s, x, y1, false, 40);
++    gd_gesture_run(s);
++}
++
++/*
++ * iOS's app switcher: up from the bottom edge, then a pause before the lift.
++ * The pause is reported as touches that stay put: with no reports at all
++ * SpringBoard kept the last speed and went home instead.
++ */
++static void gd_sidebar_switcher(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    int i;
++
++    if (s->gesture_timer) {
++        return;
++    }
++    /* measured under TCG: 35 % of the height in 0.8 s, then 1.5 s still */
++    gd_gesture_add(s, 0.5, 0.995, true, 40);
++    for (i = 1; i <= 20; i++) {
++        gd_gesture_add(s, 0.5, 0.995 - 0.35 * i / 20, true, 40);
++    }
++    for (i = 0; i < 75; i++) {
++        gd_gesture_add(s, 0.5 + (i & 1) * 0.0005, 0.645, true, 20);
++    }
++    gd_gesture_add(s, 0.5, 0.645, false, 30);
++    gd_gesture_run(s);
++}
++
++/*
++ * Text from the PC's clipboard, typed on the guest's keyboard one character
++ * every PASTE_INTERVAL_MS. A US layout: printable ASCII, tabs and new lines;
++ * anything else is left out.
++ */
++#define PASTE_INTERVAL_MS 30
++#define PASTE_MAX 4000
++
++static bool gd_ascii_key(char c, unsigned int *key, bool *shift)
++{
++    static const char lower[] = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./";
++    static const char upper[] = "~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?";
++    static const unsigned char keys[] = {
++        KEY_GRAVE, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8,
++        KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL,
++        KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P,
++        KEY_LEFTBRACE, KEY_RIGHTBRACE, KEY_BACKSLASH,
++        KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L,
++        KEY_SEMICOLON, KEY_APOSTROPHE,
++        KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M,
++        KEY_COMMA, KEY_DOT, KEY_SLASH,
++    };
++    const char *p;
++
++    QEMU_BUILD_BUG_ON(sizeof(lower) - 1 != ARRAY_SIZE(keys));
++    QEMU_BUILD_BUG_ON(sizeof(upper) - 1 != ARRAY_SIZE(keys));
++    *shift = false;
++    switch (c) {
++    case ' ':
++        *key = KEY_SPACE;
++        return true;
++    case '\n':
++        *key = KEY_ENTER;
++        return true;
++    case '\t':
++        *key = KEY_TAB;
++        return true;
++    case '\0':
++        return false;
++    }
++    if ((p = strchr(lower, c))) {
++        *key = keys[p - lower];
++        return true;
++    }
++    if ((p = strchr(upper, c))) {
++        *key = keys[p - upper];
++        *shift = true;
++        return true;
++    }
++    return false;
++}
++
++static gboolean gd_paste_tick(void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    unsigned int key;
++    bool shift;
++
++    while (s->paste[s->paste_pos]) {
++        if (!gd_ascii_key(s->paste[s->paste_pos++], &key, &shift)) {
++            continue;
++        }
++        if (shift) {
++            qemu_input_event_send_key_linux(NULL, KEY_LEFTSHIFT, true);
++        }
++        qemu_input_event_send_key_linux(NULL, key, true);
++        qemu_input_event_send_key_delay(10);
++        qemu_input_event_send_key_linux(NULL, key, false);
++        if (shift) {
++            qemu_input_event_send_key_linux(NULL, KEY_LEFTSHIFT, false);
++        }
++        qemu_input_event_send_key_delay(10);
++        return G_SOURCE_CONTINUE;
++    }
++    g_clear_pointer(&s->paste, g_free);
++    s->paste_timer = 0;
++    return G_SOURCE_REMOVE;
++}
++
++static void gd_paste_received(GtkClipboard *clipboard, const char *text,
++                              void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    VirtualConsole *vc = gd_vc_find_current(s);
++    g_autofree char *said = NULL;
++    unsigned int key;
++    bool shift;
++    size_t i, typed = 0, left_out = 0;
++
++    if (!text || !*text) {
++        gd_sidebar_say(s, "The PC's clipboard has no text.");
++        return;
++    }
++    if (s->paste_timer) {
++        g_source_remove(s->paste_timer);
++        g_free(s->paste);
++    }
++    s->paste = g_strndup(text, PASTE_MAX);
++    s->paste_pos = 0;
++    for (i = 0; s->paste[i]; i++) {
++        if (gd_ascii_key(s->paste[i], &key, &shift)) {
++            typed++;
++        } else if (s->paste[i] != '\r' && ((unsigned char)s->paste[i] & 0xc0) != 0x80) {
++            left_out++;     /* a character, counted once (not a UTF-8 tail) */
++        }
++    }
++    /* Ctrl, still held for Ctrl+V, would make every character a shortcut */
++    if (vc && vc->type == GD_VC_GFX) {
++        qkbd_state_lift_all_keys(vc->gfx.kbd);
++    }
++    s->paste_timer = g_timeout_add(PASTE_INTERVAL_MS, gd_paste_tick, s);
++    said = left_out ? g_strdup_printf("Typing %zu characters; %zu left out "
++                                      "(only English letters, digits and "
++                                      "symbols).", typed, left_out)
++                    : g_strdup_printf("Typing %zu characters.", typed);
++    gd_sidebar_say(s, said);
++}
++
++static void gd_sidebar_paste(GtkButton *button, void *opaque)
++{
++    gtk_clipboard_request_text(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD),
++                               gd_paste_received, opaque);
++}
++
++static void gd_sidebar_full_screen(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++
++    gtk_menu_item_activate(GTK_MENU_ITEM(s->full_screen_item));
++}
++
++static void gd_sidebar_pause(GtkButton *button, void *opaque)
++{
++    Error *err = NULL;
++
++    if (runstate_is_running()) {
++        qmp_stop(NULL);
++    } else if (runstate_check(RUN_STATE_PAUSED)) {
++        qmp_cont(&err);
++        error_free(err);
++    }
++}
++
++/*
++ * A cover over the guest display that says what the machine is doing: paused
++ * (a click goes on), or saving or restoring a state (a spinner).
++ */
++static gboolean gd_busy_clicked(GtkWidget *widget, GdkEventButton *event,
++                                void *opaque)
++{
++    if (runstate_check(RUN_STATE_PAUSED)) {
++        gd_sidebar_pause(NULL, opaque);
++    }
++    return TRUE;
++}
++
++static void gd_create_busy(GtkDisplayState *s)
++{
++    GtkCssProvider *css = gtk_css_provider_new();
++    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
++
++    s->busy = gtk_event_box_new();
++    gtk_widget_set_name(s->busy, "asoft-busy");
++    gtk_css_provider_load_from_data(css,
++        "#asoft-busy { background-color: rgba(0, 0, 0, 0.72); }"
++        "#asoft-busy .title { color: #ffffff; font-size: 20px; font-weight: 600; }"
++        "#asoft-busy .text { color: #8e8e93; font-size: 13px; }"
++        "#asoft-busy spinner { color: #ffffff; }", -1, NULL);
++    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
++        GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
++    g_object_unref(css);
++    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
++    s->busy_spinner = gtk_spinner_new();
++    gtk_widget_set_size_request(s->busy_spinner, 36, 36);
++    s->busy_title = gtk_label_new(NULL);
++    s->busy_text = gtk_label_new(NULL);
++    gtk_label_set_justify(GTK_LABEL(s->busy_text), GTK_JUSTIFY_CENTER);
++    gtk_label_set_line_wrap(GTK_LABEL(s->busy_text), TRUE);
++    gtk_label_set_max_width_chars(GTK_LABEL(s->busy_text), 30);
++    gtk_style_context_add_class(gtk_widget_get_style_context(s->busy_title), "title");
++    gtk_style_context_add_class(gtk_widget_get_style_context(s->busy_text), "text");
++    gtk_box_pack_start(GTK_BOX(box), s->busy_spinner, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(box), s->busy_title, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(box), s->busy_text, FALSE, FALSE, 0);
++    gtk_container_add(GTK_CONTAINER(s->busy), box);
++    gtk_widget_show_all(box);
++    gtk_widget_set_no_show_all(s->busy, TRUE);
++    g_signal_connect(s->busy, "button-press-event",
++                     G_CALLBACK(gd_busy_clicked), s);
++}
++
++static void gd_busy_show(GtkDisplayState *s, const char *title,
++                         const char *text, bool spinning)
++{
++    if (!s->busy) {
++        return;
++    }
++    gtk_label_set_text(GTK_LABEL(s->busy_title), title);
++    gtk_label_set_text(GTK_LABEL(s->busy_text), text);
++    gtk_widget_set_visible(s->busy_spinner, spinning);
++    if (spinning) {
++        gtk_spinner_start(GTK_SPINNER(s->busy_spinner));
++    } else {
++        gtk_spinner_stop(GTK_SPINNER(s->busy_spinner));
++    }
++    gtk_widget_show(s->busy);
++}
++
++static void gd_busy_hide(GtkDisplayState *s)
++{
++    if (s->busy) {
++        gtk_spinner_stop(GTK_SPINNER(s->busy_spinner));
++        gtk_widget_hide(s->busy);
++    }
++}
++
++/* What the cover shows when nothing is being saved: Paused, or nothing. */
++static void gd_busy_idle(GtkDisplayState *s)
++{
++    if (s->snapshot_busy) {
++        return;
++    }
++    if (runstate_check(RUN_STATE_PAUSED)) {
++        gd_busy_show(s, "Paused", "Click here or press Resume to go on.", false);
++    } else {
++        gd_busy_hide(s);
++    }
++}
++
++/*
++ * Saved states: internal snapshots of the machine (devices, memory, disks) in
++ * its qcow2 disk, named "state-<time>". QEMU saves and loads them in its main
++ * loop, so the window stands still meanwhile: the cover says so first.
++ */
++#define QUICK_BOOT_SNAPSHOT "asoft-quick"
++
++typedef struct GdSnapshotJob {
++    GtkDisplayState *s;
++    char *name;
++    int what;           /* 0 save, 1 load, 2 delete, 3 save and quit */
++} GdSnapshotJob;
++
++static gboolean gd_snapshot_run(void *opaque)
++{
++    GdSnapshotJob *job = opaque;
++    GtkDisplayState *s = job->s;
++    Error *err = NULL;
++    g_autofree char *said = NULL;
++    RunState state;
++    bool ok;
++
++    switch (job->what) {
++    case 1:
++        state = runstate_get();
++        vm_stop(RUN_STATE_RESTORE_VM);
++        ok = load_snapshot(job->name, NULL, false, NULL, &err);
++        if (ok) {
++            load_snapshot_resume(state);
++        }
++        break;
++    case 2:
++        ok = delete_snapshot(job->name, false, NULL, &err);
++        break;
++    case 3:
++        /* stopped first, so the guest does not run on after the snapshot */
++        state = runstate_get();
++        vm_stop(RUN_STATE_PAUSED);
++        ok = save_snapshot(job->name, true, NULL, false, NULL, &err);
++        if (ok) {
++            qmp_quit(NULL);         /* the cover stays until the end */
++            g_free(job->name);
++            g_free(job);
++            return G_SOURCE_REMOVE;
++        }
++        if (state == RUN_STATE_RUNNING) {
++            vm_start();
++        }
++        break;
++    default:
++        ok = save_snapshot(job->name, true, NULL, false, NULL, &err);
++        break;
++    }
++    said = ok ? g_strdup(job->what == 0 ? "State saved." :
++                         job->what == 1 ? "State restored." : "State deleted.")
++              : g_strdup_printf(job->what == 3 ? "Could not save the state (%s);"
++                                " shutting down instead." : "Failed: %s",
++                                error_get_pretty(err));
++    gd_sidebar_say(s, said);
++    s->snapshot_busy = false;
++    gd_busy_idle(s);
++    if (!ok && job->what == 3) {
++        gd_powerdown(s);
++    }
++    error_free(err);
++    g_free(job->name);
++    g_free(job);
++    return G_SOURCE_REMOVE;
++}
++
++/* After 150 ms, so that the cover is drawn before the window stands still. */
++static void gd_snapshot_job(GtkDisplayState *s, const char *name, int what,
++                            const char *title)
++{
++    GdSnapshotJob *job;
++
++    if (s->snapshot_busy) {
++        return;
++    }
++    job = g_new0(GdSnapshotJob, 1);
++    job->s = s;
++    job->name = g_strdup(name);
++    job->what = what;
++    s->snapshot_busy = true;
++    gd_sidebar_say(s, title);
++    gd_busy_show(s, title, what == 3 ? "Closing when it is saved." :
++                 "This takes a moment; the window stands still meanwhile.",
++                 true);
++    g_timeout_add(150, gd_snapshot_run, job);
++}
++
++static void gd_sidebar_save_state(GtkButton *button, void *opaque)
++{
++    g_autoptr(GDateTime) now = g_date_time_new_now_local();
++    g_autofree char *name = g_date_time_format(now, "state-%Y%m%d-%H%M%S");
++
++    gd_snapshot_job(opaque, name, 0, "Saving the state…");
++}
++
++static void gd_states_answered(GtkDialog *dialog, gint response, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    GtkListBox *list = g_object_get_data(G_OBJECT(dialog), "list");
++    GtkListBoxRow *row = gtk_list_box_get_selected_row(list);
++    const char *name = row ? g_object_get_data(G_OBJECT(row), "name") : NULL;
++
++    if (name && response == 1) {
++        gd_snapshot_job(s, name, 1, "Restoring the state…");
++    } else if (name && response == 2) {
++        gd_snapshot_job(s, name, 2, "Deleting the state…");
++    }
++    gtk_widget_destroy(GTK_WIDGET(dialog));
++}
++
++static void gd_sidebar_states(GtkButton *button, void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    QEMUSnapshotInfo *sn_tab = NULL;
++    BlockDriverState *bs;
++    GtkWidget *dialog, *list, *content;
++    Error *err = NULL;
++    int i, n = 0, shown = 0;
++
++    {
++        GRAPH_RDLOCK_GUARD_MAINLOOP();
++
++        bs = bdrv_all_find_vmstate_bs(NULL, false, NULL, &err);
++        if (bs) {
++            n = bdrv_snapshot_list(bs, &sn_tab);
++        }
++    }
++    if (!bs) {
++        g_autofree char *said = g_strdup_printf("No saved states here: %s",
++                                                error_get_pretty(err));
++        gd_sidebar_say(s, said);
++        error_free(err);
++        return;
++    }
++    /* the quick boot's own state is not one of them */
++    for (i = 0; i < n; i++) {
++        shown += strcmp(sn_tab[i].name, QUICK_BOOT_SNAPSHOT) != 0;
++    }
++    if (!shown) {
++        g_free(sn_tab);
++        gd_sidebar_say(s, "No saved states yet: Save state makes one.");
++        return;
++    }
++
++    dialog = gtk_dialog_new_with_buttons("Saved states", GTK_WINDOW(s->window),
++                                         GTK_DIALOG_DESTROY_WITH_PARENT,
++                                         "_Delete", 2, "_Cancel",
++                                         GTK_RESPONSE_CANCEL, "_Restore", 1,
++                                         NULL);
++    list = gtk_list_box_new();
++    for (i = n - 1; i >= 0; i--) {     /* the newest first */
++        g_autoptr(GDateTime) when = NULL;
++        g_autofree char *date = NULL, *text = NULL;
++        GtkWidget *label;
++
++        if (!strcmp(sn_tab[i].name, QUICK_BOOT_SNAPSHOT)) {
++            continue;
++        }
++        when = g_date_time_new_from_unix_local(sn_tab[i].date_sec);
++        date = g_date_time_format(when, "%d %b %Y, %H:%M:%S");
++        text = g_strdup_printf("%s  ·  %.1f GB", date,
++                               sn_tab[i].vm_state_size / 1e9);
++        label = gtk_label_new(text);
++        gtk_label_set_xalign(GTK_LABEL(label), 0);
++        gtk_widget_set_margin_start(label, 10);
++        gtk_widget_set_margin_end(label, 10);
++        gtk_widget_set_margin_top(label, 6);
++        gtk_widget_set_margin_bottom(label, 6);
++        gtk_list_box_insert(GTK_LIST_BOX(list), label, -1);
++        g_object_set_data_full(G_OBJECT(gtk_widget_get_parent(label)), "name",
++                               g_strdup(sn_tab[i].name), g_free);
++    }
++    g_free(sn_tab);
++    gtk_list_box_select_row(GTK_LIST_BOX(list),
++                            gtk_list_box_get_row_at_index(GTK_LIST_BOX(list), 0));
++    content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
++    gtk_container_set_border_width(GTK_CONTAINER(content), 8);
++    gtk_box_pack_start(GTK_BOX(content), list, TRUE, TRUE, 0);
++    g_object_set_data(G_OBJECT(dialog), "list", list);
++    g_signal_connect(dialog, "response", G_CALLBACK(gd_states_answered), s);
++    gtk_widget_set_size_request(dialog, 320, -1);
++    gtk_widget_show_all(dialog);
++}
++
++/*
++ * Quick boot: closing the window saves the machine as the internal snapshot
++ * QUICK_BOOT_SNAPSHOT and quits (gd_snapshot_run, what 3); the launcher starts
++ * it next time with -loadvm of it. Once that machine runs, the snapshot goes:
++ * the disk goes on from there, so a state is never resumed twice.
++ */
++static gboolean gd_quick_clear(void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    Error *err = NULL;
++
++    if (bdrv_all_has_snapshot(QUICK_BOOT_SNAPSHOT, false, NULL, &err) == 1 &&
++        delete_snapshot(QUICK_BOOT_SNAPSHOT, false, NULL, &err)) {
++        gd_sidebar_say(s, "Resumed where it was closed.");
++    }
++    if (err) {
++        g_autofree char *said = g_strdup_printf("The quick boot state stays: "
++                                                "%s", error_get_pretty(err));
++        gd_sidebar_say(s, said);
++        error_free(err);
++    }
++    return G_SOURCE_REMOVE;
++}
++
+ /*
+  * ASoftware's look: its logo (asoftware.png next to the executable) as the window
+  * icon and atop the side bar, which follows the dark style of the iOS it shows:
+@@ -1252,19 +1862,25 @@
+     s->sidebar_lock = gd_sidebar_button(s, group, "Lock", "F2",
+                                         "Side button: lock (F2)",
+                                         G_CALLBACK(gd_sidebar_key), KEY_F2);
++    gd_sidebar_button(s, group, "App switcher", NULL,
++                      "Swipe up from the bottom edge and hold",
++                      G_CALLBACK(gd_sidebar_switcher), 0);
+     gd_sidebar_button(s, group, "Volume up", "F4", "Volume up (F4)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F4);
+     gd_sidebar_button(s, group, "Volume down", "F3", "Volume down (F3)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F3);
+ 
+     group = gd_sidebar_group(s, "SCREEN");
+-    gd_sidebar_button(s, group, "Screenshot", NULL, "Save the screen as a PNG",
++    gd_sidebar_button(s, group, "Screenshot", "Ctrl+S",
++                      "Save the screen as a PNG (Ctrl+S)",
+                       G_CALLBACK(gd_sidebar_screenshot), 0);
++    gd_sidebar_button(s, group, "Full screen", "F11", "Full screen (F11)",
++                      G_CALLBACK(gd_sidebar_full_screen), 0);
+     gd_sidebar_button(s, group, "Screenshots folder", NULL,
+                       "Open the folder the screenshots go to",
+                       G_CALLBACK(gd_sidebar_open_shots), 0);
+ 
+-    group = gd_sidebar_group(s, "APPS");
++    group = gd_sidebar_group(s, "APPS AND TEXT");
+     install = gd_sidebar_button(s, group, "Install .ipa…", NULL,
+                                 "Copy .ipa files to the guest, which "
+                                 "installs them",
+@@ -1274,9 +1890,27 @@
+         gtk_widget_set_sensitive(install, FALSE);
+         gtk_widget_set_tooltip_text(install, "ASOFT_IPA_DIR is not set");
+     }
++    gd_sidebar_button(s, group, "Paste text", "Ctrl+V",
++                      "Type the text on the PC's clipboard (Ctrl+V)",
++                      G_CALLBACK(gd_sidebar_paste), 0);
++
++    group = gd_sidebar_group(s, "STATE");
++    s->sidebar_pause = gd_sidebar_button(s, group, "Pause", NULL,
++                                         "Stop the guest where it is, or go on",
++                                         G_CALLBACK(gd_sidebar_pause), 0);
++    gd_sidebar_button(s, group, "Save state", NULL,
++                      "Save the whole machine as it is now",
++                      G_CALLBACK(gd_sidebar_save_state), 0);
++    gd_sidebar_button(s, group, "Saved states…", NULL,
++                      "Go back to a saved state, or delete one",
++                      G_CALLBACK(gd_sidebar_states), 0);
+ 
+     group = gd_sidebar_group(s, "POWER");
+     s->sidebar_power = gd_sidebar_button(s, group, "Shut down", NULL,
++                                         s->quick_boot ?
++                                         "Shut the guest down (closing the "
++                                         "window saves its state instead); "
++                                         "pressed again, quit QEMU" :
+                                          "Power the guest down; pressed "
+                                          "again, quit QEMU",
+                                          G_CALLBACK(gd_sidebar_power), 0);
+@@ -1342,6 +1976,15 @@
+ {
+     GtkDisplayState *s = opaque;
+ 
++    /* quick-boot=on: save the machine, then quit; the next start resumes it */
++    if (s->quick_boot && !s->powerdown_requested && !s->snapshot_busy &&
++        (runstate_is_running() || runstate_check(RUN_STATE_PAUSED))) {
++        gd_snapshot_job(s, QUICK_BOOT_SNAPSHOT, 3, "Saving the state…");
++        return TRUE;
++    }
++    if (s->snapshot_busy) {
++        return TRUE;                /* QEMU stands still until it is done */
++    }
+     if (s->opts->has_window_close && !s->opts->window_close &&
+         !s->powerdown_requested) {
+         gd_powerdown(s);
+@@ -1739,6 +2382,13 @@
+         return TRUE;
+     }
+ 
++    if (btn == INPUT_BUTTON_LEFT) {
++        /* a real touch ends any gesture the side bar is making */
++        if (button->type == GDK_BUTTON_PRESS && (s->gesture_timer || s->gesture_down)) {
++            gd_gesture_abort(s);
++        }
++        s->mouse_down = button->type == GDK_BUTTON_PRESS;
++    }
+     qemu_input_queue_btn(vc->gfx.dcl.con, btn,
+                          button->type == GDK_BUTTON_PRESS);
+     qemu_input_event_sync();
+@@ -1754,6 +2404,23 @@
+     bool has_vertical = false;
+     bool has_horizontal = false;
+ 
++    /* with the side bar the guest is a phone: the wheel swipes */
++    if (vc->s->sidebar && qemu_input_is_absolute(vc->gfx.dcl.con)) {
++        gdouble delta_x, delta_y;
++
++        if (scroll->direction == GDK_SCROLL_UP) {
++            vc->s->wheel_pending -= 1;
++        } else if (scroll->direction == GDK_SCROLL_DOWN) {
++            vc->s->wheel_pending += 1;
++        } else if (scroll->direction == GDK_SCROLL_SMOOTH &&
++                   gdk_event_get_scroll_deltas((GdkEvent *)scroll,
++                                               &delta_x, &delta_y)) {
++            vc->s->wheel_pending += delta_y;
++        }
++        gd_wheel_swipe(vc->s);
++        return TRUE;
++    }
++
+     if (scroll->direction == GDK_SCROLL_UP) {
+         btn_vertical = INPUT_BUTTON_WHEEL_UP;
+         has_vertical = true;
+@@ -1988,6 +2655,26 @@
+         return TRUE;
+     }
+ 
++    /* the side bar's keys: F11 full screen, Ctrl+S screenshot, Ctrl+V paste */
++    if (vc->s->sidebar && key->type == GDK_KEY_PRESS) {
++        guint lower = gdk_keyval_to_lower(key->keyval);
++        bool ctrl = (key->state & GDK_CONTROL_MASK) &&
++                    !(key->state & (GDK_MOD1_MASK | GDK_SHIFT_MASK));
++
++        if (key->keyval == GDK_KEY_F11) {
++            gd_sidebar_full_screen(NULL, vc->s);
++            return TRUE;
++        }
++        if (ctrl && lower == GDK_KEY_s) {
++            gd_sidebar_screenshot(NULL, vc->s);
++            return TRUE;
++        }
++        if (ctrl && lower == GDK_KEY_v) {
++            gd_sidebar_paste(NULL, vc->s);
++            return TRUE;
++        }
++    }
++
+     keycode = gd_get_keycode(key);
+     lnx = gd_map_keycode(keycode);
+ 
+@@ -3415,12 +4102,20 @@
+     gd_update_caption(s);
+ 
+     s->hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
++    s->quick_boot = opts->u.gtk.has_quick_boot && opts->u.gtk.quick_boot;
++    if (s->quick_boot && runstate_is_running()) {
++        /* -loadvm resumed the machine before the display was up */
++        s->quick_cleared = true;
++        g_idle_add(gd_quick_clear, s);
++    }
+     if (opts->u.gtk.has_sidebar && opts->u.gtk.sidebar) {
+         gd_create_sidebar(s);
+         gd_create_screen_off(s);
++        gd_create_busy(s);
+         s->overlay = gtk_overlay_new();
+         gtk_container_add(GTK_CONTAINER(s->overlay), s->notebook);
+         gtk_overlay_add_overlay(GTK_OVERLAY(s->overlay), s->screen_off);
++        gtk_overlay_add_overlay(GTK_OVERLAY(s->overlay), s->busy);
+         gtk_box_pack_start(GTK_BOX(s->hbox), s->overlay, TRUE, TRUE, 0);
+         gtk_box_pack_end(GTK_BOX(s->hbox), s->sidebar, FALSE, FALSE, 0);
+     } else {
