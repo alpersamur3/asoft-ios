@@ -18,13 +18,14 @@ param(
     # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake); 0103 sets the
     # clock from the host's after a pause or a quick boot
     [string]$Kernel = "$PSScriptRoot\..\xnu\out-0103\kernel.development.sweet",
-    # New user disks start from v4. Layers, each an overlay on the one before (never write a layer
+    # New user disks start from v5. Layers, each an overlay on the one before (never write a layer
     # that others sit on): the base image as built; v2, its LaunchServices database rebuilt with
     # kernel 0099 so wallpaper posters and widgets are registered; v3, asoftinstalld that starts at
-    # boot; v4, the asoftinstalld that also sets the time zone and keeps the display from dimming
+    # boot; v4, the asoftinstalld that also sets the time zone and keeps the display from dimming;
+    # v5, tools/sweet-root-tweaks.py again (no driverkitd, no crash-looping plug-ins)
     # The installer's disk is ios16-base.qcow2 (installer/Install-ASoftware.ps1).
     [string]$Disk = $(if (Test-Path "$Work\root\ios16-base.qcow2") { "$Work\root\ios16-base.qcow2" }
-                      else { "$Work\root\ios16-root-20H392-v4.qcow2" }),
+                      else { "$Work\root\ios16-root-20H392-v5.qcow2" }),
     # gl=on: the GPU scales the 1080x2400 frame; plain gtk scales it on the QEMU main loop and
     # made the whole boot ~3.4x slower (scripts/dev/bench.py, 2026-10-21)
     # show-cursor: QEMU hides the host pointer over an absolute (tablet) input and expects the
