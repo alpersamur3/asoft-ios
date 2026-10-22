@@ -6,12 +6,21 @@
 // ../Installed or, after three failed attempts, to ../Failed, with NAME.ipa.log
 // saying what happened. Every message also goes to stderr, which the job sends to
 // /dev/console (the kernel log on the serial port).
+//
+// It also asks the host: scripts/ipa-server.py (started by the Windows launcher)
+// serves a Windows folder at 10.0.2.2:8765, QEMU's user network address of the
+// host. Each .ipa listed there is fetched into the inbox and its result posted back.
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <zlib.h>
 
 static NSString *const kRoot = @"/private/var/mobile/Media/Sweet";
 static const int kAttempts = 3;
+static const char *const kHost = "10.0.2.2";
+static const uint16_t kPort = 8765;
 
 static void
 say(NSString *format, ...)
@@ -147,6 +156,113 @@ finish(NSFileManager *fm, NSString *src, NSString *name, NSString *where, NSStri
 	    atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
+static BOOL
+sendAll(int fd, NSData *data)
+{
+	const uint8_t *p = data.bytes;
+	for (size_t left = data.length; left > 0;) {
+		ssize_t n = send(fd, p, left, 0);
+		if (n <= 0) {
+			return NO;
+		}
+		p += n;
+		left -= (size_t)n;
+	}
+	return YES;
+}
+
+// A minimal HTTP/1.0 client on a plain socket (no CFNetwork, so no App Transport
+// Security): ipa-server.py closes the connection after each reply. Returns the
+// body and sets *status, or nil when the host cannot be reached.
+static NSData *
+http(NSString *method, NSString *path, NSData *body, int timeout, int *status)
+{
+	*status = 0;
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0) {
+		return nil;
+	}
+	struct timeval tv = {.tv_sec = timeout};
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	struct sockaddr_in sa = {.sin_len = sizeof(sa), .sin_family = AF_INET, .sin_port = htons(kPort)};
+	inet_pton(AF_INET, kHost, &sa.sin_addr);
+	NSMutableData *response = nil;
+	if (connect(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0) {
+		NSString *head = [NSString stringWithFormat:@"%@ %@ HTTP/1.0\r\nHost: %s\r\nContent-Length: %lu\r\n\r\n",
+		    method, path, kHost, (unsigned long)body.length];
+		NSMutableData *request = [[head dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+		if (body) {
+			[request appendData:body];
+		}
+		if (sendAll(fd, request)) {
+			response = [NSMutableData data];
+			uint8_t buf[65536];
+			ssize_t n;
+			while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) {
+				[response appendBytes:buf length:(NSUInteger)n];
+			}
+			if (n < 0) {
+				response = nil;
+			}
+		}
+	}
+	close(fd);
+	NSData *crlf2 = [@"\r\n\r\n" dataUsingEncoding:NSASCIIStringEncoding];
+	NSRange end = response ? [response rangeOfData:crlf2 options:0 range:NSMakeRange(0, response.length)]
+	                       : NSMakeRange(NSNotFound, 0);
+	if (end.location == NSNotFound) {
+		return nil;
+	}
+	NSString *head = [[NSString alloc] initWithData:[response subdataWithRange:NSMakeRange(0, end.location)]
+	    encoding:NSISOLatin1StringEncoding];
+	NSArray<NSString *> *words = [head componentsSeparatedByString:@" "];
+	*status = words.count > 1 ? words[1].intValue : 0;
+	return [response subdataWithRange:NSMakeRange(NSMaxRange(end), response.length - NSMaxRange(end))];
+}
+
+static NSString *
+urlName(NSString *name)
+{
+	NSMutableCharacterSet *allowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
+	[allowed removeCharactersInString:@"/?#%"];
+	return [name stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+}
+
+// Fetch the .ipa files the host lists into the inbox; remembers them in fromHost.
+static void
+fetchFromHost(NSString *inbox, NSMutableSet<NSString *> *fromHost)
+{
+	int status;
+	NSData *list = http(@"GET", @"/list", nil, 5, &status);
+	if (!list || status != 200) {
+		return;
+	}
+	NSString *names = [[NSString alloc] initWithData:list encoding:NSUTF8StringEncoding];
+	for (NSString *name in [names componentsSeparatedByString:@"\n"]) {
+		if (![name.pathExtension.lowercaseString isEqualToString:@"ipa"] || [name containsString:@"/"] ||
+		    [name hasPrefix:@"."] || [fromHost containsObject:name]) {
+			continue;
+		}
+		NSData *ipa = http(@"GET", [@"/ipa/" stringByAppendingString:urlName(name)], nil, 60, &status);
+		if (ipa && status == 200 && [ipa writeToFile:[inbox stringByAppendingPathComponent:name] atomically:YES]) {
+			say(@"%@: fetched from the host (%lu bytes)", name, (unsigned long)ipa.length);
+			[fromHost addObject:name];
+		}
+	}
+}
+
+static void
+reportToHost(NSString *name, NSString *result, NSMutableSet<NSString *> *fromHost)
+{
+	if ([fromHost containsObject:name]) {
+		int status;
+		http(@"POST", [@"/done/" stringByAppendingString:urlName(name)],
+		    [result dataUsingEncoding:NSUTF8StringEncoding], 10, &status);
+		[fromHost removeObject:name];
+	}
+}
+
 int
 main(void)
 {
@@ -156,9 +272,11 @@ main(void)
 		[fm createDirectoryAtPath:inbox withIntermediateDirectories:YES
 		    attributes:@{NSFilePosixPermissions: @0777} error:nil];
 		NSMutableDictionary<NSString *, NSNumber *> *attempts = [NSMutableDictionary dictionary];
-		say(@"watching %@", inbox);
+		NSMutableSet<NSString *> *fromHost = [NSMutableSet set];
+		say(@"watching %@ and http://%s:%u/list", inbox, kHost, kPort);
 		for (;;) {
 			@autoreleasepool {
+				fetchFromHost(inbox, fromHost);
 				for (NSString *name in [fm contentsOfDirectoryAtPath:inbox error:nil]) {
 					if (![name.pathExtension.lowercaseString isEqualToString:@"ipa"]) {
 						continue;
@@ -171,12 +289,14 @@ main(void)
 					if (install(src, &error)) {
 						say(@"%@: installed", name);
 						finish(fm, src, name, @"Installed", @"installed");
+						reportToHost(name, @"installed", fromHost);
 						[attempts removeObjectForKey:name];
 					} else {
 						NSString *result = [NSString stringWithFormat:@"failed: %@", error];
 						say(@"%@: %@", name, result);
 						if (n >= kAttempts) {
 							finish(fm, src, name, @"Failed", result);
+							reportToHost(name, result, fromHost);
 							[attempts removeObjectForKey:name];
 						}
 					}
