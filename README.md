@@ -24,7 +24,7 @@ for QEMU's virtual hardware.
 | Power | Closing the window shuts iOS down cleanly (sync, unmount, power off) |
 | Storage | What iOS writes is kept in a per-user disk layered on the built image |
 | Window | Sized to the phone's shape, with a side bar: Home, Lock/Wake, Volume, Screenshot, Install .ipa, Shut down; a Screen off cover while iOS has the display off |
-| Clock | The PC's time zone; the lock screen does not dim or lock by itself |
+| Clock | The PC's time zone, region format and 12/24-hour clock (until changed in iOS's Settings); the lock screen does not dim or lock by itself |
 
 Not yet: audio, GPU acceleration, the App Store and other Apple services.
 

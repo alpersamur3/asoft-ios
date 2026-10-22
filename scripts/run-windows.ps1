@@ -48,8 +48,12 @@ param(
     # the v3 disk) fetches them through scripts\ipa-server.py and installs them; results land in
     # Installed\ or Failed\ with a .log
     [string]$IpaDir = "$Work\ipa",
-    # iOS's time zone as an IANA name (Europe/Istanbul); default the PC's. asoftinstalld sets it
-    [string]$TimeZone = ''
+    # iOS's time zone (IANA name, Europe/Istanbul), region (TR) and clock (24 or 12); default the
+    # PC's. asoftinstalld applies each when it differs from what it applied last, so a change
+    # made in iOS's Settings stays until the PC's own setting changes
+    [string]$TimeZone = '',
+    [string]$Region = '',
+    [ValidateSet('', '12', '24')] [string]$Clock = ''
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $TmpDir | Out-Null
@@ -114,6 +118,13 @@ public static extern int ucal_getTimeZoneIDForWindowsID(string winid, int len, s
 # -cmatch: a case-insensitive -match lowercases with the PC's culture, and in Turkish the I of
 # Istanbul becomes a dotless ı, which [a-z] does not hold
 if ($TimeZone -cmatch '^[A-Za-z0-9_+/-]+$') { $bootArgs += " asoft_tz=$TimeZone" }
+# Region and clock from the PC's region format (Settings > Time & language > Region):
+# tr-TR -> TR, a short time pattern with H (HH:mm) -> 24-hour
+$culture = Get-Culture
+if (-not $Region) { $Region = ($culture.Name -split '-')[-1] }
+if (-not $Clock) { $Clock = if ($culture.DateTimeFormat.ShortTimePattern -cmatch 'H') { '24' } else { '12' } }
+if ($Region -cmatch '^([A-Z]{2}|[0-9]{3})$') { $bootArgs += " asoft_region=$Region" }
+$bootArgs += " asoft_clock=$Clock"
 
 Push-Location $repo
 $ipaServer = $null
