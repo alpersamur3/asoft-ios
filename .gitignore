@@ -8,3 +8,5 @@ research/
 __pycache__/
 # the helper VM image (installer/helper/build-*.sh)
 installer/helper/out/
+# release packages (installer/Make-Release.ps1)
+release/

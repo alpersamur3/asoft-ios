@@ -50,12 +50,16 @@ Not yet: audio, GPU acceleration, the App Store and Apple ID services.
 
 ## Install
 
+In PowerShell (no admin rights needed):
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\Install-ASoftware.ps1
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-ios/releases/latest/download/Get-ASoftware.ps1 | iex"
 ```
 
-The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` unless you give
-`-Dir`) and resumes where it stopped when run again:
+Or download `ASoftware-iOS-*-win64.zip` from [Releases](https://github.com/alpersamur3/asoft-ios/releases),
+extract it and run `Install-ASoftware.cmd`. It takes about an hour, once (see below), and puts
+everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` unless you give `-Dir`); run again,
+it resumes where it stopped:
 
 1. the app, our QEMU build and Python
 2. iOS 16.7.16 for the iPhone X, 6.2 GB from Apple (or `-Ipsw` with one you have), and the
@@ -64,9 +68,9 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 4. iOS's first start, which sets up its app database once (20-30 min)
 5. a desktop shortcut
 
-> [!IMPORTANT]
-> The installer is a preview: it does not download our QEMU build yet. Give it one with
-> `-QemuDist` (built by `qemu/build-windows.sh` or the `qemu-win` workflow).
+Measured on a 16-core laptop CPU (i7-13700HX): the disk 22 min, the first start 21 min, the rest a minute or
+two, plus the 6.2 GB download (about 9 min at 100 Mbit/s). A 4-core CPU takes longer. After that
+iOS starts in seconds with quick boot.
 
 ## Use
 
@@ -175,12 +179,16 @@ Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
 
 ### Kurulum
 
+PowerShell'de (yönetici izni gerekmez):
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File installer\Install-ASoftware.ps1
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-ios/releases/latest/download/Get-ASoftware.ps1 | iex"
 ```
 
-Kurulum programı her şeyi tek klasöre koyar (`-Dir` verilmezse `%LOCALAPPDATA%\ASoftware iOS`) ve
-yeniden çalıştırılınca kaldığı yerden devam eder:
+Ya da [Releases](https://github.com/alpersamur3/asoft-ios/releases) sayfasından
+`ASoftware-iOS-*-win64.zip` dosyasını indirip açın ve `Install-ASoftware.cmd`'yi çalıştırın. Kurulum
+bir kez, yaklaşık bir saat sürer (aşağıda). Her şeyi tek klasöre koyar (`-Dir` verilmezse
+`%LOCALAPPDATA%\ASoftware iOS`); yeniden çalıştırılınca kaldığı yerden devam eder:
 
 1. uygulama, QEMU derlememiz ve Python
 2. iPhone X için iOS 16.7.16, Apple'dan 6,2 GB (ya da elinizdekiyle `-Ipsw`) ve içinden
@@ -189,9 +197,9 @@ yeniden çalıştırılınca kaldığı yerden devam eder:
 4. iOS'un ilk açılışı; uygulama veritabanını bir kez kurar (20-30 dk)
 5. masaüstü kısayolu
 
-> [!IMPORTANT]
-> Kurulum programı önizleme sürümünde: QEMU derlememizi henüz kendisi indirmiyor. `-QemuDist`
-> ile bir derleme verin (`qemu/build-windows.sh` ya da `qemu-win` workflow'u üretir).
+16 çekirdekli bir dizüstü işlemcisinde (i7-13700HX) ölçülen: disk 22 dk, ilk açılış 21 dk, gerisi bir iki dakika,
+artı 6,2 GB indirme (100 Mbit/s'de yaklaşık 9 dk). 4 çekirdekli işlemcide daha uzun sürer. Sonrasında
+iOS hızlı açılışla saniyeler içinde açılır.
 
 ### Kullanım
 

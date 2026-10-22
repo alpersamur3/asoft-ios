@@ -12,8 +12,10 @@
 param(
     [string]$Dir = "$env:LOCALAPPDATA\ASoftware iOS",
     [string]$Ipsw = '',
-    # our QEMU build with its DLLs (qemu/build-windows.sh's dist, or the qemu-win workflow artifact)
-    [string]$QemuDist = $(if ($env:ASOFT_WORK) { "$env:ASOFT_WORK\qemu\v11.1.2-asoft" } else { '' }),
+    # our QEMU build with its DLLs: the release package's qemu\bin, else qemu/build-windows.sh's
+    # dist or the qemu-win workflow artifact
+    [string]$QemuDist = $(if (Test-Path "$PSScriptRoot\..\qemu\bin\qemu-system-aarch64.exe") { "$PSScriptRoot\..\qemu\bin" }
+                          elseif ($env:ASOFT_WORK) { "$env:ASOFT_WORK\qemu\v11.1.2-asoft" } else { '' }),
     [int]$Cpus = 4,
     # keep the downloaded IPSW once the iOS disk is built (6.2 GB; it can be downloaded again)
     [switch]$KeepIpsw,
