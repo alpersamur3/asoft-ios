@@ -1,10 +1,8 @@
-# device dumps: persist/modemst/fsg hold IMEI + calibration; live DT holds the serial
-backup/
-dtb/
-recovery/
-# third-party/Apple sources fetched for reading
-research/
-shim/out/
+# QEMU, iOS disks, runs, .ipa folder (scripts/run-windows.ps1 -Work, ASOFT_WORK)
+work/
+# kernels from the xnu workflow
 xnu/out/
 xnu/out-*/
+# third-party and Apple sources fetched for reading
+research/
 __pycache__/
