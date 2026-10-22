@@ -73,6 +73,9 @@ job = {
     'ProgramArguments': ['/usr/libexec/sweetinstalld'],
     'RunAtLoad': True,
     'KeepAlive': True,
+    # Without it launchd starts the job as a background process: while iOS boots its
+    # xpcproxy got so little CPU that sweetinstalld ran only 2.5-3.5 min after launch.
+    'ProcessType': 'Interactive',
     'UserName': 'root',
     'StandardOutPath': '/dev/console',
     'StandardErrorPath': '/dev/console',

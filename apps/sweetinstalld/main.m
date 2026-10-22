@@ -1,10 +1,11 @@
 // sweetinstalld: installs the .ipa files dropped into an inbox folder (SWEET on QEMU).
 //
-// A root launchd job (RunAtLoad, KeepAlive; tools/sweet-ipa.sh adds it). Every
-// 10 s it looks at /private/var/mobile/Media/Sweet/Inbox: each NAME.ipa there is
-// installed through LaunchServices (installd does the work) and moved to
-// ../Installed or, after three failed attempts, to ../Failed, with NAME.ipa.log
-// saying what happened. Every message also goes to stderr, which the job sends to
+// A root launchd job (RunAtLoad, KeepAlive; tools/sweet-ipa.sh adds it). Once
+// SpringBoard has started up (installs asked for earlier never returned), every 10 s
+// it looks at /private/var/mobile/Media/Sweet/Inbox: each NAME.ipa there is installed
+// through LaunchServices (installd does the work) and moved to ../Installed or, after
+// three failed attempts or one that hangs, to ../Failed, with NAME.ipa.log saying what
+// happened. Every message also goes to stderr, which the job sends to
 // /dev/console (the kernel log on the serial port).
 //
 // It also asks the host: scripts/ipa-server.py (started by the Windows launcher)
@@ -13,7 +14,10 @@
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #include <arpa/inet.h>
+#include <notify.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <zlib.h>
 
@@ -21,6 +25,8 @@ static NSString *const kRoot = @"/private/var/mobile/Media/Sweet";
 static const int kAttempts = 3;
 static const char *const kHost = "10.0.2.2";
 static const uint16_t kPort = 8765;
+static const int kReadyUptime = 300;      // s after boot: iOS is surely up by then
+static const int kInstallTimeout = 300;   // s; installd answers within seconds
 
 static void
 say(NSString *format, ...)
@@ -142,6 +148,60 @@ install(NSString *path, NSError **error)
 	BOOL (*call)(id, SEL, NSURL *, NSDictionary *, NSError **) = (void *)objc_msgSend;
 	return call(workspace, sel, [NSURL fileURLWithPath:path],
 	           @{@"CFBundleIdentifier": identifier, @"PackageType": @"Customer"}, error);
+}
+
+static double
+uptime(void)
+{
+	struct timeval boot, now;
+	size_t size = sizeof(boot);
+	int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+	if (sysctl(mib, 2, &boot, &size, NULL, 0) != 0 || gettimeofday(&now, NULL) != 0) {
+		return 0;
+	}
+	return (double)(now.tv_sec - boot.tv_sec) + (now.tv_usec - boot.tv_usec) / 1e6;
+}
+
+// An install asked for in the first seconds of boot, before lsd and installd ran, never
+// returned. Wait until SpringBoard has finished starting up; when we start later than that
+// (launchd restarted us), kReadyUptime after boot is enough.
+static void
+waitForSpringBoard(void)
+{
+	dispatch_semaphore_t up = dispatch_semaphore_create(0);
+	int token = 0;
+	BOOL registered = notify_register_dispatch("com.apple.springboard.finishedstartup", &token,
+	    dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^(__unused int t) {
+		dispatch_semaphore_signal(up);
+	}) == NOTIFY_STATUS_OK;
+	while (uptime() < kReadyUptime &&
+	    dispatch_semaphore_wait(up, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0) {
+	}
+	if (registered) {
+		notify_cancel(token);
+	}
+	say(@"iOS is up (%.0f s after boot)", uptime());
+}
+
+// install() on another thread: 1 installed, 0 failed, -1 no answer within kInstallTimeout.
+static int
+installWithTimeout(NSString *path, NSError **error)
+{
+	__block BOOL ok = NO;
+	__block NSError *failed = nil;
+	dispatch_semaphore_t done = dispatch_semaphore_create(0);
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+		NSError *e = nil;
+		ok = install(path, &e);
+		failed = e;
+		dispatch_semaphore_signal(done);
+	});
+	if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, kInstallTimeout * NSEC_PER_SEC)) != 0) {
+		*error = failure([NSString stringWithFormat:@"installd did not answer within %d s", kInstallTimeout]);
+		return -1;
+	}
+	*error = failed;
+	return ok ? 1 : 0;
 }
 
 static void
@@ -273,6 +333,7 @@ main(void)
 		    attributes:@{NSFilePosixPermissions: @0777} error:nil];
 		NSMutableDictionary<NSString *, NSNumber *> *attempts = [NSMutableDictionary dictionary];
 		NSMutableSet<NSString *> *fromHost = [NSMutableSet set];
+		waitForSpringBoard();
 		say(@"watching %@ and http://%s:%u/list", inbox, kHost, kPort);
 		for (;;) {
 			@autoreleasepool {
@@ -286,7 +347,8 @@ main(void)
 					attempts[name] = @(n);
 					say(@"installing %@ (attempt %d)", name, n);
 					NSError *error = nil;
-					if (install(src, &error)) {
+					int status = installWithTimeout(src, &error);
+					if (status == 1) {
 						say(@"%@: installed", name);
 						finish(fm, src, name, @"Installed", @"installed");
 						reportToHost(name, @"installed", fromHost);
@@ -294,10 +356,13 @@ main(void)
 					} else {
 						NSString *result = [NSString stringWithFormat:@"failed: %@", error];
 						say(@"%@: %@", name, result);
-						if (n >= kAttempts) {
+						if (n >= kAttempts || status < 0) {
 							finish(fm, src, name, @"Failed", result);
 							reportToHost(name, result, fromHost);
 							[attempts removeObjectForKey:name];
+						}
+						if (status < 0) {
+							exit(1);    // the hung request stays with this process; launchd starts a fresh one
 						}
 					}
 				}
