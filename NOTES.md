@@ -347,6 +347,23 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
 - Not emulated: Qualcomm XPUs, ABL, real panel, PSCI conduit (QEMU virt uses hvc). Hardware still decides those.
 - Example: `python3 tools/mkadt.py /tmp/q.adt --qemu && python3 tools/mkpayload.py xnu/out-0013/kernel.development.sweet /tmp/q.adt /tmp/pq.bin --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam' && python3 tools/qemu-sweet.py /tmp/pq.bin /tmp/q`
 
+### qemu-virt branch state 2026-10-22 (Windows host, QEMU 11.1.2 + qemu/patches 0002-0003)
+- Kernel **0100** is current. 0099: the built-in AMFI MAC policy is named "AMFI" and answers op 0x60
+  (amfi_interface_query_bootarg_state) with 0x2 = "code signing enforcement disabled" (mask 0x86 in
+  ExtensionFoundation and InstalledContentLibrary). Without it lsd could not read the XPC extension point cache
+  ("Unable to find AMFI": it wants the AppleMobileFileIntegrity IOService), so no poster/widget extension
+  ever ran (black wallpaper). 0100: QEMU's power key (PL061 line 3, ADT /sweet-power-key) runs
+  reboot_kernel(RB_HALT); haltRestart() does PSCI SYSTEM_OFF/RESET over HVC. system_powerdown -> clean HFS+
+  unmount, QEMU exits in ~7 s.
+- lsd registers extension points/plugins only when it creates its database: an image first booted before
+  0099 needs `com.apple.LaunchServices-4035-v2.csstore` (+ SystemDataOnly-) removed; the rebuild then takes
+  ~20 min under TCG. Boot-arg `launchd_disable_all_timeouts=1` (no internal gate in launchd) is needed so the
+  default wallpaper's CollectionsPoster survives software HEIC decoding (else "extension check-in timeout").
+- `apps/sweetinstalld` (root launchd job, added by `tools/sweet-ipa.sh setup`) installs .ipa files from
+  /private/var/mobile/Media/Sweet/Inbox and from http://10.0.2.2:8765 (the host's ipa-server.py) via
+  LSApplicationWorkspace; `apps/hello` (Hello.ipa) installs and launches. Workflow `ios-apps.yml`.
+- Host-side details (disk layers, launcher, benchmarks) are in the parent project's PROGRESS.md.
+
 ## Layout
 - `backup/`  partition dumps + full sdb..sdf LUNs, `SHA256SUMS` (all verified on-device == local)
 - `dtb/`     live FDT (from OrangeFox), PixelOS boot.img dtb, dtbo, dts versions
