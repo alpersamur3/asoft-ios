@@ -19,6 +19,14 @@ param(
     [switch]$NoShortcut
 )
 $ErrorActionPreference = 'Stop'
+# A native tool's stderr lines are notes, not failures: Windows PowerShell 5.1 turns them into
+# errors when the script's output is redirected, which 'Stop' would end the script on. Its exit
+# code ($LASTEXITCODE) says how it went.
+function Invoke-Tool {
+    $ErrorActionPreference = 'Continue'
+    $rest = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
+    & $args[0] @rest
+}
 $ProgressPreference = 'Continue'
 $src = Resolve-Path "$PSScriptRoot\.."
 $work = "$Dir\work"
@@ -30,8 +38,9 @@ $ipswSize = 6171035648
 $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
 
 # Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
-# and after iOS's first start, the room the helper unpacks the IPSW into, and the rest
-$space = @{ Ipsw = 5.75; Disk = 12.1; DiskReady = 12.6; Scratch = 7.0; App = 0.3 }
+# and after iOS's first start, the room the helper unpacks the IPSW into, the rest, and a saved
+# state (the quick boot's, or one Save state makes) in the user disk
+$space = @{ Ipsw = 5.75; Disk = 12.1; DiskReady = 12.6; Scratch = 7.0; App = 0.3; State = 3.0 }
 
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
 
@@ -55,16 +64,17 @@ $drive = $Dir.Substring(0, 2)
 $free = (Get-PSDrive $Dir.Substring(0, 1)).Free / 1GB
 # What is still to come here: no IPSW download with -Ipsw, nothing to build once the disk is there
 $needed = $space.App
-$parts = @("app $($space.App)")
+$parts = @('app {0:N1}' -f $space.App)
 if (-not (Test-Path "$work\root\ios16-base.qcow2")) {
-    if (-not $Ipsw) { $needed += $space.Ipsw; $parts += "iOS image $($space.Ipsw)" }
+    if (-not $Ipsw) { $needed += $space.Ipsw; $parts += 'iOS image {0:N1}' -f $space.Ipsw }
     $needed += $space.DiskReady + $space.Scratch
-    $parts += "iOS disk $($space.DiskReady)", "room to build it $($space.Scratch)"
+    $parts += ('iOS disk {0:N1}' -f $space.DiskReady), ('room to build it {0:N1}' -f $space.Scratch)
 }
 $installed = $space.DiskReady + $space.App + $(if ($KeepIpsw -and -not $Ipsw) { $space.Ipsw } else { 0 })
 Write-Host ('Disk space on {0} ({1:N1} GB free):' -f $drive, $free)
-Write-Host ('  needed while installing: about {0:N0} GB ({1})' -f $needed, ($parts -join ' + '))
+Write-Host ('  needed while installing: about {0:N1} GB ({1})' -f $needed, ($parts -join ' + '))
 Write-Host ('  once installed:          about {0:N0} GB, plus what iOS stores as you use it' -f $installed)
+Write-Host ('                           and {0:N0} GB per saved state (quick boot keeps one while iOS is closed)' -f $space.State)
 if ($free -lt $needed + 1) {
     throw ('{0:N1} GB free on {1}, about {2:N0} GB needed: free some space or use -Dir on another drive' -f $free, $drive, ($needed + 1))
 }
@@ -94,7 +104,7 @@ Write-Host (& $qemu --version | Select-Object -First 1)
 Step '2/6 Python'
 if (-not (Test-Path "$Dir\python\python.exe")) {
     $zip = "$env:TEMP\asoft-python.zip"
-    curl.exe -fL --retry 3 -o $zip $pythonUrl
+    Invoke-Tool curl.exe -fL --retry 3 -o $zip $pythonUrl
     if ($LASTEXITCODE) { throw "could not download $pythonUrl" }
     Expand-Archive $zip "$Dir\python" -Force
     Remove-Item $zip
@@ -106,7 +116,7 @@ if (-not $Ipsw) {
     $Ipsw = "$work\ipsw\iPhone10,3_16.7.16_20H392_Restore.ipsw"
     if (-not (Test-Path $Ipsw) -or (Get-Item $Ipsw).Length -ne $ipswSize) {
         Write-Host "Downloading 6.2 GB from Apple; if it stops, run the installer again to resume."
-        curl.exe -fL --retry 5 -C - -o $Ipsw $ipswUrl
+        Invoke-Tool curl.exe -fL --retry 5 -C - -o $Ipsw $ipswUrl
         if ($LASTEXITCODE) { throw "the download stopped (curl $LASTEXITCODE); run the installer again to resume" }
     }
 }

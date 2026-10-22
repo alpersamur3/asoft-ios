@@ -10,12 +10,12 @@
 # WORKDIR (default C:\asoft-build) gets qemu-src (QEMU_REF, default v11.1.2), qemu-build and dist;
 # dist holds the .exe with the DLLs it needs, as the CI artifact does.
 set -eu
-PATCHES=$(cd "$(dirname "$0")" && pwd)/patches
+PATCHES=${PATCHES:-$(cd "$(dirname "$0")" && pwd)/patches}
 WORK=${1:-/c/asoft-build}
 QEMU_REF=${QEMU_REF:-v11.1.2}
 SRC=$WORK/qemu-src
 BUILD=$WORK/qemu-build
-DIST=$WORK/dist
+DIST=${DIST:-$WORK/dist}     # DIST=... builds elsewhere, e.g. while dist is in use
 mkdir -p "$WORK"
 [ -d "$SRC" ] || git clone -q --depth 1 -b "$QEMU_REF" -c core.autocrlf=false \
     https://github.com/qemu/qemu.git "$SRC"

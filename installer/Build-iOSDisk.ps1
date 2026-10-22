@@ -13,6 +13,14 @@ param(
     [string]$Log = "$Out.log"
 )
 $ErrorActionPreference = 'Stop'
+# A native tool's stderr lines are notes, not failures: Windows PowerShell 5.1 turns them into
+# errors when the script's output is redirected, which 'Stop' would end the script on. Its exit
+# code ($LASTEXITCODE) says how it went.
+function Invoke-Tool {
+    $ErrorActionPreference = 'Continue'
+    $rest = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
+    & $args[0] @rest
+}
 if (Test-Path $Out) { throw "$Out exists already" }
 $qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
 foreach ($f in $Ipsw, $Qemu, $qemuImg, "$Helper\Image.gz", "$Helper\initrd.gz") {
@@ -21,8 +29,8 @@ foreach ($f in $Ipsw, $Qemu, $qemuImg, "$Helper\Image.gz", "$Helper\initrd.gz") 
 
 # The new disk, and scratch room to unpack the IPSW's three disk images into (7.5 GB for 20H392)
 $scratch = "$Out.scratch.qcow2"
-& $qemuImg create -q -f qcow2 $Out 16G
-& $qemuImg create -q -f qcow2 $scratch 10G
+Invoke-Tool $qemuImg create -q -f qcow2 $Out 16G
+Invoke-Tool $qemuImg create -q -f qcow2 $scratch 10G
 if ($LASTEXITCODE) { throw 'qemu-img failed' }
 
 # A comma in a -drive file name must be doubled (IPSW names have one: iPhone10,3_...)
@@ -49,7 +57,7 @@ $logFile = [IO.File]::Open($Log, 'Append', 'Write', 'ReadWrite')
 $logWriter = New-Object IO.StreamWriter($logFile)
 $logWriter.AutoFlush = $true
 try {
-    & $Qemu @qemuArgs 2>&1 | ForEach-Object {
+    Invoke-Tool $Qemu @qemuArgs 2>&1 | ForEach-Object {
         $line = "$_"
         $logWriter.WriteLine($line)
         if ($line -match '^ASOFT: progress (\d+) (.*)$') {
