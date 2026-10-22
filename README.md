@@ -1,3 +1,5 @@
+<img src="assets/logo-256.png" width="128" alt="ASoftware iOS logo" align="right">
+
 # ASoftware iOS
 
 **Apple's iOS 16 running in a window on a Windows PC.**
@@ -64,6 +66,8 @@ sets all of this up is planned; until then the pieces are built as below.
 | `qemu/` | Patches on QEMU 11.1.2 (redraw rate, close button powers iOS down, window title, phone-shaped window, side bar) and the Windows build script |
 | `tools/` | Device tree (`mkadt.py`), boot payload (`mkpayload.py`), QEMU launcher (`qemu-sweet.py`), iOS root builder, disk tool (`asoft-disk.sh`) |
 | `apps/` | Our iOS programs: `asoftinstalld` (installs .ipa files) and a test app |
+| `assets/` | The logo, as SVG (made by `make-logo.py`), PNG and ICO |
+| `installer/` | The installer, and the helper VM (a small arm64 Linux) that builds the iOS disk from the IPSW on Windows |
 | `scripts/` | Windows launcher, .ipa server, WSL disk build; `dev/` holds benchmark and debugging tools |
 | `.github/workflows/` | Kernel, QEMU for Windows, iOS apps |
 
