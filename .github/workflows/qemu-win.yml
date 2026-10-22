@@ -84,7 +84,7 @@ jobs:
           # our build says so in `qemu-system-aarch64 --version`: "11.1.2 (ASoftware)"
           pkgversion=; [ "${{ matrix.variant }}" = patched ] && pkgversion=--with-pkgversion=ASoftware
           ../qemu-src/configure --target-list=aarch64-softmmu -Ddebug=false \
-            --disable-docs --disable-tools --disable-guest-agent \
+            --disable-docs --disable-guest-agent \
             --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=internal $pkgversion
 
       - name: Build
@@ -93,10 +93,10 @@ jobs:
       - name: Package
         run: |
           mkdir dist
-          cp build/qemu-system-aarch64.exe build/qemu-system-aarch64w.exe dist/
+          cp build/qemu-system-aarch64.exe build/qemu-system-aarch64w.exe build/qemu-img.exe dist/
           # ANGLE (libEGL/libGLESv2): libepoxy loads it at run time for gl=on, so no import
           # table names it; without it gl=on crashes.
-          todo="dist/qemu-system-aarch64.exe"
+          todo="dist/qemu-system-aarch64.exe dist/qemu-img.exe"
           for dll in $(pacman -Ql mingw-w64-ucrt-x86_64-angleproject | awk '/\/bin\/.*\.dll$/ {print $2}'); do
             cp "$dll" dist/
             todo="$todo dist/$(basename "$dll")"

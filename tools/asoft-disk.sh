@@ -5,6 +5,7 @@
 #   asoft-disk.sh add       DISK.qcow2 FILE.ipa...    drop .ipa files into its inbox
 #   asoft-disk.sh list      DISK.qcow2                inbox, installed and failed .ipa files with their logs
 #   asoft-disk.sh name      DISK.qcow2 "NAME"         the device name (Settings > General > About > Name)
+#   asoft-disk.sh nodim     DISK.qcow2                no lock screen dimming or auto-lock (always on power)
 #
 # At the next boot asoftinstalld installs every inbox .ipa through installd and
 # logs to the console ("asoftinstalld: ..." in serial.txt). installer puts the daemon
@@ -21,7 +22,7 @@
 # Copyright (c) 2026 ASoftware. MIT License, see LICENSE.
 set -euo pipefail
 cmd=${1:-}; disk=${2:-}
-[ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,8p' "$0"; exit 2; }
+[ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,9p' "$0"; exit 2; }
 shift 2
 MNT=/mnt/asoft-disk
 DEV=/dev/nbd2
@@ -130,6 +131,24 @@ system.setdefault('Network', {}).setdefault('HostNames', {})['LocalHostName'] = 
 with open(path, 'wb') as f:
     plistlib.dump(prefs, f, fmt=fmt)
 print('device name: %s (host %s)' % (name, host))
+PY
+    ;;
+nodim)
+    # SpringBoard dims the lock screen and asks for the display off seconds after boot. The
+    # kernel keeps the display on (sweetfb_keepon), so the dimmed last frame stayed until a
+    # key woke iOS. Never dim or lock while on power (the emulated battery always charges).
+    python3 -I - $MNT/private/var/mobile/Library/Preferences/com.apple.springboard.plist <<'PY'
+import os, plistlib, sys
+path = sys.argv[1]
+prefs = {}
+if os.path.exists(path):
+    with open(path, 'rb') as f:
+        prefs = plistlib.load(f)
+prefs.update({'SBDontDimOrLockOnAC': True, 'SBDisableAutoDim': True})
+with open(path, 'wb') as f:
+    plistlib.dump(prefs, f, fmt=plistlib.FMT_BINARY)
+os.chown(path, 501, 501)
+print('SpringBoard: no dimming or auto-lock on power')
 PY
     ;;
 *)
