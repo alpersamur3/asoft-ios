@@ -111,7 +111,9 @@ public static extern int ucal_getTimeZoneIDForWindowsID(string winid, int len, s
         Write-Host "PC time zone not found ($($_.Exception.Message)); iOS keeps its own"
     }
 }
-if ($TimeZone -match '^[A-Za-z0-9_+\-/]+$') { $bootArgs += " asoft_tz=$TimeZone" }
+# -cmatch: a case-insensitive -match lowercases with the PC's culture, and in Turkish the I of
+# Istanbul becomes a dotless ı, which [a-z] does not hold
+if ($TimeZone -cmatch '^[A-Za-z0-9_+/-]+$') { $bootArgs += " asoft_tz=$TimeZone" }
 
 Push-Location $repo
 $ipaServer = $null
