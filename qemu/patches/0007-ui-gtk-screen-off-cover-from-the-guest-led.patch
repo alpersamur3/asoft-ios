@@ -1,0 +1,164 @@
+ui/gtk: Screen off cover and Wake from the guest display power
+
+The ASoftware kernel lights its virtio keyboard's Scroll Lock LED while
+iOS has the display off (xnu 0102) and keeps the last frame on screen.
+With sidebar=on a dark "Screen off" cover now lies over the guest display
+then (a click on it presses the side button, F2), and the Lock button
+reads Wake. The display power arrives through the LED notifier, on the
+vCPU thread, and is shown from an idle callback. iOS turns the display
+off once while it boots, under the Apple logo, so the cover is armed only
+after the display was on again after that.
+Based on QEMU v11.1.2 with 0002-0006.
+
+--- a/include/ui/gtk.h
++++ b/include/ui/gtk.h
+@@ -132,7 +132,15 @@
+     /* sidebar=on: phone buttons next to the guest display */
+     GtkWidget *sidebar;
+     GtkWidget *sidebar_status;
++    GtkWidget *sidebar_lock;
+     GtkWidget *sidebar_power;
++    /* the guest's display power, from its keyboard's Scroll Lock LED */
++    GtkWidget *overlay;         /* the notebook, and screen_off over it */
++    GtkWidget *screen_off;
++    Notifier led_notifier;
++    bool guest_display_off;
++    bool guest_display_was_off;
++    bool guest_display_armed;   /* on again after the off while booting */
+     char *shots_dir;
+     char *ipa_dir;
+     GHashTable *ipas_pending;   /* .ipa name -> time copied (s) */
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -801,18 +801,97 @@
+                    "about 10 s.");
+ }
+ 
+-static void gd_sidebar_key(GtkButton *button, void *opaque)
++/* Press and release a key, as QMP send-key does. */
++static void gd_sidebar_press(unsigned int key)
+ {
+-    unsigned int key = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(button),
+-                                                          "key"));
+-
+-    /* as QMP send-key does */
+     qemu_input_event_send_key_linux(NULL, key, true);
+     qemu_input_event_send_key_delay(SIDEBAR_KEY_HOLD_MS);
+     qemu_input_event_send_key_linux(NULL, key, false);
+     qemu_input_event_send_key_delay(SIDEBAR_KEY_HOLD_MS);
+ }
+ 
++static void gd_sidebar_key(GtkButton *button, void *opaque)
++{
++    gd_sidebar_press(GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(button),
++                                                        "key")));
++}
++
++/*
++ * Screen off: ASoftware's kernel lights the guest keyboard's Scroll Lock LED
++ * while iOS has the display off (xnu 0102), and keeps showing the last frame.
++ * A cover over the guest display says so instead, and Lock becomes Wake. iOS
++ * also turns the display off once while it boots, under the Apple logo: the
++ * cover comes only once the display was on again after that.
++ */
++static gboolean gd_guest_display_update(void *opaque)
++{
++    GtkDisplayState *s = opaque;
++    bool off = qemu_input_get_leds_mask(NULL) & QEMU_SCROLL_LOCK_LED;
++    bool cover;
++
++    if (off == s->guest_display_off) {
++        return G_SOURCE_REMOVE;
++    }
++    s->guest_display_off = off;
++    if (off) {
++        s->guest_display_was_off = true;
++    } else if (s->guest_display_was_off) {
++        s->guest_display_armed = true;
++    }
++    cover = off && s->guest_display_armed;
++    gtk_widget_set_visible(s->screen_off, cover);
++    gtk_button_set_label(GTK_BUTTON(s->sidebar_lock), cover ? "Wake" : "Lock");
++    gtk_widget_set_tooltip_text(s->sidebar_lock,
++                                cover ? "Side button: wake (F2)"
++                                      : "Side button: lock (F2)");
++    return G_SOURCE_REMOVE;
++}
++
++/* from the vCPU thread that ran the guest's LED request: GTK on the main loop */
++static void gd_guest_leds(Notifier *notifier, void *data)
++{
++    GtkDisplayState *s = container_of(notifier, GtkDisplayState, led_notifier);
++
++    g_idle_add(gd_guest_display_update, s);
++}
++
++static gboolean gd_screen_off_clicked(GtkWidget *widget, GdkEventButton *event,
++                                      void *opaque)
++{
++    gd_sidebar_press(KEY_F2);
++    return TRUE;
++}
++
++static void gd_create_screen_off(GtkDisplayState *s)
++{
++    GtkCssProvider *css = gtk_css_provider_new();
++    GtkWidget *label = gtk_label_new(NULL);
++
++    s->screen_off = gtk_event_box_new();
++    gtk_widget_set_name(s->screen_off, "screen-off");
++    gtk_css_provider_load_from_data(css, "#screen-off { background-color: "
++                                    "#101010; }", -1, NULL);
++    gtk_style_context_add_provider(gtk_widget_get_style_context(s->screen_off),
++                                   GTK_STYLE_PROVIDER(css),
++                                   GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
++    g_object_unref(css);
++    gtk_label_set_markup(GTK_LABEL(label),
++                         "<span foreground='#bbbbbb' size='x-large'>"
++                         "Screen off</span>\n\n"
++                         "<span foreground='#888888'>Click here, or press "
++                         "Wake or Home</span>");
++    gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
++    gtk_container_add(GTK_CONTAINER(s->screen_off), label);
++    gtk_widget_show(label);
++    /* shown by gd_guest_display_update only, not by gtk_widget_show_all */
++    gtk_widget_set_no_show_all(s->screen_off, TRUE);
++    g_signal_connect(s->screen_off, "button-press-event",
++                     G_CALLBACK(gd_screen_off_clicked), s);
++
++    s->led_notifier.notify = gd_guest_leds;
++    qemu_input_led_notifier_add(&s->led_notifier);
++}
++
+ static void gd_sidebar_screenshot(GtkButton *button, void *opaque)
+ {
+     GtkDisplayState *s = opaque;
+@@ -1052,8 +1131,8 @@
+     gtk_container_set_border_width(GTK_CONTAINER(s->sidebar), 8);
+     gd_sidebar_button(s, "Home", "Home (F1)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F1);
+-    gd_sidebar_button(s, "Lock", "Side button: lock / wake (F2)",
+-                      G_CALLBACK(gd_sidebar_key), KEY_F2);
++    s->sidebar_lock = gd_sidebar_button(s, "Lock", "Side button: lock (F2)",
++                                        G_CALLBACK(gd_sidebar_key), KEY_F2);
+     gd_sidebar_button(s, "Volume +", "Volume up (F4)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F4);
+     gd_sidebar_button(s, "Volume −", "Volume down (F3)",
+@@ -3174,10 +3253,16 @@
+     gd_update_caption(s);
+ 
+     s->hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+-    gtk_box_pack_start(GTK_BOX(s->hbox), s->notebook, TRUE, TRUE, 0);
+     if (opts->u.gtk.has_sidebar && opts->u.gtk.sidebar) {
+         gd_create_sidebar(s);
++        gd_create_screen_off(s);
++        s->overlay = gtk_overlay_new();
++        gtk_container_add(GTK_CONTAINER(s->overlay), s->notebook);
++        gtk_overlay_add_overlay(GTK_OVERLAY(s->overlay), s->screen_off);
++        gtk_box_pack_start(GTK_BOX(s->hbox), s->overlay, TRUE, TRUE, 0);
+         gtk_box_pack_end(GTK_BOX(s->hbox), s->sidebar, FALSE, FALSE, 0);
++    } else {
++        gtk_box_pack_start(GTK_BOX(s->hbox), s->notebook, TRUE, TRUE, 0);
+     }
+ 
+     gtk_box_pack_start(GTK_BOX(s->vbox), s->menu_bar, FALSE, TRUE, 0);
