@@ -1,0 +1,30 @@
+diff --git a/config/version.c b/config/version.c
+index 568b8be..efe9aac 100644
+--- a/config/version.c
++++ b/config/version.c
+@@ -35,9 +35,14 @@
+ 
+ #include <libkern/version.h>
+ 
++/*
++ * SWEET (ASoftware iOS emulator): the builder field names the project instead of
++ * the CI user ("Darwin Kernel Version 22.6.0: <date>; ASoftware:xnu-8796...").
++ */
++
+ // for what(1):
+-const char __kernelVersionString[] __attribute__((used)) = "@(#)VERSION: " OSTYPE " Kernel Version ###KERNEL_VERSION_LONG###: ###KERNEL_BUILD_DATE###; ###KERNEL_BUILDER###:###KERNEL_BUILD_OBJROOT###";
+-const char version[] = OSTYPE " Kernel Version ###KERNEL_VERSION_LONG###: ###KERNEL_BUILD_DATE###; ###KERNEL_BUILDER###:###KERNEL_BUILD_OBJROOT###";
++const char __kernelVersionString[] __attribute__((used)) = "@(#)VERSION: " OSTYPE " Kernel Version ###KERNEL_VERSION_LONG###: ###KERNEL_BUILD_DATE###; ASoftware:###KERNEL_BUILD_OBJROOT###";
++const char version[] = OSTYPE " Kernel Version ###KERNEL_VERSION_LONG###: ###KERNEL_BUILD_DATE###; ASoftware:###KERNEL_BUILD_OBJROOT###";
+ const int  version_major = VERSION_MAJOR;
+ const int  version_minor = VERSION_MINOR;
+ const int  version_revision = VERSION_REVISION;
+@@ -45,7 +50,7 @@ const int  version_stage = VERSION_STAGE;
+ const int  version_prerelease_level = VERSION_PRERELEASE_LEVEL;
+ const char version_variant[] = VERSION_VARIANT;
+ const char osbuild_config[] = "###KERNEL_BUILD_CONFIG###";
+-const char osbuilder[] = "###KERNEL_BUILDER###";
++const char osbuilder[] = "ASoftware";
+ const char osrelease[] = OSRELEASE;
+ const char ostype[] = OSTYPE;
+ char osversion[OSVERSIZE];

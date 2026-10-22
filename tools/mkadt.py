@@ -124,6 +124,8 @@ def build(seed=None, qemu=False, highmem=False):
     ] + ([
         # QEMU virt has no EL3: PSCI CPU_ON goes through HVC (iokit/Kernel/arm/SweetCPU.cpp)
         ('sweet-psci-conduit', cstr('hvc')),
+        # Who built this machine (ioreg -p IODeviceTree -n chosen shows it)
+        ('asoftware', cstr('ASoftware iOS emulator, on ios-sweet by dipa-studio and contributors')),
     ] if qemu else []), [node('memory-map', [ph()]),
         # Local boot policy (kern_csr.c): SIP relaxed like `csrutil disable`
         # (lp-sip0: untrusted kexts, unrestricted FS, task_for_pid, kernel
