@@ -81,9 +81,11 @@ jobs:
       - name: Configure
         run: |
           mkdir build && cd build
+          # our build says so in `qemu-system-aarch64 --version`: "11.1.2 (ASoftware)"
+          pkgversion=; [ "${{ matrix.variant }}" = patched ] && pkgversion=--with-pkgversion=ASoftware
           ../qemu-src/configure --target-list=aarch64-softmmu -Ddebug=false \
             --disable-docs --disable-tools --disable-guest-agent \
-            --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=internal
+            --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=internal $pkgversion
 
       - name: Build
         run: make -C build -j"$(nproc)"

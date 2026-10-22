@@ -1,0 +1,21 @@
+ui/gtk: the window title is -name alone
+
+With -name NAME the GTK window was titled "QEMU (NAME)"; it is now just NAME
+(the ASoftware iOS emulator passes -name "ASoftware iOS"). Without -name it
+stays "QEMU".
+Based on QEMU v11.1.2.
+
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 7078d89..c0da4b4 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -229,7 +229,8 @@ static void gd_update_caption(GtkDisplayState *s)
+     int i;
+ 
+     if (qemu_name) {
+-        prefix = g_strdup_printf("QEMU (%s)", qemu_name);
++        /* -name: the window is the guest's (the ASoftware iOS emulator: "ASoftware iOS") */
++        prefix = g_strdup(qemu_name);
+     } else {
+         prefix = g_strdup_printf("QEMU");
+     }

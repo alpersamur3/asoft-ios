@@ -250,6 +250,7 @@ def main():
                          "guest 10.0.2.15, DNS 10.0.2.3); 'none': no network")
     ap.add_argument('--qmp-tcp', type=int, metavar='PORT',
                     help='with --display: QMP on 127.0.0.1:PORT (e.g. for screendump)')
+    ap.add_argument('--name', help='QEMU -name: the window title ("QEMU (NAME)"; just NAME with qemu/patches/0004)')
     ap.add_argument('--qemu-log', default='int,guest_errors,unimp',
                     help="QEMU -d items for qemu.log (default: int,guest_errors,unimp; 'int' is very slow for a full iOS boot)")
     a = ap.parse_args()
@@ -322,6 +323,8 @@ def main():
     if a.disk or a.net != 'none':
         # the SWEET virtio drivers handle only modern (version 2) virtio-mmio transports
         cmd += ['-global', 'virtio-mmio.force-legacy=false']
+    if a.name:
+        cmd += ['-name', a.name]
     if a.net == 'user':
         # iokit/Kernel/arm/SweetVirtioNet.cpp (kernel 0095+); older kernels leave it unused
         cmd += ['-netdev', 'user,id=net0', '-device', 'virtio-net-device,netdev=net0']
