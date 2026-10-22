@@ -14,6 +14,8 @@ param(
     # our QEMU build with its DLLs (qemu/build-windows.sh's dist, or the qemu-win workflow artifact)
     [string]$QemuDist = $(if ($env:ASOFT_WORK) { "$env:ASOFT_WORK\qemu\v11.1.2-asoft" } else { '' }),
     [int]$Cpus = 4,
+    # keep the downloaded IPSW once the iOS disk is built (6.2 GB; it can be downloaded again)
+    [switch]$KeepIpsw,
     [switch]$NoShortcut
 )
 $ErrorActionPreference = 'Stop'
@@ -26,6 +28,10 @@ $ipswUrl = 'https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/115
 $ipswSha256 = 'ECE1194F7E233E9109C5790A8D23A4564A10A254E15EC5B09978A343265568FB'
 $ipswSize = 6171035648
 $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
+
+# Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
+# and after iOS's first start, the room the helper unpacks the IPSW into, and the rest
+$space = @{ Ipsw = 5.75; Disk = 12.1; DiskReady = 12.6; Scratch = 7.0; App = 0.3 }
 
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
 
@@ -45,9 +51,22 @@ function Send-Qmp([int]$port, [string]$command) {
 
 Step "Installing to $Dir"
 New-Item -ItemType Directory -Force $Dir, "$work\root", "$work\ipsw", "$work\ipa" | Out-Null
-$free = (Get-PSDrive ($Dir.Substring(0, 1))).Free
-if ($free -lt 25GB -and -not (Test-Path "$work\root\ios16-base.qcow2")) {
-    throw ("{0:N0} GB free on {1}: the IPSW, the iOS disk and room to build it need about 25 GB" -f ($free / 1GB), $Dir.Substring(0, 2))
+$drive = $Dir.Substring(0, 2)
+$free = (Get-PSDrive $Dir.Substring(0, 1)).Free / 1GB
+# What is still to come here: no IPSW download with -Ipsw, nothing to build once the disk is there
+$needed = $space.App
+$parts = @("app $($space.App)")
+if (-not (Test-Path "$work\root\ios16-base.qcow2")) {
+    if (-not $Ipsw) { $needed += $space.Ipsw; $parts += "iOS image $($space.Ipsw)" }
+    $needed += $space.DiskReady + $space.Scratch
+    $parts += "iOS disk $($space.DiskReady)", "room to build it $($space.Scratch)"
+}
+$installed = $space.DiskReady + $space.App + $(if ($KeepIpsw -and -not $Ipsw) { $space.Ipsw } else { 0 })
+Write-Host ('Disk space on {0} ({1:N1} GB free):' -f $drive, $free)
+Write-Host ('  needed while installing: about {0:N0} GB ({1})' -f $needed, ($parts -join ' + '))
+Write-Host ('  once installed:          about {0:N0} GB, plus what iOS stores as you use it' -f $installed)
+if ($free -lt $needed + 1) {
+    throw ('{0:N1} GB free on {1}, about {2:N0} GB needed: free some space or use -Dir on another drive' -f $free, $drive, ($needed + 1))
 }
 
 Step '1/6 App files'
@@ -145,6 +164,12 @@ if (-not (Test-Path $ready)) {
         if (-not $boot.HasExited) { Send-Qmp $qmpPort 'quit' }
         throw "iOS did not finish its first start; the kernel log is under $runs"
     }
+}
+# The downloaded IPSW is not needed any more (Apple keeps serving it)
+$downloaded = "$work\ipsw\iPhone10,3_16.7.16_20H392_Restore.ipsw"
+if (-not $KeepIpsw -and (Test-Path $downloaded) -and (Test-Path $ready)) {
+    Remove-Item $downloaded
+    Write-Host ('Removed the downloaded IPSW ({0:N1} GB); -KeepIpsw keeps it' -f $space.Ipsw)
 }
 
 Step '6/6 Shortcut'
