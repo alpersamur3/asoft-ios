@@ -13,8 +13,8 @@
 // serves a Windows folder at 10.0.2.2:8765, QEMU's user network address of the
 // host. Each .ipa listed there is fetched into the inbox and its result posted back.
 //
-// At start it sets iOS's time zone to the PC's, which the launcher passes as the
-// boot-arg asoft_tz=Area/City, and keeps SpringBoard from dimming and locking.
+// At start it gives iOS the PC's time zone, region format and 12/24-hour clock, which
+// the launcher passes as boot-args, and keeps SpringBoard from dimming and locking.
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #include <arpa/inet.h>
@@ -178,49 +178,130 @@ uptime(void)
 	return (double)(now.tv_sec - boot.tv_sec) + (now.tv_usec - boot.tv_usec) / 1e6;
 }
 
-// iOS keeps its time zone as the symlink /var/db/timezone/localtime, which timed sets from
-// the cell network or the location; there is neither here, so it stays at the image's
-// US/Pacific. Point it at the zone the boot-arg asoft_tz names, before the apps start.
-static void
-setTimeZone(void)
+// The value of boot-arg NAME=value, or nil.
+static NSString *
+bootArg(NSString *name)
 {
-	char args[1024] = {0};
-	size_t size = sizeof(args) - 1;
-	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0) {
-		return;
+	static NSArray<NSString *> *args;
+	if (!args) {
+		char buf[1024] = {0};
+		size_t size = sizeof(buf) - 1;
+		args = sysctlbyname("kern.bootargs", buf, &size, NULL, 0) == 0
+		    ? [[NSString stringWithUTF8String:buf] componentsSeparatedByString:@" "] : @[];
 	}
-	NSString *zone = nil;
-	for (NSString *arg in [[NSString stringWithUTF8String:args] componentsSeparatedByString:@" "]) {
-		if ([arg hasPrefix:@"asoft_tz="]) {
-			zone = [arg substringFromIndex:@"asoft_tz=".length];
+	NSString *prefix = [name stringByAppendingString:@"="];
+	for (NSString *arg in args) {
+		if ([arg hasPrefix:prefix]) {
+			return [arg substringFromIndex:prefix.length];
 		}
 	}
-	if (zone.length == 0) {
-		return;
-	}
+	return nil;
+}
+
+// iOS keeps its time zone as the symlink /var/db/timezone/localtime, which timed sets from
+// the cell network or the location; there is neither here, so it stayed at the image's
+// US/Pacific.
+static BOOL
+setTimeZone(NSString *zone)
+{
 	NSFileManager *fm = NSFileManager.defaultManager;
 	NSString *link = @"/private/var/db/timezone/localtime";
 	NSString *target = [@"/var/db/timezone/zoneinfo/" stringByAppendingString:zone];
 	if ([zone hasPrefix:@"/"] || [zone containsString:@".."] || ![fm fileExistsAtPath:target]) {
 		say(@"time zone %@: no such zone", zone);
-		return;
+		return NO;
 	}
 	NSString *was = [fm destinationOfSymbolicLinkAtPath:link error:nil];
-	if ([was isEqualToString:target]) {
-		return;
-	}
-	// a new link renamed over the old one: never a moment without a time zone
-	NSString *tmp = [link stringByAppendingString:@".asoft"];
-	unlink(tmp.fileSystemRepresentation);
-	if (symlink(target.fileSystemRepresentation, tmp.fileSystemRepresentation) != 0 ||
-	    rename(tmp.fileSystemRepresentation, link.fileSystemRepresentation) != 0) {
-		say(@"time zone %@: %s", zone, strerror(errno));
+	if (![was isEqualToString:target]) {
+		// a new link renamed over the old one: never a moment without a time zone
+		NSString *tmp = [link stringByAppendingString:@".asoft"];
 		unlink(tmp.fileSystemRepresentation);
-		return;
+		if (symlink(target.fileSystemRepresentation, tmp.fileSystemRepresentation) != 0 ||
+		    rename(tmp.fileSystemRepresentation, link.fileSystemRepresentation) != 0) {
+			say(@"time zone %@: %s", zone, strerror(errno));
+			unlink(tmp.fileSystemRepresentation);
+			return NO;
+		}
+		notify_post("com.apple.system.timezone");
 	}
-	notify_post("com.apple.system.timezone");
 	say(@"time zone %@ (was %@)", zone, [was stringByReplacingOccurrencesOfString:@"/var/db/timezone/zoneinfo/"
 	                                                                      withString:@""]);
+	return YES;
+}
+
+// The region format, AppleLocale: iOS's language with the PC's region (English with Turkey
+// is en_TR, English words in Turkish date, time and number formats).
+static BOOL
+setRegion(NSString *region)
+{
+	if ([region rangeOfString:@"^([A-Z]{2}|[0-9]{3})$" options:NSRegularExpressionSearch].location == NSNotFound) {
+		say(@"region %@: not a region code", region);
+		return NO;
+	}
+	CFStringRef user = CFSTR("mobile");
+	id languages = CFBridgingRelease(CFPreferencesCopyValue(CFSTR("AppleLanguages"),
+	    kCFPreferencesAnyApplication, user, kCFPreferencesAnyHost));
+	id first = [languages isKindOfClass:NSArray.class] ? [languages firstObject] : nil;
+	NSString *language = [first isKindOfClass:NSString.class] ? first : @"en";
+	NSMutableDictionary *parts = [[NSLocale componentsFromLocaleIdentifier:language] mutableCopy];
+	parts[NSLocaleCountryCode] = region;
+	NSString *locale = [NSLocale localeIdentifierFromComponents:parts];
+	CFPreferencesSetValue(CFSTR("AppleLocale"), (__bridge CFStringRef)locale, kCFPreferencesAnyApplication,
+	    user, kCFPreferencesAnyHost);
+	say(@"region %@ (%@)", region, locale);
+	return YES;
+}
+
+// 24 or 12: the 24-Hour Time switch of Settings > General > Date & Time.
+static BOOL
+setClock(NSString *clock)
+{
+	BOOL h24 = [clock isEqualToString:@"24"];
+	if (!h24 && ![clock isEqualToString:@"12"]) {
+		say(@"clock %@: not 12 or 24", clock);
+		return NO;
+	}
+	CFStringRef user = CFSTR("mobile");
+	CFPreferencesSetValue(CFSTR("AppleICUForce24HourTime"), h24 ? kCFBooleanTrue : NULL,
+	    kCFPreferencesAnyApplication, user, kCFPreferencesAnyHost);
+	CFPreferencesSetValue(CFSTR("AppleICUForce12HourTime"), h24 ? NULL : kCFBooleanTrue,
+	    kCFPreferencesAnyApplication, user, kCFPreferencesAnyHost);
+	say(@"%@-hour clock", clock);
+	return YES;
+}
+
+// The PC's settings, from the Windows launcher's boot-args asoft_tz (time zone, Area/City),
+// asoft_region (region, TR) and asoft_clock (24 or 12). Each is applied only when it differs
+// from what was applied last (Host.plist next to the inbox): a change made in iOS's Settings
+// stays until the PC's own setting changes. Before the apps start, so they read the new ones.
+static void
+applyHostSettings(void)
+{
+	NSString *path = [kRoot stringByAppendingPathComponent:@"Host.plist"];
+	NSMutableDictionary *applied = [[NSDictionary dictionaryWithContentsOfFile:path] mutableCopy]
+	    ?: [NSMutableDictionary dictionary];
+	NSDictionary<NSString *, NSString *> *args = @{@"TimeZone": @"asoft_tz", @"Region": @"asoft_region",
+	                                               @"Clock": @"asoft_clock"};
+	BOOL changed = NO;
+	for (NSString *key in args) {
+		NSString *value = bootArg(args[key]);
+		if (value.length == 0 || [applied[key] isEqual:value]) {
+			continue;
+		}
+		BOOL ok = [key isEqualToString:@"TimeZone"] ? setTimeZone(value)
+		        : [key isEqualToString:@"Region"]   ? setRegion(value)
+		                                            : setClock(value);
+		if (ok) {
+			applied[key] = value;
+			changed = YES;
+		}
+	}
+	if (changed) {
+		CFPreferencesSynchronize(kCFPreferencesAnyApplication, CFSTR("mobile"), kCFPreferencesAnyHost);
+		[NSFileManager.defaultManager createDirectoryAtPath:kRoot withIntermediateDirectories:YES
+		                                          attributes:nil error:nil];
+		[applied writeToFile:path atomically:YES];
+	}
 }
 
 // SpringBoard dims the lock screen and asks for the display off seconds after boot; the
@@ -417,7 +498,7 @@ int
 main(void)
 {
 	@autoreleasepool {
-		setTimeZone();
+		applyHostSettings();
 		keepDisplayOn();
 		NSFileManager *fm = NSFileManager.defaultManager;
 		NSString *inbox = [kRoot stringByAppendingPathComponent:@"Inbox"];
