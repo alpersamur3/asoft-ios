@@ -11,7 +11,14 @@ screen (image versions v8-v14 in NOTES.md):
 
   launchd.plist   _PanicOnCrash -> _PanicOnCrasX (a crashing daemon must not
                   panic the system); CommCenter jobs removed (no baseband: it
-                  crash-loops and Setup blocks on its CoreTelephony XPC)
+                  crash-loops and Setup blocks on its CoreTelephony XPC);
+                  driverkitd removed (no DriverKit extensions here: it went
+                  over its memory limit at boot and on every app install)
+  plug-ins        moved to PlugIns.disabled, as they crash in a loop here, each
+                  restart costing CPU: the speech synthesizers (MacinTalkAUSP,
+                  SiriTTSSynthesizerAU, KonaSynthesizer: an exception as they
+                  start) and the Astronomy wallpaper AegirPoster (it renders
+                  with Metal, which needs a GPU)
   containers      /private/var/containers/{Bundle,Data/System,Shared/SystemGroup,Temp}
                   (on iOS they live on the data volume)
   migration       LastSystemVersion so DataMigration does not run for an hour
@@ -64,11 +71,11 @@ def launchd(root):
         if '_PanicOnCrash' in job:
             job['_PanicOnCrasX'] = job.pop('_PanicOnCrash')
             renamed += 1
-    removed = [k for k, j in jobs.items() if j.get('Label') == 'com.apple.CommCenter']
+    removed = [k for k, j in jobs.items() if j.get('Label') in ('com.apple.CommCenter', 'com.apple.driverkitd')]
     for k in removed:
         del jobs[k]
     save(path, plist, st.st_uid, st.st_gid, st.st_mode & 0o7777)
-    print(f'launchd.plist: {renamed} _PanicOnCrash renamed, {len(removed)} CommCenter jobs removed')
+    print(f'launchd.plist: {renamed} _PanicOnCrash renamed, {len(removed)} CommCenter/driverkitd jobs removed')
 
 
 def containers(root):
@@ -122,6 +129,19 @@ def audio(root):
         print('StartRecorderServer off', os.path.relpath(conf, root))
 
 
+def plugins(root):
+    for appex in ('System/Library/PrivateFrameworks/MacinTalk.framework/PlugIns/MacinTalkAUSP.appex',
+                  'System/Library/PrivateFrameworks/SiriTTSService.framework/PlugIns/SiriTTSSynthesizerAU.appex',
+                  'System/Library/PrivateFrameworks/TextToSpeechKonaSupport.framework/PlugIns/KonaSynthesizer.appex',
+                  'System/Library/CoreServices/AegirProxyApp.app/PlugIns/AegirPoster.appex'):
+        src = os.path.join(root, appex)
+        if os.path.exists(src):
+            dst_dir = os.path.join(os.path.dirname(os.path.dirname(src)), 'PlugIns.disabled')
+            os.makedirs(dst_dir, exist_ok=True)
+            shutil.move(src, dst_dir)
+            print(os.path.basename(appex), 'disabled')
+
+
 def main():
     if len(sys.argv) != 2 or not os.path.isdir(os.path.join(sys.argv[1], 'System/Library/xpc')):
         sys.exit(__doc__)
@@ -130,6 +150,7 @@ def main():
     containers(root)
     activation(root)
     audio(root)
+    plugins(root)
     merge_pref(root, 'com.apple.migration', {
         'LastSystemVersion': BUILD,
         'DMUserDataDisposition': {'SyntheticDidUpgrade': False, 'buildVersion': BUILD}})
