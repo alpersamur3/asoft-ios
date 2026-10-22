@@ -2,7 +2,8 @@
 # admin rights, WSL or Mac:
 #   1. the app (launcher, tools, kernel, helper VM) and our QEMU build
 #   2. Python (python.org's embeddable package) for the launcher's tools
-#   3. the iPhone X iOS 16.7.16 IPSW, from Apple (6.2 GB; -Ipsw uses one you have)
+#   3. the iPhone X iOS 16.7.16 IPSW, from Apple (6.2 GB; -Ipsw uses one you have), and its
+#      device tree (tools/ipsw-devicetree.py) for the launcher's ADT
 #   4. the iOS disk, built from the IPSW by the helper VM (Build-iOSDisk.ps1)
 #   5. iOS's first start, which sets up its app database once (20-30 min)
 #   6. a desktop shortcut
@@ -62,11 +63,14 @@ Step "Installing to $Dir"
 New-Item -ItemType Directory -Force $Dir, "$work\root", "$work\ipsw", "$work\ipa" | Out-Null
 $drive = $Dir.Substring(0, 2)
 $free = (Get-PSDrive $Dir.Substring(0, 1)).Free / 1GB
-# What is still to come here: no IPSW download with -Ipsw, nothing to build once the disk is there
+# What is still to come here: no IPSW download with -Ipsw or once the disk and the device tree
+# are there, nothing to build once the disk is
+$deviceTree = "$work\firmware\d22ap.adt"
+$needIpsw = -not (Test-Path "$work\root\ios16-base.qcow2") -or -not (Test-Path $deviceTree)
 $needed = $space.App
 $parts = @('app {0:N1}' -f $space.App)
+if ($needIpsw -and -not $Ipsw) { $needed += $space.Ipsw; $parts += 'iOS image {0:N1}' -f $space.Ipsw }
 if (-not (Test-Path "$work\root\ios16-base.qcow2")) {
-    if (-not $Ipsw) { $needed += $space.Ipsw; $parts += 'iOS image {0:N1}' -f $space.Ipsw }
     $needed += $space.DiskReady + $space.Scratch
     $parts += ('iOS disk {0:N1}' -f $space.DiskReady), ('room to build it {0:N1}' -f $space.Scratch)
 }
@@ -112,19 +116,25 @@ if (-not (Test-Path "$Dir\python\python.exe")) {
 & "$Dir\python\python.exe" --version
 
 Step '3/6 iOS 16.7.16 (iPhone X) from Apple'
-if (-not $Ipsw) {
-    $Ipsw = "$work\ipsw\iPhone10,3_16.7.16_20H392_Restore.ipsw"
-    if (-not (Test-Path $Ipsw) -or (Get-Item $Ipsw).Length -ne $ipswSize) {
-        Write-Host "Downloading 6.2 GB from Apple; if it stops, run the installer again to resume."
-        Invoke-Tool curl.exe -fL --retry 5 -C - -o $Ipsw $ipswUrl
-        if ($LASTEXITCODE) { throw "the download stopped (curl $LASTEXITCODE); run the installer again to resume" }
+if ($needIpsw) {
+    if (-not $Ipsw) {
+        $Ipsw = "$work\ipsw\iPhone10,3_16.7.16_20H392_Restore.ipsw"
+        if (-not (Test-Path $Ipsw) -or (Get-Item $Ipsw).Length -ne $ipswSize) {
+            Write-Host "Downloading 6.2 GB from Apple; if it stops, run the installer again to resume."
+            Invoke-Tool curl.exe -fL --retry 5 -C - -o $Ipsw $ipswUrl
+            if ($LASTEXITCODE) { throw "the download stopped (curl $LASTEXITCODE); run the installer again to resume" }
+        }
     }
-}
-if (-not (Test-Path "$work\root\ios16-base.qcow2")) {
     Write-Host 'Checking the IPSW...'
     if ((Get-FileHash $Ipsw -Algorithm SHA256).Hash -ne $ipswSha256) {
         throw "$Ipsw is not Apple's iOS 16.7.16 IPSW for the iPhone X (SHA-256 differs)"
     }
+}
+# The iPhone X's device tree: the launcher's ADT takes its /product from it (screen, artwork,
+# model names), without which SpringBoard cannot draw
+if (-not (Test-Path $deviceTree)) {
+    Invoke-Tool "$Dir\python\python.exe" "$Dir\tools\ipsw-devicetree.py" $Ipsw $deviceTree
+    if ($LASTEXITCODE) { throw "could not take the device tree from $Ipsw" }
 }
 
 Step '4/6 The iOS disk'

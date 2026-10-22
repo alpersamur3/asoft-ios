@@ -181,7 +181,11 @@ try {
         $env:ASOFT_IPA_DIR = $IpaDir   # the side bar's Install .ipa copies there
         Write-Host "Drop .ipa files into $IpaDir to install them"
     }
+    # The iPhone X device tree mkadt.py takes /product from: the installer extracts it from the
+    # IPSW into the work folder (a checkout may have it in research\ipsw-x instead)
+    if (Test-Path "$Work\firmware\d22ap.adt") { $env:ASOFT_DEVICE_TREE = "$Work\firmware\d22ap.adt" }
     Invoke-Tool $python tools\mkadt.py "$out\qemu.adt" --qemu --highmem
+    if ($LASTEXITCODE) { throw 'mkadt.py could not make the device tree' }
     Invoke-Tool $python tools\mkpayload.py $Kernel "$out\qemu.adt" "$out\payload.bin" --cmdline $bootArgs
     $qemuArgs = @("$out\payload.bin", "$out\run", '--disk', $Disk, '--smp', $Cpus,
         '--display', $Display, '--qemu-log', 'guest_errors,unimp', '--qmp-tcp', $QmpPort,
