@@ -366,6 +366,12 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
   xpcproxy starves for 2.5-3.5 min during boot); it waits for `com.apple.springboard.finishedstartup`
   before the first install (one sent before lsd/installd ran never returned) and reopens /dev/console per
   message (an early-opened console fd stopped reaching the serial log after SpringBoard's startup).
+- 2026-10-22: upstream (dipa-studio) is MIT licensed now; the LICENSE commit is on qemu-virt. Our own
+  layer carries ASoftware names: sweetinstalld -> `apps/asoftinstalld` (com.asoftware.installd, inbox
+  /private/var/mobile/Media/ASoftware), `tools/sweet-ipa.sh` -> `tools/asoft-disk.sh` (installer, add,
+  list, name). Kernel 0101 puts ASoftware in kern.version's builder field; mkadt.py --qemu adds
+  /chosen/asoftware; qemu/patches/0004 titles the GTK window with -name; the QEMU build reports
+  "(ASoftware)". The kernel-internal SWEET names stay as upstream has them.
 - Host-side details (disk layers, launcher, benchmarks) are in the parent project's PROGRESS.md.
 
 ## Layout
