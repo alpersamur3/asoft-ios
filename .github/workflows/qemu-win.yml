@@ -38,7 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: qemu
+          sparse-checkout: |
+            qemu
+            assets
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -120,6 +122,8 @@ jobs:
           cp -r /ucrt64/lib/gdk-pixbuf-2.0 dist/lib/
           cp qemu-src/COPYING qemu-src/LICENSE dist/
           [ "${{ matrix.variant }}" = patched ] && cp qemu/patches/*.patch dist/
+          # the window icon and side bar logo (qemu/patches/0008)
+          [ "${{ matrix.variant }}" = patched ] && cp assets/logo-256.png dist/asoftware.png
           echo "QEMU $QEMU_REF ($(git -C qemu-src rev-parse HEAD)), ${{ matrix.variant }}" > dist/BUILD.txt
           (cd dist && sha256sum qemu-system-aarch64.exe > SHA256SUMS)
           ls dist | wc -l

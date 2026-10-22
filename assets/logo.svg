@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<title>ASoftware iOS</title>
+<defs>
+  <linearGradient id="bezel" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#3a4054"/><stop offset="1" stop-color="#191c27"/>
+  </linearGradient>
+  <linearGradient id="desk" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#1aa7b8"/><stop offset="0.55" stop-color="#155e8a"/><stop offset="1" stop-color="#1b2a63"/>
+  </linearGradient>
+  <radialGradient id="bloom" cx="0.32" cy="0.38" r="0.55">
+    <stop offset="0" stop-color="#7ef0e4" stop-opacity="0.55"/><stop offset="1" stop-color="#7ef0e4" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="neck" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#2c3243"/><stop offset="0.5" stop-color="#3d4458"/><stop offset="1" stop-color="#1d212d"/>
+  </linearGradient>
+  <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#4a5167"/><stop offset="1" stop-color="#1f2330"/>
+  </linearGradient>
+  <linearGradient id="frame" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#8a909d"/><stop offset="0.12" stop-color="#3a3f4b"/>
+    <stop offset="0.88" stop-color="#2a2e38"/><stop offset="1" stop-color="#737986"/>
+  </linearGradient>
+  <linearGradient id="wall" x1="0" y1="0" x2="0.35" y2="1">
+    <stop offset="0" stop-color="#5a9bff"/><stop offset="0.6" stop-color="#4a5df0"/><stop offset="1" stop-color="#5b36cf"/>
+  </linearGradient>
+  <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/><stop offset="0.45" stop-color="#ffffff" stop-opacity="0.05"/>
+    <stop offset="0.46" stop-color="#ffffff" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+  <filter id="softer" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"/></filter>
+  <clipPath id="screen"><rect x="40" y="78" width="352" height="222" rx="10"/></clipPath>
+  <clipPath id="phone-screen"><rect x="291" y="155" width="158" height="312" rx="27"/></clipPath>
+</defs>
+<ellipse cx="214" cy="420" rx="118" ry="12" fill="#0b0d14" opacity="0.28" filter="url(#soft)"/>
+<ellipse cx="370" cy="488" rx="92" ry="10" fill="#0b0d14" opacity="0.35" filter="url(#soft)"/>
+<path d="M190 330 h48 l13 58 h-74 z" fill="url(#neck)"/>
+<rect x="132" y="384" width="164" height="26" rx="13" fill="url(#base)"/>
+<path d="M145 386.5 h138" stroke="#ffffff" stroke-opacity="0.25" stroke-width="2" stroke-linecap="round"/>
+<rect x="20" y="58" width="392" height="274" rx="24" fill="url(#bezel)"/>
+<path d="M44 59.5 h344" stroke="#ffffff" stroke-opacity="0.22" stroke-width="2" stroke-linecap="round"/>
+<rect x="40" y="78" width="352" height="222" rx="10" fill="url(#desk)"/>
+<g clip-path="url(#screen)">
+<rect x="40" y="78" width="352" height="222" fill="url(#bloom)"/>
+<rect x="66" y="104" width="150" height="104" rx="8" fill="#0f172a" fill-opacity="0.45"/>
+<rect x="66" y="104" width="150" height="18" rx="8" fill="#0f172a" fill-opacity="0.35"/>
+<rect x="40" y="276" width="352" height="24" fill="#0b1224" fill-opacity="0.72"/>
+<rect x="171" y="282" width="13" height="13" rx="3.5" fill="#5ac8fa"/>
+<rect x="190" y="282" width="13" height="13" rx="3.5" fill="#ffd60a"/>
+<rect x="209" y="282" width="13" height="13" rx="3.5" fill="#34c759"/>
+<rect x="228" y="282" width="13" height="13" rx="3.5" fill="#ff9f0a"/>
+<rect x="247" y="282" width="13" height="13" rx="3.5" fill="#e5e7eb"/>
+<polygon points="40,78 250,78 120,300 40,300" fill="#ffffff" opacity="0.06"/>
+</g>
+<rect x="268" y="152" width="190" height="334" rx="40" fill="#05060a" opacity="0.45" filter="url(#softer)"/>
+<rect x="274" y="246" width="5" height="30" rx="2" fill="#4b505c"/>
+<rect x="274" y="284" width="5" height="30" rx="2" fill="#4b505c"/>
+<rect x="465" y="262" width="5" height="48" rx="2" fill="#4b505c"/>
+<rect x="277" y="140" width="190" height="340" rx="42" fill="url(#frame)"/>
+<rect x="282" y="145" width="180" height="330" rx="37" fill="#0a0c11"/>
+<rect x="291" y="155" width="158" height="312" rx="27" fill="url(#wall)"/>
+<g clip-path="url(#phone-screen)">
+<path d="M339 155 H401 V162 a10 10 0 0 1 -10 10 H349 a10 10 0 0 1 -10 -10 Z" fill="#0a0c11"/>
+<rect x="307" y="193.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="307" y="192" width="34" height="34" rx="9.18" fill="#34c759"/>
+<rect x="307" y="192" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="353" y="193.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="353" y="192" width="34" height="34" rx="9.18" fill="#f2f2f7"/>
+<rect x="353" y="192" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="399" y="193.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="399" y="192" width="34" height="34" rx="9.18" fill="#ff9f0a"/>
+<rect x="399" y="192" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="307" y="243.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="307" y="242" width="34" height="34" rx="9.18" fill="#ff453a"/>
+<rect x="307" y="242" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="353" y="243.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="353" y="242" width="34" height="34" rx="9.18" fill="#64d2ff"/>
+<rect x="353" y="242" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="399" y="243.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="399" y="242" width="34" height="34" rx="9.18" fill="#ffd60a"/>
+<rect x="399" y="242" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="307" y="293.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="307" y="292" width="34" height="34" rx="9.18" fill="#bf5af2"/>
+<rect x="307" y="292" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="353" y="293.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="353" y="292" width="34" height="34" rx="9.18" fill="#0a84ff"/>
+<rect x="353" y="292" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="399" y="293.5" width="34" height="34" rx="9.18" fill="#000000" opacity="0.18"/>
+<rect x="399" y="292" width="34" height="34" rx="9.18" fill="#30d158"/>
+<rect x="399" y="292" width="34" height="34" rx="9.18" fill="url(#tile)"/>
+<rect x="301" y="396" width="138" height="52" rx="17" fill="#ffffff" fill-opacity="0.26"/>
+<rect x="316" y="406.5" width="32" height="32" rx="8.64" fill="#000000" opacity="0.18"/>
+<rect x="316" y="405" width="32" height="32" rx="8.64" fill="#34c759"/>
+<rect x="316" y="405" width="32" height="32" rx="8.64" fill="url(#tile)"/>
+<rect x="356" y="406.5" width="32" height="32" rx="8.64" fill="#000000" opacity="0.18"/>
+<rect x="356" y="405" width="32" height="32" rx="8.64" fill="#f2f2f7"/>
+<rect x="356" y="405" width="32" height="32" rx="8.64" fill="url(#tile)"/>
+<rect x="396" y="406.5" width="32" height="32" rx="8.64" fill="#000000" opacity="0.18"/>
+<rect x="396" y="405" width="32" height="32" rx="8.64" fill="#30d158"/>
+<rect x="396" y="405" width="32" height="32" rx="8.64" fill="url(#tile)"/>
+<rect x="345" y="456" width="50" height="5" rx="2.5" fill="#ffffff"/>
+<rect x="291" y="155" width="158" height="312" fill="url(#glass)"/>
+</g>
+<rect x="277.75" y="140.75" width="188.5" height="338.5" rx="41.25" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="1.5"/>
+</svg>

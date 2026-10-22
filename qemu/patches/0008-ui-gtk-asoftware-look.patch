@@ -1,0 +1,202 @@
+ui/gtk: ASoftware's look: logo, window icon, a dark side bar
+
+The window icon is asoftware.png next to the executable (ASoftware's
+logo; the QEMU icon when it is missing). With sidebar=on the side bar
+gets its own dark style (rounded buttons, Install .ipa as the accent,
+Shut down red under the pointer), the logo and name at its top, and GTK
+prefers its dark theme for menus and dialogs. The Screen off cover (0007)
+shows the logo too.
+Based on QEMU v11.1.2 with 0002-0007.
+
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -862,27 +862,39 @@
+     return TRUE;
+ }
+ 
++static GdkPixbuf *gd_asoft_logo(int size);
++
+ static void gd_create_screen_off(GtkDisplayState *s)
+ {
+     GtkCssProvider *css = gtk_css_provider_new();
+     GtkWidget *label = gtk_label_new(NULL);
++    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 18);
++    g_autoptr(GdkPixbuf) logo = gd_asoft_logo(72);
+ 
+     s->screen_off = gtk_event_box_new();
+     gtk_widget_set_name(s->screen_off, "screen-off");
+     gtk_css_provider_load_from_data(css, "#screen-off { background-color: "
+-                                    "#101010; }", -1, NULL);
++                                    "#11141c; }", -1, NULL);
+     gtk_style_context_add_provider(gtk_widget_get_style_context(s->screen_off),
+                                    GTK_STYLE_PROVIDER(css),
+                                    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+     g_object_unref(css);
++    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
++    if (logo) {
++        GtkWidget *image = gtk_image_new_from_pixbuf(logo);
++
++        gtk_widget_set_opacity(image, 0.55);
++        gtk_box_pack_start(GTK_BOX(box), image, FALSE, FALSE, 0);
++    }
+     gtk_label_set_markup(GTK_LABEL(label),
+-                         "<span foreground='#bbbbbb' size='x-large'>"
++                         "<span foreground='#c9cedb' size='x-large'>"
+                          "Screen off</span>\n\n"
+-                         "<span foreground='#888888'>Click here, or press "
++                         "<span foreground='#7f889c'>Click here, or press "
+                          "Wake or Home</span>");
+     gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
+-    gtk_container_add(GTK_CONTAINER(s->screen_off), label);
+-    gtk_widget_show(label);
++    gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
++    gtk_container_add(GTK_CONTAINER(s->screen_off), box);
++    gtk_widget_show_all(box);
+     /* shown by gd_guest_display_update only, not by gtk_widget_show_all */
+     gtk_widget_set_no_show_all(s->screen_off, TRUE);
+     g_signal_connect(s->screen_off, "button-press-event",
+@@ -1092,6 +1104,42 @@
+     gtk_widget_show(dialog);
+ }
+ 
++/*
++ * ASoftware's look: its logo (asoftware.png next to the executable) as the window
++ * icon and atop the side bar, and a dark side bar of its own.
++ */
++static GdkPixbuf *gd_asoft_logo(int size)
++{
++#ifdef G_OS_WIN32
++    /* the executable's folder (CONFIG_BINDIR is no path there) */
++    g_autofree char *dir = g_win32_get_package_installation_directory_of_module(NULL);
++#else
++    g_autofree char *dir = get_relocated_path(CONFIG_BINDIR);
++#endif
++    g_autofree char *path = g_build_filename(dir, "asoftware.png", NULL);
++
++    return gdk_pixbuf_new_from_file_at_size(path, size, size, NULL);
++}
++
++static const char asoft_sidebar_css[] =
++    "#asoft-sidebar { background-color: #161a24; padding: 10px; }"
++    "#asoft-sidebar button { background-image: none; background-color: #252b3a;"
++    "  color: #e6e9f0; border: 1px solid #2f3648; border-radius: 9px;"
++    "  padding: 6px 10px; box-shadow: none; text-shadow: none; -gtk-icon-shadow: none; }"
++    "#asoft-sidebar button label { color: #e6e9f0; }"
++    "#asoft-sidebar button:hover { background-color: #303850; border-color: #3a4360; }"
++    "#asoft-sidebar button:active { background-color: #3a4460; }"
++    "#asoft-sidebar button:disabled { background-color: #1d2230; border-color: #232838; }"
++    "#asoft-sidebar button:disabled label { color: #5b6377; }"
++    "#asoft-sidebar button.accent { background-color: #3d7bf5; border-color: #4a86f7; }"
++    "#asoft-sidebar button.accent:hover { background-color: #5590f8; }"
++    "#asoft-sidebar button.accent:disabled { background-color: #1d2230; border-color: #232838; }"
++    "#asoft-sidebar button.danger:hover { background-color: #b8343d; border-color: #c9434c; }"
++    "#asoft-sidebar separator { background-color: #262c3b; min-height: 1px; }"
++    "#asoft-sidebar .brand { color: #f2f4f8; font-weight: bold; font-size: 13px; }"
++    "#asoft-sidebar .subtitle { color: #8a93a8; font-size: 11px; }"
++    "#asoft-sidebar .status { color: #a3abbd; font-size: 11px; }";
++
+ static GtkWidget *gd_sidebar_button(GtkDisplayState *s, const char *label,
+                                     const char *tooltip, GCallback clicked,
+                                     unsigned int key)
+@@ -1118,7 +1166,9 @@
+ {
+     const char *shots = g_getenv("ASOFT_SHOTS_DIR");
+     const char *pictures = g_get_user_special_dir(G_USER_DIRECTORY_PICTURES);
+-    GtkWidget *install, *footer;
++    GtkWidget *install, *header, *names, *brand, *subtitle;
++    GtkCssProvider *css = gtk_css_provider_new();
++    g_autoptr(GdkPixbuf) logo = gd_asoft_logo(40);
+ 
+     s->shots_dir = shots ? g_strdup(shots)
+         : g_build_filename(pictures ? pictures : g_get_home_dir(),
+@@ -1127,8 +1177,38 @@
+     s->ipas_pending = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+ 
++    /* dark menus and dialogs to go with the side bar */
++    g_object_set(gtk_settings_get_default(),
++                 "gtk-application-prefer-dark-theme", TRUE, NULL);
++    gtk_css_provider_load_from_data(css, asoft_sidebar_css, -1, NULL);
++    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
++        GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
++    g_object_unref(css);
++
+     s->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+-    gtk_container_set_border_width(GTK_CONTAINER(s->sidebar), 8);
++    gtk_widget_set_name(s->sidebar, "asoft-sidebar");    /* padding in its CSS */
++
++    /* logo and name */
++    header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
++    if (logo) {
++        gtk_box_pack_start(GTK_BOX(header), gtk_image_new_from_pixbuf(logo),
++                           FALSE, FALSE, 0);
++    }
++    names = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
++    gtk_widget_set_valign(names, GTK_ALIGN_CENTER);
++    brand = gtk_label_new("ASoftware");
++    subtitle = gtk_label_new("iOS 16");
++    gtk_label_set_xalign(GTK_LABEL(brand), 0);
++    gtk_label_set_xalign(GTK_LABEL(subtitle), 0);
++    gtk_style_context_add_class(gtk_widget_get_style_context(brand), "brand");
++    gtk_style_context_add_class(gtk_widget_get_style_context(subtitle),
++                                "subtitle");
++    gtk_box_pack_start(GTK_BOX(names), brand, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(names), subtitle, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(header), names, FALSE, FALSE, 0);
++    gtk_box_pack_start(GTK_BOX(s->sidebar), header, FALSE, FALSE, 4);
++    gd_sidebar_gap(s);
++
+     gd_sidebar_button(s, "Home", "Home (F1)",
+                       G_CALLBACK(gd_sidebar_key), KEY_F1);
+     s->sidebar_lock = gd_sidebar_button(s, "Lock", "Side button: lock (F2)",
+@@ -1147,6 +1227,7 @@
+                                 "Copy .ipa files to the guest, which "
+                                 "installs them",
+                                 G_CALLBACK(gd_sidebar_install), 0);
++    gtk_style_context_add_class(gtk_widget_get_style_context(install), "accent");
+     if (!s->ipa_dir) {
+         gtk_widget_set_sensitive(install, FALSE);
+         gtk_widget_set_tooltip_text(install, "ASOFT_IPA_DIR is not set");
+@@ -1156,6 +1237,8 @@
+                                          "Power the guest down; pressed "
+                                          "again, quit QEMU",
+                                          G_CALLBACK(gd_sidebar_power), 0);
++    gtk_style_context_add_class(gtk_widget_get_style_context(s->sidebar_power),
++                                "danger");
+ 
+     s->sidebar_status = gtk_label_new(NULL);
+     gtk_label_set_line_wrap(GTK_LABEL(s->sidebar_status), TRUE);
+@@ -1165,14 +1248,10 @@
+     gtk_label_set_xalign(GTK_LABEL(s->sidebar_status), 0);
+     gtk_label_set_selectable(GTK_LABEL(s->sidebar_status), TRUE);
+     gtk_widget_set_can_focus(s->sidebar_status, FALSE);
++    gtk_style_context_add_class(gtk_widget_get_style_context(s->sidebar_status),
++                                "status");
+     gtk_box_pack_start(GTK_BOX(s->sidebar), s->sidebar_status,
+                        FALSE, FALSE, 4);
+-
+-    footer = gtk_label_new(NULL);
+-    gtk_label_set_markup(GTK_LABEL(footer),
+-                         "<span size='small' foreground='#999999'>"
+-                         "ASoftware</span>");
+-    gtk_box_pack_end(GTK_BOX(s->sidebar), footer, FALSE, FALSE, 0);
+ }
+ 
+ /** GTK Events **/
+@@ -3238,7 +3317,15 @@
+     qemu_add_mouse_mode_change_notifier(&s->mouse_mode_notifier);
+     s->vmse = qemu_add_vm_change_state_handler(gd_change_runstate, s);
+ 
+-    gtk_window_set_icon_name(GTK_WINDOW(s->window), "qemu");
++    {
++        g_autoptr(GdkPixbuf) logo = gd_asoft_logo(256);
++
++        if (logo) {
++            gtk_window_set_icon(GTK_WINDOW(s->window), logo);
++        } else {
++            gtk_window_set_icon_name(GTK_WINDOW(s->window), "qemu");
++        }
++    }
+ 
+     gd_create_menus(s, opts);
+ 
