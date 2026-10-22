@@ -46,7 +46,7 @@ Not yet: audio, GPU acceleration, the App Store and Apple ID services.
 
 - Windows 10 (1903 or later) or 11, 64-bit; no admin rights, WSL or Mac needed
 - A 4-core CPU or better and 16 GB of RAM (iOS gets 7 GB)
-- About **27 GB** free while installing and **14 GB** once installed (see [Disk space](#disk-space))
+- About **26 GB** free while installing and **13 GB** once installed (see [Disk space](#disk-space))
 
 ## Install
 
@@ -60,7 +60,7 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 1. the app, our QEMU build and Python
 2. iOS 16.7.16 for the iPhone X, 6.2 GB from Apple (or `-Ipsw` with one you have), and the
    phone's device tree from it
-3. the iOS disk, built from it by a small Linux VM in QEMU (about 25 min)
+3. the iOS disk, built from it by a small Linux VM in QEMU (about 22 min)
 4. iOS's first start, which sets up its app database once (20-30 min)
 5. a desktop shortcut
 
@@ -93,10 +93,11 @@ The installer puts everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` un
 | | While installing | Installed |
 | --- | --- | --- |
 | iOS image from Apple (IPSW) | 6.2 GB | removed (kept with `-KeepIpsw`) |
-| iOS disk | 13 GB | 13.5 GB after the first start |
-| Room to build it | 7.5 GB | removed |
+| iOS disk | 11.7 GB | 12.2 GB after the first start |
+| Room to build it | 7 GB | removed |
 | App, QEMU, Python, kernel | 0.3 GB | 0.3 GB |
-| **Total** | **about 27 GB** | **about 14 GB**, plus what iOS stores as you use it |
+| A saved state (quick boot, *Save state*) | | about 3 GB each |
+| **Total** | **about 26 GB** | **about 13 GB**, plus what iOS stores as you use it |
 
 ## How it works
 
@@ -170,7 +171,7 @@ Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
 
 - Windows 10 (1903 ve sonrası) ya da 11, 64 bit; yönetici izni, WSL ya da Mac gerekmez
 - 4 çekirdekli ya da daha iyi bir işlemci ve 16 GB RAM (iOS 7 GB kullanır)
-- Kurulum sırasında yaklaşık **27 GB**, kurulumdan sonra **14 GB** boş alan ([Disk alanı](#disk-alanı))
+- Kurulum sırasında yaklaşık **26 GB**, kurulumdan sonra **13 GB** boş alan ([Disk alanı](#disk-alanı))
 
 ### Kurulum
 
@@ -184,7 +185,7 @@ yeniden çalıştırılınca kaldığı yerden devam eder:
 1. uygulama, QEMU derlememiz ve Python
 2. iPhone X için iOS 16.7.16, Apple'dan 6,2 GB (ya da elinizdekiyle `-Ipsw`) ve içinden
    telefonun cihaz ağacı
-3. iOS diski, QEMU'daki küçük bir Linux VM'i tarafından kurulur (yaklaşık 25 dk)
+3. iOS diski, QEMU'daki küçük bir Linux VM'i tarafından kurulur (yaklaşık 22 dk)
 4. iOS'un ilk açılışı; uygulama veritabanını bir kez kurar (20-30 dk)
 5. masaüstü kısayolu
 
@@ -217,10 +218,11 @@ yeniden çalıştırılınca kaldığı yerden devam eder:
 | | Kurulum sırasında | Kurulumdan sonra |
 | --- | --- | --- |
 | Apple'dan iOS kalıbı (IPSW) | 6,2 GB | silinir (`-KeepIpsw` ile kalır) |
-| iOS diski | 13 GB | ilk açılıştan sonra 13,5 GB |
-| Kurmak için gereken alan | 7,5 GB | silinir |
+| iOS diski | 11,7 GB | ilk açılıştan sonra 12,2 GB |
+| Kurmak için gereken alan | 7 GB | silinir |
 | Uygulama, QEMU, Python, çekirdek | 0,3 GB | 0,3 GB |
-| **Toplam** | **yaklaşık 27 GB** | **yaklaşık 14 GB**, artı kullandıkça iOS'un sakladıkları |
+| Kayıtlı durum (hızlı açılış, *Save state*) | | her biri yaklaşık 3 GB |
+| **Toplam** | **yaklaşık 26 GB** | **yaklaşık 13 GB**, artı kullandıkça iOS'un sakladıkları |
 
 ### Emeği geçenler ve lisanslar
 

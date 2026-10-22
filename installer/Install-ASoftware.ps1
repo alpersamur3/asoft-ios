@@ -41,7 +41,7 @@ $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd
 # Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
 # and after iOS's first start, the room the helper unpacks the IPSW into, the rest, and a saved
 # state (the quick boot's, or one Save state makes) in the user disk
-$space = @{ Ipsw = 5.75; Disk = 12.1; DiskReady = 12.6; Scratch = 7.0; App = 0.3; State = 3.0 }
+$space = @{ Ipsw = 5.75; Disk = 11.7; DiskReady = 12.2; Scratch = 7.0; App = 0.3; State = 3.0 }
 
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
 
