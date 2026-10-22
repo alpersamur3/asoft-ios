@@ -1,0 +1,56 @@
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+index aecb99e..d1c259a 100644
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -30,6 +30,41 @@ extern "C" int reboot_kernel(int howto, char *message);
+ 
+ static volatile uint32_t *sweet_rtc;
+ 
++/*
++ * The calendar runs on the CPU's counter, which stops with the VM: after QEMU
++ * is paused, resumes a saved state (ASoftware's quick boot) or the PC sleeps,
++ * iOS's clock is behind. Every 5 s the calendar is compared with the PL031,
++ * which follows the host's clock, and set from it when they are more than
++ * 3 s apart.
++ */
++#define SWEET_RTC_CHECK_SECS    5
++#define SWEET_RTC_MAX_DRIFT     3
++
++static thread_call_t sweet_rtc_call;
++
++static void
++sweet_rtc_arm(void)
++{
++	uint64_t deadline;
++	clock_interval_to_deadline(SWEET_RTC_CHECK_SECS, NSEC_PER_SEC, &deadline);
++	thread_call_enter_delayed(sweet_rtc_call, deadline);
++}
++
++static void
++sweet_rtc_check(__unused thread_call_param_t p0, __unused thread_call_param_t p1)
++{
++	clock_sec_t secs;
++	clock_usec_t usecs;
++	clock_sec_t rtc = sweet_rtc[PL031_DR / 4];
++	clock_get_calendar_microtime(&secs, &usecs);
++	long drift = (long)rtc - (long)secs;
++	if (drift > SWEET_RTC_MAX_DRIFT || drift < -SWEET_RTC_MAX_DRIFT) {
++		IOLog("SWEET RTC: calendar %ld s off the PL031, set from it\n", -drift);
++		clock_set_calendar_microtime(rtc, 0);
++	}
++	sweet_rtc_arm();
++}
++
+ /*
+  * Power off. QEMU's power key (monitor command system_powerdown, or closing
+  * the window with qemu/patches/0003) is a line of the virt machine's PL061
+@@ -176,6 +211,9 @@ SweetPlatformExpert::start(IOService *provider)
+ 		sweet_rtc = (volatile uint32_t *)ml_io_map(reg[0], reg[1]);
+ 		IOLog("SWEET RTC: PL031 at 0x%lx, %u s since 1970\n", (unsigned long)reg[0],
+ 		    sweet_rtc[PL031_DR / 4]);
++		if ((sweet_rtc_call = thread_call_allocate(sweet_rtc_check, NULL))) {
++			sweet_rtc_arm();
++		}
+ 	}
+ 	publishResource("IORTC");
+ 
