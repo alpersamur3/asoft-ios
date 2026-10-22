@@ -304,6 +304,12 @@ def main():
         if spec.split(',')[0] == 'gtk' and 'zoom-to-fit' not in spec:
             spec += ',zoom-to-fit=on'
         screen = ['-display', spec,
+                  # No text consoles for the default monitor and parallel port (virt has no
+                  # parallel port, QEMU still makes the console): each is a hidden 640x480 page
+                  # of the GTK window, and a window is never narrower than its widest page, so a
+                  # phone-shaped window could not be narrower than 640 px (monitor commands go
+                  # through QMP anyway)
+                  '-monitor', 'none', '-parallel', 'none',
                   '-device', 'ramfb',
                   # bsd/dev/sweet_vinput.c: F1-F4 = Home/side/volume buttons, tablet = touch
                   '-device', 'virtio-keyboard-device', '-device', 'virtio-tablet-device']

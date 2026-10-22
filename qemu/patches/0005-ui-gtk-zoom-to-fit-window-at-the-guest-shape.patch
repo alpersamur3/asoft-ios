@@ -4,12 +4,13 @@ With zoom-to-fit the window kept whatever size it had, so a tall guest
 display (a phone's 1080x2400 screen) sat between wide black bars. When
 the guest display changes size, and on View > Best Fit, the window is now
 sized to the display's shape, as large as fits 92 % of the monitor's work
-area (title bar, borders and menu bar accounted for).
+area (title bar, borders and menu bar accounted for), and moved, if need
+be, to lie inside that work area.
 Based on QEMU v11.1.2.
 
 --- a/ui/gtk.c
 +++ b/ui/gtk.c
-@@ -331,6 +331,50 @@
+@@ -331,6 +331,58 @@
      gtk_window_set_geometry_hints(geo_window, geo_widget, &geo, mask);
  }
  
@@ -28,7 +29,7 @@ Based on QEMU v11.1.2.
 +    GdkWindow *gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
 +    GdkMonitor *monitor;
 +    GdkRectangle area, frame;
-+    int width, height, menu = 0;
++    int width, height, menu = 0, x, y;
 +    double scale;
 +
 +    if (!gdk_window || !vc->gfx.ds) {
@@ -54,13 +55,21 @@ Based on QEMU v11.1.2.
 +    if (scale <= VC_SCALE_MIN) {
 +        return;
 +    }
-+    gtk_window_resize(window, width * scale, height * scale + menu);
++    width = width * scale;
++    height = height * scale + menu;
++    gtk_window_resize(window, width, height);
++
++    /* and keep the whole window inside that work area */
++    gtk_window_get_position(window, &x, &y);
++    x = MAX(area.x, MIN(x, area.x + area.width - width - frame.width));
++    y = MAX(area.y, MIN(y, area.y + area.height - height - frame.height));
++    gtk_window_move(window, x, y);
 +}
 +
  void gd_update_windowsize(VirtualConsole *vc)
  {
      GtkDisplayState *s = vc->s;
-@@ -340,6 +384,8 @@
+@@ -340,6 +392,8 @@
      if (vc->type == GD_VC_GFX && !s->full_screen && !s->free_scale) {
          gtk_window_resize(GTK_WINDOW(vc->window ? vc->window : s->window),
                            VC_WINDOW_X_MIN, VC_WINDOW_Y_MIN);
