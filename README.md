@@ -10,6 +10,7 @@
 ![iOS 16.7.16](https://img.shields.io/badge/iOS-16.7.16%20(iPhone%20X)-1c1c1e?style=flat-square)
 ![QEMU 11.1.2](https://img.shields.io/badge/QEMU-11.1.2-ff9f0a?style=flat-square)
 ![License MIT](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
+[![Release](https://img.shields.io/github/v/release/alpersamur3/asoft-ios?style=flat-square&color=0a84ff)](https://github.com/alpersamur3/asoft-ios/releases/latest)
 
 English · [Türkçe](#turkce)
 
