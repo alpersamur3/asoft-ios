@@ -30,16 +30,17 @@ done
 mkdir -p "$BUILD" && cd "$BUILD"
 if [ ! -f build.ninja ]; then
     "$SRC"/configure --target-list=aarch64-softmmu -Ddebug=false \
-        --disable-docs --disable-tools --disable-guest-agent \
+        --disable-docs --disable-guest-agent \
         --enable-gtk --enable-opengl --enable-sdl --enable-slirp --enable-fdt=internal \
         --with-pkgversion=ASoftware 2>&1 | tail -5
 fi
-ninja qemu-system-aarch64.exe qemu-system-aarch64w.exe 2>&1 | tail -3
+# qemu-img makes the per-user disk overlays (scripts/run-windows.ps1)
+ninja qemu-system-aarch64.exe qemu-system-aarch64w.exe qemu-img.exe 2>&1 | tail -3
 
 rm -rf "$DIST" && mkdir -p "$DIST"
-cp qemu-system-aarch64.exe qemu-system-aarch64w.exe "$DIST"/
+cp qemu-system-aarch64.exe qemu-system-aarch64w.exe qemu-img.exe "$DIST"/
 # ANGLE: libepoxy loads it at run time for gl=on, so no import table names it
-todo="$DIST/qemu-system-aarch64.exe"
+todo="$DIST/qemu-system-aarch64.exe $DIST/qemu-img.exe"
 for dll in $(pacman -Ql mingw-w64-ucrt-x86_64-angleproject | awk '/\/bin\/.*\.dll$/ {print $2}'); do
     cp "$dll" "$DIST"/
     todo="$todo $DIST/$(basename "$dll")"
