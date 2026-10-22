@@ -1,0 +1,3 @@
+ASoftware iOS emulator
+Copyright (c) 2026 ASoftware. MIT License.
+Built on ios-sweet by dipa-studio and contributors.

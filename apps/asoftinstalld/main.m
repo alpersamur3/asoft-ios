@@ -1,8 +1,9 @@
-// sweetinstalld: installs the .ipa files dropped into an inbox folder (SWEET on QEMU).
+// asoftinstalld: installs the .ipa files dropped into an inbox folder (ASoftware iOS on QEMU).
+// Copyright (c) 2026 ASoftware. MIT License, see LICENSE.
 //
-// A root launchd job (RunAtLoad, KeepAlive; tools/sweet-ipa.sh adds it). Once
+// A root launchd job (RunAtLoad, KeepAlive; tools/asoft-disk.sh adds it). Once
 // SpringBoard has started up (installs asked for earlier never returned), every 10 s
-// it looks at /private/var/mobile/Media/Sweet/Inbox: each NAME.ipa there is installed
+// it looks at /private/var/mobile/Media/ASoftware/Inbox: each NAME.ipa there is installed
 // through LaunchServices (installd does the work) and moved to ../Installed or, after
 // three failed attempts or one that hangs, to ../Failed, with NAME.ipa.log saying what
 // happened. Every message also goes to stderr, which the job sends to
@@ -22,7 +23,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-static NSString *const kRoot = @"/private/var/mobile/Media/Sweet";
+static NSString *const kRoot = @"/private/var/mobile/Media/ASoftware";
 static const int kAttempts = 3;
 static const char *const kHost = "10.0.2.2";
 static const uint16_t kPort = 8765;
@@ -39,7 +40,7 @@ say(NSString *format, ...)
 	// stderr is the console as launchd opened it when it spawned us, early in boot; nothing
 	// written to that descriptor after SpringBoard's startup reached the serial log any more,
 	// so every message opens the console anew.
-	const char *line = [NSString stringWithFormat:@"sweetinstalld: %@\n", s].UTF8String;
+	const char *line = [NSString stringWithFormat:@"asoftinstalld: %@\n", s].UTF8String;
 	int fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_NONBLOCK);
 	if (fd >= 0) {
 		write(fd, line, strlen(line));
@@ -52,7 +53,7 @@ say(NSString *format, ...)
 static NSError *
 failure(NSString *what)
 {
-	return [NSError errorWithDomain:@"sweetinstalld" code:1 userInfo:@{NSLocalizedDescriptionKey: what}];
+	return [NSError errorWithDomain:@"asoftinstalld" code:1 userInfo:@{NSLocalizedDescriptionKey: what}];
 }
 
 static uint32_t

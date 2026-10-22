@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>com.sweet.hello</string>
+	<string>com.asoftware.hello</string>
 	<key>CFBundleName</key>
 	<string>Hello</string>
 	<key>CFBundleDisplayName</key>
@@ -36,6 +36,8 @@
 	<array>
 		<string>arm64</string>
 	</array>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright (c) 2026 ASoftware</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

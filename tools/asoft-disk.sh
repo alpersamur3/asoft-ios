@@ -1,27 +1,34 @@
 #!/bin/bash
-# Offline .ipa installation for SWEET (run as root in WSL/Linux, with iOS shut down):
+# Offline changes to an iOS disk image (run as root in WSL/Linux, with iOS shut down):
 #
-#   sweet-ipa.sh setup DISK.qcow2 SWEETINSTALLD   install the sweetinstalld daemon (apps/sweetinstalld)
-#   sweet-ipa.sh add   DISK.qcow2 FILE.ipa...      drop .ipa files into its inbox
-#   sweet-ipa.sh list  DISK.qcow2                  inbox, installed and failed .ipa files with their logs
+#   asoft-disk.sh installer DISK.qcow2 ASOFTINSTALLD  install the asoftinstalld daemon (apps/asoftinstalld)
+#   asoft-disk.sh add       DISK.qcow2 FILE.ipa...    drop .ipa files into its inbox
+#   asoft-disk.sh list      DISK.qcow2                inbox, installed and failed .ipa files with their logs
+#   asoft-disk.sh name      DISK.qcow2 "NAME"         the device name (Settings > General > About > Name)
 #
-# At the next boot sweetinstalld installs every inbox .ipa through installd and
-# logs to the console ("sweetinstalld: ..." in serial.txt). setup puts the daemon
-# at /usr/libexec/sweetinstalld and adds its job to launchd's job cache,
+# At the next boot asoftinstalld installs every inbox .ipa through installd and
+# logs to the console ("asoftinstalld: ..." in serial.txt). installer puts the daemon
+# at /usr/libexec/asoftinstalld and adds its job to launchd's job cache,
 # /System/Library/xpc/launchd.plist (read from disk with boot-arg
-# launchd_unsecure_cache=1; the original is kept as launchd.plist.sweet-orig).
+# launchd_unsecure_cache=1; the original is kept as launchd.plist.sweet-orig). It
+# replaces the earlier sweetinstalld (com.sweet.installd) if that is there.
 #
 # DISK is written through Linux's hfsplus driver, which ignores the journal: a
 # volume whose journal still holds transactions (iOS was not shut down cleanly)
-# gets them replayed first with fsck.hfsplus. Use an overlay, not the base image.
+# gets them replayed first with fsck.hfsplus. Use an overlay, not the base image,
+# and never one that another overlay sits on.
+#
+# Copyright (c) 2026 ASoftware. MIT License, see LICENSE.
 set -euo pipefail
 cmd=${1:-}; disk=${2:-}
-[ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,7p' "$0"; exit 2; }
+[ -n "$cmd" ] && [ -f "$disk" ] || { sed -n '2,8p' "$0"; exit 2; }
 shift 2
-MNT=/mnt/sweet-ipa
+MNT=/mnt/asoft-disk
 DEV=/dev/nbd2
-ROOT=/private/var/mobile/Media/Sweet
-JOB=com.sweet.installd
+ROOT=/private/var/mobile/Media/ASoftware
+OLD_ROOT=/private/var/mobile/Media/Sweet
+JOB=com.asoftware.installd
+OLD_JOB=com.sweet.installd
 
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null ||
     { echo "no hfsplus driver (WSL: build and load it first)" >&2; exit 1; }
@@ -60,21 +67,22 @@ PY
 mount -t hfsplus -o rw,force $DEV $MNT
 
 case $cmd in
-setup)
+installer)
     bin=$1
-    install -m 755 -o 0 -g 0 "$bin" $MNT/usr/libexec/sweetinstalld
+    install -m 755 -o 0 -g 0 "$bin" $MNT/usr/libexec/asoftinstalld
+    rm -f $MNT/usr/libexec/sweetinstalld $MNT/System/Library/LaunchDaemons/$OLD_JOB.plist
     plist=$MNT/System/Library/xpc/launchd.plist
     [ -f $plist.sweet-orig ] || cp -p $plist $plist.sweet-orig
-    python3 -I - $plist $MNT/System/Library/LaunchDaemons/$JOB.plist "$JOB" <<'PY'
+    python3 -I - $plist $MNT/System/Library/LaunchDaemons/$JOB.plist "$JOB" "$OLD_JOB" <<'PY'
 import plistlib, sys
-cache, job_path, label = sys.argv[1:4]
+cache, job_path, label, old_label = sys.argv[1:5]
 job = {
     'Label': label,
-    'ProgramArguments': ['/usr/libexec/sweetinstalld'],
+    'ProgramArguments': ['/usr/libexec/asoftinstalld'],
     'RunAtLoad': True,
     'KeepAlive': True,
     # Without it launchd starts the job as a background process: while iOS boots its
-    # xpcproxy got so little CPU that sweetinstalld ran only 2.5-3.5 min after launch.
+    # xpcproxy got so little CPU that the daemon ran only 2.5-3.5 min after launch.
     'ProcessType': 'Interactive',
     'UserName': 'root',
     'StandardOutPath': '/dev/console',
@@ -82,13 +90,18 @@ job = {
 }
 with open(cache, 'rb') as f:
     plist = plistlib.load(f)
-plist['LaunchDaemons']['/System/Library/LaunchDaemons/%s.plist' % label] = job
+daemons = plist['LaunchDaemons']
+daemons.pop('/System/Library/LaunchDaemons/%s.plist' % old_label, None)
+daemons['/System/Library/LaunchDaemons/%s.plist' % label] = job
 with open(cache, 'wb') as f:
     plistlib.dump(plist, f, fmt=plistlib.FMT_BINARY)
 with open(job_path, 'wb') as f:
     plistlib.dump(job, f, fmt=plistlib.FMT_XML)
-print('launchd job %s added (%d jobs)' % (label, len(plist['LaunchDaemons'])))
+print('launchd job %s added (%d jobs)' % (label, len(daemons)))
 PY
+    if [ -d $MNT$OLD_ROOT ] && [ ! -e $MNT$ROOT ]; then
+        mv $MNT$OLD_ROOT $MNT$ROOT
+    fi
     mkdir -p $MNT$ROOT/Inbox
     chown -R 501:501 $MNT$ROOT
     chmod 0777 $MNT$ROOT/Inbox
@@ -99,6 +112,25 @@ add)
         install -m 644 -o 501 -g 501 "$ipa" "$MNT$ROOT/Inbox/$(basename "$ipa")"
         echo "inbox: $(basename "$ipa")"
     done
+    ;;
+name)
+    # configd's preferences: ComputerName is what iOS shows as the device name; the host
+    # names (Bonjour, DHCP) get the same name without spaces.
+    python3 -I - $MNT/private/var/preferences/SystemConfiguration/preferences.plist "$1" <<'PY'
+import plistlib, re, sys
+path, name = sys.argv[1:3]
+with open(path, 'rb') as f:
+    raw = f.read()
+prefs = plistlib.loads(raw)
+fmt = plistlib.FMT_BINARY if raw.startswith(b'bplist') else plistlib.FMT_XML
+host = re.sub(r'[^A-Za-z0-9-]+', '-', name).strip('-') or 'iPhone'
+system = prefs.setdefault('System', {})
+system.setdefault('System', {}).update({'ComputerName': name, 'ComputerNameEncoding': 0x8000100, 'HostName': host})
+system.setdefault('Network', {}).setdefault('HostNames', {})['LocalHostName'] = host
+with open(path, 'wb') as f:
+    plistlib.dump(prefs, f, fmt=fmt)
+print('device name: %s (host %s)' % (name, host))
+PY
     ;;
 *)
     echo "unknown command $cmd" >&2; exit 2 ;;

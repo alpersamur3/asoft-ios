@@ -1,8 +1,9 @@
 name: ios-apps
 
-# Our own iOS binaries for SWEET: sweetinstalld (installs .ipa files dropped into
-# an inbox, see apps/sweetinstalld/main.m) and Hello.ipa (a minimal UIKit app to
-# test it). Both are ad-hoc signed; SWEET accepts any signer.
+# Our own iOS binaries (ASoftware): asoftinstalld (installs .ipa files dropped into
+# an inbox, see apps/asoftinstalld/main.m) and Hello.ipa (a minimal UIKit app to
+# test it). Both are ad-hoc signed; SWEET accepts any signer. Both carry an
+# __TEXT,__asoftware section and a copyright in their Info.plist.
 on:
   workflow_dispatch:
   push:
@@ -23,22 +24,25 @@ jobs:
           CC="xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK -miphoneos-version-min=16.0 -fobjc-arc -O2"
           mkdir -p out/Payload/Hello.app
 
-          $CC apps/sweetinstalld/main.m -framework Foundation -framework MobileCoreServices -lz -o out/sweetinstalld
-          codesign -f -s - --entitlements apps/sweetinstalld/entitlements.plist out/sweetinstalld
+          SIG="-Wl,-sectcreate,__TEXT,__asoftware,apps/asoftware.txt"
+          $CC apps/asoftinstalld/main.m -framework Foundation -framework MobileCoreServices -lz $SIG \
+              -Wl,-sectcreate,__TEXT,__info_plist,apps/asoftinstalld/Info.plist -o out/asoftinstalld
+          codesign -f -s - -i com.asoftware.installd --entitlements apps/asoftinstalld/entitlements.plist out/asoftinstalld
 
-          $CC apps/hello/main.m -framework UIKit -framework Foundation -o out/Payload/Hello.app/Hello
+          $CC apps/hello/main.m -framework UIKit -framework Foundation $SIG -o out/Payload/Hello.app/Hello
           plutil -convert binary1 -o out/Payload/Hello.app/Info.plist apps/hello/Info.plist
           printf 'APPL????' > out/Payload/Hello.app/PkgInfo
           codesign -f -s - out/Payload/Hello.app
           (cd out && zip -qry Hello.ipa Payload)
 
-          codesign -dvv out/sweetinstalld 2>&1 | head -5
-          codesign -d --entitlements - out/sweetinstalld 2>&1 | head -20
+          codesign -dvv out/asoftinstalld 2>&1 | head -5
+          codesign -d --entitlements - out/asoftinstalld 2>&1 | head -20
+          otool -s __TEXT __asoftware out/asoftinstalld | head -3
           codesign -dvv out/Payload/Hello.app 2>&1 | head -5
           ls -la out out/Payload/Hello.app
       - uses: actions/upload-artifact@v4
         with:
           name: ios-apps
           path: |
-            out/sweetinstalld
+            out/asoftinstalld
             out/Hello.ipa
