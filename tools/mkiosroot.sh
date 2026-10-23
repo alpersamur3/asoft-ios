@@ -4,6 +4,9 @@
 #
 #   mkiosroot.sh OS.dmg SYSTEMOS.dmg APPOS.dmg OUT.img [SIZE]     (SIZE default 16G)
 #
+# OUT may also be a block device (the ASoftware helper VM builds onto its virtio
+# disk), which is used whole. The .dmg arguments may be block devices too.
+#
 # The IPSW images are raw APFS with LZBITMAP-compressed files: they are read
 # through apfs-fuse (decompressing), so the HFS+ copy is uncompressed. On a
 # device /private/preboot is its own volume holding the cryptexes, which
@@ -20,7 +23,7 @@ set -euo pipefail
 
 [[ $# -ge 4 ]] || { sed -n '2,12p' "$0"; exit 2; }
 os=$(realpath "$1") sysos=$(realpath "$2") appos=$(realpath "$3") out=$4 size=${5:-16G}
-[[ ! -e $out ]] || { echo "refusing to overwrite $out" >&2; exit 1; }
+[[ ! -e $out || -b $out ]] || { echo "refusing to overwrite $out" >&2; exit 1; }
 
 # Pre-flight tool check
 missing_tools=()
@@ -71,10 +74,15 @@ apfs_mount "$os" os
 apfs_mount "$sysos" sysos
 apfs_mount "$appos" appos
 
-truncate -s "$size" "$out"
+loop=loop,
+if [[ -b $out ]]; then
+	loop=
+else
+	truncate -s "$size" "$out"
+fi
 mkfs.hfsplus -s -J -v iOSRoot "$out"
 mkdir "$work/root"
-sudo mount -t hfsplus -o loop,force "$out" "$work/root"
+sudo mount -t hfsplus -o ${loop}force "$out" "$work/root"
 mounts=("$work/root" "${mounts[@]}")
 
 copy() {
@@ -95,20 +103,36 @@ done
 
 # dyld does not search the cryptexes at ignition level 1: hard-link every
 # cryptex file that has no counterpart in the OS root (libobjc-trampolines,
-# libffi-trampolines, libstdc++, ...) to its root path.
-for c in OS App; do
-	(cd "$work/root/private/preboot/Cryptexes/$c" && sudo find . ! -type d ! -path './System/Library/Caches/com.apple.dyld/*') |
-	while IFS= read -r f; do
-		f=${f#./}
-		if ! sudo test -e "$work/root/$f" && ! sudo test -L "$work/root/$f"; then
-			sudo mkdir -p "$work/root/$(dirname "$f")"
-			src="$work/root/private/preboot/Cryptexes/$c/$f"
-			# Linux hfsplus cannot hard-link symlinks: copy those.
-			if sudo test -L "$src"; then sudo cp -P "$src" "$work/root/$f"; else sudo ln "$src" "$work/root/$f"; fi
-			echo "linked $c:/$f"
-		fi
-	done
-done
+# libffi-trampolines, libstdc++, ...) to its root path. In one process: the
+# helper VM is emulated, where starting a process per file is slow.
+sudo python3 - "$work/root" <<'EOF'
+import os, sys
+root = sys.argv[1]
+linked = 0
+for c in ('OS', 'App'):
+    base = os.path.join(root, 'private/preboot/Cryptexes', c)
+    for d, dirs, files in os.walk(base):
+        rel_dir = os.path.relpath(d, base)
+        if rel_dir == 'System/Library/Caches/com.apple.dyld':
+            continue
+        for name in files + [n for n in dirs if os.path.islink(os.path.join(d, n))]:
+            rel = os.path.normpath(os.path.join(rel_dir, name))
+            dst = os.path.join(root, rel)
+            if os.path.lexists(dst):
+                continue
+            src = os.path.join(d, name)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.islink(src):
+                # Linux hfsplus cannot hard-link symlinks: copy those.
+                os.symlink(os.readlink(src), dst)
+                st = os.lstat(src)
+                os.lchown(dst, st.st_uid, st.st_gid)
+            else:
+                os.link(src, dst)
+            linked += 1
+            print(f'linked {c}:/{rel}')
+print(f'{linked} cryptex files linked into the root')
+EOF
 
 # logd's log stores, normally made at restore: it checks owner _logd (272)
 # and mode, plus a .migrated marker, else asks a helper and crashes
