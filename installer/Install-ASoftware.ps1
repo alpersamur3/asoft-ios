@@ -144,7 +144,7 @@ $base = "$work\root\ios16-base.qcow2"
 $building = "$work\root\ios16-base.building.qcow2"
 if (-not (Test-Path $base)) {
     Remove-Item "$building*" -ErrorAction SilentlyContinue
-    & "$Dir\installer\Build-iOSDisk.ps1" -Ipsw $Ipsw -Out $building -Qemu $qemu -Helper "$Dir\installer\helper\out" -Cpus $Cpus
+    & "$Dir\installer\Build-iOSDisk.ps1" -Ipsw $Ipsw -Out $building -Qemu $qemu -Helper "$Dir\installer\helper\out"
     Move-Item $building $base
 }
 

@@ -23,22 +23,29 @@ disk() {
 ipsw=$(disk ipsw) root=$(disk root) scratch=$(disk scratch)
 
 progress 1 "reading the IPSW"
-declare -A size
-while read -r role _ s _ _; do
-    size[$role]=$s
+declare -A size offset stored
+while read -r role o s st _; do
+    size[$role]=$s offset[$role]=$o stored[$role]=$st
 done < <(python3 ipsw-members.py "$ipsw")
 
 # no journal: nothing on scratch outlives this job
 mkfs.ext4 -q -F -O ^has_journal "$scratch"
 mkdir -p /mnt/scratch
 mount "$scratch" /mnt/scratch
-image() {    # image ROLE PERCENT: unpack it to /mnt/scratch/ROLE.dmg
-    progress "$2" "unpacking $1 ($((size[$1] >> 20)) MB)"
-    python3 ipsw-members.py "$ipsw" "$1" "/mnt/scratch/$1.dmg"
+image() {    # image ROLE: unpack it to /mnt/scratch/ROLE.dmg
+    if [ "${stored[$1]}" = 1 ]; then
+        # stored, as Apple's are: its bytes as they are, no CRC pass in Python
+        dd if="$ipsw" of="/mnt/scratch/$1.dmg" bs=4M iflag=skip_bytes,count_bytes \
+            skip="${offset[$1]}" count="${size[$1]}" status=none
+    else
+        python3 ipsw-members.py "$ipsw" "$1" "/mnt/scratch/$1.dmg"
+    fi
 }
-image OS 2
-image SystemOS 6
-image AppOS 9
+progress 2 "unpacking the iOS images ($(( (size[OS] + size[SystemOS] + size[AppOS]) >> 20 )) MB)"
+image OS & image SystemOS & image AppOS & wait
+for role in OS SystemOS AppOS; do
+    [ "$(stat -c %s "/mnt/scratch/$role.dmg")" = "${size[$role]}" ] || { echo "ASOFT: $role image short" >&2; exit 1; }
+done
 os=/mnt/scratch/OS.dmg sysos=/mnt/scratch/SystemOS.dmg appos=/mnt/scratch/AppOS.dmg
 
 # The copy is most of the time: report how far it is from the new volume's use

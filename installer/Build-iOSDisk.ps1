@@ -8,7 +8,8 @@ param(
     [string]$Qemu = "$env:ASOFT_WORK\qemu\v11.1.2-asoft\qemu-system-aarch64.exe",
     # Image.gz and initrd.gz from installer/helper/build-*.sh
     [string]$Helper = "$PSScriptRoot\helper\out",
-    [int]$Cpus = 4,
+    # up to 8, as many as the PC has: apfs-fuse, rsync and the guest's kernel share them
+    [int]$Cpus = [Math]::Min(8, [Environment]::ProcessorCount),
     # the helper's serial log, next to the new disk unless given
     [string]$Log = "$Out.log"
 )
@@ -38,7 +39,7 @@ function Escape([string]$path) { $path -replace ',', ',,' }
 
 # cortex-a76, not max: pointer authentication, which max has, is slow under TCG.
 # cache=unsafe: no flushes while the disk is built; a crash means building it again anyway.
-$qemuArgs = @('-M', 'virt', '-cpu', 'cortex-a76', '-smp', $Cpus, '-m', '3G',
+$qemuArgs = @('-M', 'virt', '-cpu', 'cortex-a76', '-smp', $Cpus, '-m', '4G',
     '-kernel', "$Helper\Image.gz", '-initrd', "$Helper\initrd.gz",
     '-append', 'console=ttyAMA0 loglevel=4 asoft.job=build-root',
     '-display', 'none', '-monitor', 'none', '-serial', 'stdio', '-no-reboot', '-nic', 'none',
@@ -59,7 +60,7 @@ $logWriter.AutoFlush = $true
 try {
     Invoke-Tool $Qemu @qemuArgs 2>&1 | ForEach-Object {
         $line = "$_"
-        $logWriter.WriteLine($line)
+        $logWriter.WriteLine(('[{0:mm\:ss}] {1}' -f ((Get-Date) - $started), $line))
         if ($line -match '^ASOFT: progress (\d+) (.*)$') {
             $pct = [int]$Matches[1]
             $elapsed = [int]((Get-Date) - $started).TotalMinutes
