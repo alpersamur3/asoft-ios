@@ -13,7 +13,9 @@ screen (image versions v8-v14 in NOTES.md):
                   panic the system); CommCenter jobs removed (no baseband: it
                   crash-loops and Setup blocks on its CoreTelephony XPC);
                   driverkitd removed (no DriverKit extensions here: it went
-                  over its memory limit at boot and on every app install)
+                  over its memory limit at boot and on every app install);
+                  bluetoothd removed (no Bluetooth: it exited at once and was
+                  started again every 10 s, pulling in lskdd and others)
   plug-ins        moved to PlugIns.disabled, as they crash in a loop here, each
                   restart costing CPU: the speech synthesizers (MacinTalkAUSP,
                   SiriTTSSynthesizerAU, KonaSynthesizer: an exception as they
@@ -71,11 +73,12 @@ def launchd(root):
         if '_PanicOnCrash' in job:
             job['_PanicOnCrasX'] = job.pop('_PanicOnCrash')
             renamed += 1
-    removed = [k for k, j in jobs.items() if j.get('Label') in ('com.apple.CommCenter', 'com.apple.driverkitd')]
+    removed = [k for k, j in jobs.items() if j.get('Label') in ('com.apple.CommCenter', 'com.apple.driverkitd',
+                                                             'com.apple.bluetoothd')]
     for k in removed:
         del jobs[k]
     save(path, plist, st.st_uid, st.st_gid, st.st_mode & 0o7777)
-    print(f'launchd.plist: {renamed} _PanicOnCrash renamed, {len(removed)} CommCenter/driverkitd jobs removed')
+    print(f'launchd.plist: {renamed} _PanicOnCrash renamed, {len(removed)} CommCenter/driverkitd/bluetoothd jobs removed')
 
 
 def containers(root):
