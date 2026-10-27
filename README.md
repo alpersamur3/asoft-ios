@@ -27,6 +27,10 @@ first brought this userland up on a Redmi Note 10 Pro, plus our own for QEMU's v
 > is in this repository: the installer downloads the iOS image from Apple and builds the disk
 > on your PC.
 
+> [!TIP]
+> **New: iOS 26 on your PC's GPU (research preview).** iOS 26.6.2 in the same window, its
+> interface drawn by the PC's GPU through Vulkan. No installer yet: see [`ios26/`](ios26/README.md).
+
 ## Features
 
 | | |
@@ -155,6 +159,10 @@ bizim yamalarımız var.
 > Deneysel. Her şey işlemcide öykünülüyor (GPU yok), bu yüzden telefondan yavaş; Apple'ın
 > güvenlik modeli büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda Apple yazılımı
 > yoktur: kurulum programı iOS kalıbını Apple'dan indirir ve diski sizin bilgisayarınızda kurar.
+
+> [!TIP]
+> **Yeni: ekran kartıyla iOS 26 (araştırma önizlemesi).** Aynı pencerede iOS 26.6.2, arayüzünü
+> bilgisayarın ekran kartı Vulkan üzerinden çiziyor. Henüz kurulum programı yok: bkz. [`ios26/`](ios26/README.md#turkce).
 
 ### Özellikler
 
