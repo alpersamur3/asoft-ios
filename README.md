@@ -4,17 +4,40 @@
 
 # ASoftware iOS
 
-**Apple's iOS 16 in a window on your Windows PC.**
+**Apple's iOS in a window on your Windows PC.**<br>
+iOS 16, ready to install · **new:** iOS 26, drawn by your PC's GPU
 
 ![Windows 10/11 x64](https://img.shields.io/badge/Windows-10%20%7C%2011%20x64-0a84ff?style=flat-square)
 ![iOS 16.7.16](https://img.shields.io/badge/iOS-16.7.16%20(iPhone%20X)-1c1c1e?style=flat-square)
-![QEMU 11.1.2](https://img.shields.io/badge/QEMU-11.1.2-ff9f0a?style=flat-square)
+![iOS 26.6.2 on the GPU](https://img.shields.io/badge/iOS%2026.6.2-GPU%20via%20Vulkan-30d158?style=flat-square)
+![QEMU 11.1](https://img.shields.io/badge/QEMU-11.1-ff9f0a?style=flat-square)
 ![License MIT](https://img.shields.io/badge/license-MIT-30d158?style=flat-square)
 [![Release](https://img.shields.io/github/v/release/alpersamur3/asoft-ios?style=flat-square&color=0a84ff)](https://github.com/alpersamur3/asoft-ios/releases/latest)
+
+<br>
+
+<img src="ios26/screenshots/ios26-gpu.gif" width="420" alt="iOS 26 in the ASoftware window: Settings, scrolling, General, the home screen">
+
+<sub>iOS 26.6.2 on Windows 11, in real time: iOS's own Metal draws the interface, on an NVIDIA RTX 4080 through Vulkan.</sub>
 
 English · [Türkçe](#turkce)
 
 </div>
+
+## Two iOS versions
+
+| | iOS 16 | iOS 26 (new) |
+| --- | --- | --- |
+| **State** | Ready: a one-line installer | Research preview: you build it |
+| **Graphics** | The CPU | **The PC's GPU**: iOS's own Metal, through Vulkan |
+| **iOS** | 16.7.16 of the iPhone X | 26.6.2 of the iPhone 16, on the kernel of Apple's research VM |
+| **Apps** | Safari with real web pages, `.ipa` installs | The system apps, Settings |
+| **Quick boot** | Yes: iOS goes on in seconds | Not yet |
+| **Start** | [Install](#install) | [`ios26/`](ios26/README.md) |
+
+Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gpu).
+
+The rest of this page is about iOS 16; iOS 26 has [its own page](ios26/README.md).
 
 ASoftware iOS boots the real, unmodified iOS 16.7.16 of the iPhone X on QEMU, on an ordinary
 Windows PC: SpringBoard, Settings, Safari and the apps you install. The kernel is Apple's
@@ -26,10 +49,6 @@ first brought this userland up on a Redmi Note 10 Pro, plus our own for QEMU's v
 > Apple's security model is mostly switched off. Not affiliated with Apple. No Apple software
 > is in this repository: the installer downloads the iOS image from Apple and builds the disk
 > on your PC.
-
-> [!TIP]
-> **New: iOS 26 on your PC's GPU (research preview).** iOS 26.6.2 in the same window, its
-> interface drawn by the PC's GPU through Vulkan. No installer yet: see [`ios26/`](ios26/README.md).
 
 ## Features
 
@@ -149,6 +168,19 @@ QEMU on Windows (`qemu/build-windows.sh` or `qemu-win.yml`), the helper VM on Li
 
 <br>
 
+**İki iOS sürümü**
+
+| | iOS 16 | iOS 26 (yeni) |
+| --- | --- | --- |
+| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: kendiniz derlersiniz |
+| **Grafik** | İşlemci | **Bilgisayarın ekran kartı**: iOS'un kendi Metal'i, Vulkan üzerinden |
+| **iOS** | iPhone X'in 16.7.16'sı | iPhone 16'nın 26.6.2'si, Apple'ın araştırma VM'inin çekirdeğinde |
+| **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Sistem uygulamaları, Ayarlar |
+| **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Henüz yok |
+| **Başlangıç** | [Kurulum](#kurulum) | [`ios26/`](ios26/README.md#turkce) |
+
+Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu). Aşağısı iOS 16 hakkında.
+
 ASoftware iOS, iPhone X'in gerçek ve değiştirilmemiş iOS 16.7.16'sını sıradan bir Windows
 PC'de, QEMU'da açar: SpringBoard, Ayarlar, Safari ve kurduğunuz uygulamalar. Çekirdek, Apple'ın
 açık kaynak XNU'su; üzerinde bu sistemi ilk kez bir Redmi Note 10 Pro'da açan
@@ -159,10 +191,6 @@ bizim yamalarımız var.
 > Deneysel. Her şey işlemcide öykünülüyor (GPU yok), bu yüzden telefondan yavaş; Apple'ın
 > güvenlik modeli büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda Apple yazılımı
 > yoktur: kurulum programı iOS kalıbını Apple'dan indirir ve diski sizin bilgisayarınızda kurar.
-
-> [!TIP]
-> **Yeni: ekran kartıyla iOS 26 (araştırma önizlemesi).** Aynı pencerede iOS 26.6.2, arayüzünü
-> bilgisayarın ekran kartı Vulkan üzerinden çiziyor. Henüz kurulum programı yok: bkz. [`ios26/`](ios26/README.md#turkce).
 
 ### Özellikler
 

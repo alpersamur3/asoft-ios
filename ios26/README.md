@@ -4,7 +4,9 @@
 
 **iOS 26 in a window on a Windows PC, its interface drawn by the PC's own GPU.**
 
-<img src="screenshots/lock-screen.png" width="30%" alt="Lock screen"> <img src="screenshots/home-screen.png" width="30%" alt="Home screen"> <img src="screenshots/settings.png" width="30%" alt="Settings">
+<img src="screenshots/ios26-gpu.gif" width="420" alt="iOS 26 in the ASoftware window: Settings, scrolling, General, the home screen">
+
+<sub>Real time, on Windows 11 with an RTX 4080 Laptop: Settings (opened once before), scrolling, General, Home, the home screen's pages.</sub>
 
 English · [Türkçe](#turkce)
 
@@ -33,9 +35,56 @@ same GPU stack on Linux; this is the Windows host.
 | **Window** | The ASoftware window and side bar of the iOS 16 build: Home, Lock, App switcher, volume, screenshots, full screen, pasted text |
 | **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 100 s after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
 
+<img src="screenshots/lock-screen.png" width="30%" alt="Lock screen"> <img src="screenshots/home-screen.png" width="30%" alt="Home screen"> <img src="screenshots/settings.png" width="30%" alt="Settings">
+
 Not yet: the wallpaper (black), quick boot and saved states (the GPU device blocks migration for
-now), `.ipa` installs, audio, the App Store and Apple ID services. For about 3 minutes after the
+now), `.ipa` installs, audio, the App Store and Apple ID services. Calculator stops the VM: it asks
+for a two-plane texture format (`MTLPixelFormatRGB8_444_2P`) that metal2vulkan does not have yet. For about 3 minutes after the
 lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
+
+## Is it really the GPU?
+
+Three checks, each from a different side.
+
+**1. Windows' own counters.** Windows counts GPU use per process: the numbers in Task Manager's
+GPU columns. Measured on the QEMU process while iOS 26 ran, on a laptop with two GPUs:
+
+| The QEMU process, from the lock screen on | RTX 4080 Laptop | Intel UHD (the other GPU) |
+| --- | --- | --- |
+| Dedicated GPU memory | **1.5 to 2.0 GB** | none (0.24 GB shared) |
+| 3D engine | **bursts up to 36 %** when iOS draws | flat, 2 to 8 % |
+
+<img src="screenshots/gpu-chart.png" width="760" alt="GPU use of the QEMU process over a run: memory and 3D engine on the RTX 4080, the Intel GPU flat">
+
+QEMU's memory on the RTX 4080 climbs as iOS boots and loads its interface. The 3D engine works in
+bursts, when the lock screen comes up, as Settings opens and scrolls, and at each Home and swipe, then
+waits: iOS's CPU work is emulated and keeps four host cores busy, so the CPU, not the GPU, sets the
+pace. On the idle home screen iOS keeps drawing, most likely the Clock icon's live hands. Measured on
+2026-10-27, in the run the GIF above comes from, on Windows 11, i7-13700HX, RTX 4080 Laptop (driver
+610.74), 4 vCPUs, with [`scripts/gpu-sample.ps1`](scripts/gpu-sample.ps1). Two engine samples above
+100 %, a glitch of Windows' formatted counters, are left out.
+
+**2. What iOS sends.** reims-vgpu can trace the paravirtual GPU's command stream
+(`REIMS_VGPU_TRACE`). We counted it up to the lock screen:
+- **Without the guest's Metal driver:** iOS sent 4 command buffers and no GPU textures. It draws
+  every surface on the CPU and the host only shows them.
+- **With the driver:** iOS sent 573 Metal command buffers and drew into 70 render-target surfaces.
+
+The picture differs too. The dock's platter, a translucent material, appears only when iOS has its
+Metal driver:
+
+<img src="screenshots/cpu-vs-gpu.png" width="560" alt="The home screen without and with the guest GPU driver">
+
+**3. The library's log.** At start, reims-vgpu names the device it runs the guest's Metal on, and
+metal2vulkan names the Vulkan driver it translates for:
+
+```
+reims_vgpu_core::device: device starting on Metal device NVIDIA GeForce RTX 4080 Laptop GPU, guest pages of 16 KiB
+metal2vulkan: the device NVIDIA GeForce RTX 4080 Laptop GPU: its policy takes native device maths ...
+```
+
+To check it yourself, open Task Manager → *Details*, add the *GPU engine* and *Dedicated GPU
+memory* columns, and look at `qemu-system-aarch64w.exe` while you use iOS.
 
 ## How it works
 
@@ -224,7 +273,12 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
   açılıyor, kaydırma 0,3 sn'de tepki veriyor.
 
 **Henüz yok:** duvar kağıdı (siyah), hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, ses, App Store ve
-Apple ID hizmetleri.
+Apple ID hizmetleri. Hesap Makinesi VM'i durduruyor: metal2vulkan'ın henüz desteklemediği iki düzlemli
+bir doku biçimi (`MTLPixelFormatRGB8_444_2P`) istiyor.
+
+**Gerçekten ekran kartı mı?** Yukarıdaki *Is it really the GPU?* bölümünde Windows'un kendi sayaçlarıyla
+ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,0 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %36'ya kadar
+çıkıyor; diğer GPU (Intel) ne yapılırsa yapılsın %2-8'de düz kalıyor.
 
 **Derleme:** adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar dilden bağımsız). Misafirin GPU
 sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım yazılımı içeriğidir, bu repoda
