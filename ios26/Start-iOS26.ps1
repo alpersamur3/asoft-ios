@@ -57,7 +57,8 @@ $qargs = @(
     '-parallel', 'none',
     '-chardev', "`"socket,id=con,host=127.0.0.1,port=4451,server=on,wait=off,logfile=$O\serial.log`"",
     '-serial', 'chardev:con', '-d', 'guest_errors,unimp', '-D', "`"$O\qemu.log`"",
-    '-cpu', $Cpu, '-smp', "$Smp", '-accel', 'tcg,thread=multi',
+    # tb-size: a 2 GiB code buffer (x86-64's maximum); the 1 GiB default refilled ~7 times in 13 min
+    '-cpu', $Cpu, '-smp', "$Smp", '-accel', 'tcg,thread=multi,tb-size=2048',
     '-drive', "`"file=$Disk,if=none,id=root,cache=writeback,discard=unmap`"", '-device', 'virtio-blk-pci,drive=root',
     '-qmp', 'tcp:127.0.0.1:4453,server=on,wait=off',
     # the touchscreen's port reports PORTSC.DR: iOS takes it as the built-in digitizer
