@@ -2,7 +2,10 @@
 --cpus N, then the root26 tweaks (as dt-root26.py), plus A = no-effaceable
 -storage (keybag chain) and /chosen/machine-timeouts/global-scale=100 (so the
 kernel's ticket-spinlock timeout doesn't panic under SMP on a slow host, as in
-iOS 16). Non-diag, SEP off.
+iOS 16). Non-diag, SEP off. The product's syscfg keys come from the tree's own
+gestalt variant (an iPhone 16 Pro's: artwork subtype 2556, no home button),
+without which iOS takes the device for one with a home button (qemu-sptm
+5eba0a3 or later).
 
     dt-root26smp.py RAW_ADT OUT [--cpus N]     (default N=2)
 
@@ -30,6 +33,7 @@ def phandles(n):
 
 
 root, _ = dt.parse(open(raw, 'rb').read())
+filled = dt.fill_from_gestalt_variant(root)
 dt.fixup(root, dt.DRAM_BASE, dt.DRAM_SIZE, ncpus, False, dt.empty_nvram(),
          display_scale=3, no_effaceable_storage=True, timeout_scale=100)
 
@@ -55,3 +59,4 @@ if not uci or int.from_bytes(uci[1], 'little') == 0:
 open(out, 'wb').write(dt.encode(root))
 print('wrote %s  cpus=%d  (chosen children: %s)'
       % (out, ncpus, [c.name for c in chosen.children]))
+print('filled from the gestalt variant (%d): %s' % (len(filled), ', '.join(n for _, n in filled)))

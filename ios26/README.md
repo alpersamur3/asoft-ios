@@ -32,6 +32,7 @@ same GPU stack on Linux; this is the Windows host.
 | **GPU** | iOS's own Metal draws the interface; the PC's GPU runs it through Vulkan (tested: NVIDIA RTX 4080 Laptop, Windows 11) |
 | **iOS** | Lock screen, home screen with the system apps, Settings and its pages, Weather |
 | **Input** | Mouse as the touchscreen (tap, swipe, scroll), the PC keyboard, Home, side button and volume |
+| **Gestures** | A Face ID iPhone's (an iPhone 16 Pro's layout: Dynamic Island, its status bar): swipe up to open and to go home, swipe up and hold for the app switcher, Control Center from the top right, Notification Center from the top left, back from the left edge. A drag from the display's left edge becomes iOS's back gesture (a quick swipe is too fast for the emulated app), and the side bar has Back and App switcher |
 | **Window** | The ASoftware window and side bar of the iOS 16 build: Home, Lock, App switcher, volume, screenshots, full screen, pasted text |
 | **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay, `-Keep` writes the base image |
 | **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
@@ -168,7 +169,11 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
 1. *By hand*, in `$ASOFT26`: `ipsw img4 im4p extract cloudos/all_flash/DeviceTree.vphone600ap.im4p -o cloud/vphone600ap.adt`
 2. `kdec.sh`, then `unwrap-fw.sh` → `fw/bootkc`, `fw/sptm`, `fw/txm`, `fw/dtree.orig`
 3. `QEMU_SPTM=<qemu-sptm checkout> python3 dt-root26smp.py fw/dtree.orig dtree-smp4 --cpus 4`
-   (`dtree-smp8 --cpus 8` too, if you like: we have not booted 8 yet)
+   (`dtree-smp8 --cpus 8` too, if you like: we have not booted 8 yet). With qemu-sptm 5eba0a3 or
+   later it fills the product's syscfg keys from the tree's own gestalt variant (it prints the 42
+   it filled): without them iOS takes the VM for an iPhone with a Home button (the old status bar,
+   "Press home to open", Control Center from the bottom, no home gestures). A disk already booted
+   with an older tree keeps that answer in its MobileGestalt cache: `root26-mgcache.py reset` on it.
 4. `SYSROOT_TAR=<darwin-vm>/sysroot/ios_sysroot.tar.gz sysroot-check.sh`
 5. *By hand:* unwrap the cloudOS ramdisk to `$ASOFT26_LINUX/rd/rd.apfs` and put its trust cache at
    `cloud/rd.trustcache.im4p`. Then run `mk-ramdisk.sh` and copy `rd-shell.hfs` to `$ASOFT26`. The
@@ -230,6 +235,11 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
       `Library/Application Support/PRBPosterExtensionDataStore` in its data container (its first
       run then sets up wallpaper 7565), copy `root.tc` to `root-collections.tc` with the new
       CDHash added, and bake the store as above with `-Wallpaper collections -Keep`.
+
+4. **Gestures:** `edge-patch.py $ASOFT26/dsc $ASOFT26/dscpatch-edge` (UIKitCore's touch edge type,
+   `edge-cave.s`: our touchscreen's driver sets no edge bits, and without them no touch is an edge
+   touch: no home gesture, app switcher or edge swipe back). Write that `.03` into the image as
+   `apply-apps.sh` writes `.42` and add the CDHash it prints (to `root-collections.tc` too).
 
 Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 100 s; press Home (F1).
 
@@ -297,6 +307,11 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 - **Pencere:** iOS 16 sürümündeki ASoftware penceresi ve yan çubuğu.
 - **Hız:** i7-13700HX'te kilit ekranı açılıştan yaklaşık 100 sn sonra geliyor, Ayarlar yaklaşık 4 sn'de
   açılıyor, kaydırma 0,3 sn'de tepki veriyor.
+- **Hareketler:** Face ID'li iPhone düzeni (iPhone 16 Pro: Dynamic Island, onun status bar'ı): yukarı
+  kaydırıp açma ve eve dönme, kaydırıp bekleyince uygulama değiştirici, sağ üstten Denetim Merkezi, sol
+  üstten Bildirim Merkezi, sol kenardan geri. Ekranın sol kenarından başlayan sürükleme iOS'un geri
+  hareketine çevriliyor (hızlı bir kaydırma emüle edilen uygulamaya fazla hızlı); yan çubukta Back ve
+  App switcher var.
 - **Duvar kağıdı:** iOS 26'nın kendi duvar kağıdı (MercuryPoster: iOS'un Metal'inin ekran kartında
   çizdiği 3B sahne), üstünde Liquid Glass saat; `-Wallpaper collections` iOS 17 Collections duvar kağıdı
   (derleme adımı 3.6, misafir CPU'suna daha hafif).
