@@ -8,25 +8,33 @@
 #   dtree-smp4, dtree-smp8         the device tree for 4 or 8 vCPUs
 #   root.tc                        the trust cache for the root disk
 #   rd-shell.hfs                   the shell ramdisk
-#   root.qcow2                     the iOS 26 disk
+#   root.qcow2                     the iOS 26 disk (iOS 26's own wallpaper)
+#   root-collections.qcow2/.tc     optional: the Collections wallpaper disk (README.md, step 3.6)
 #   qemu\                          qemu-sptm built for Windows, with reims-vgpu's DLLs
 # Outputs (serial, logs) go to <Work>\runs\<Name>. QMP 127.0.0.1:4453 and HMP 4452 stay open
 # for tools; the guest's serial console is on 127.0.0.1:4451.
 # The disk, as the iOS 16 launcher: by default iOS writes to a throwaway overlay (-snapshot),
 # -Persist keeps its changes in a user overlay on the base image, -Keep writes the base image.
-#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Disk root.qcow2] [-Persist [-Reset]] [-Keep]
+#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep]
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8]
 param(
     [string]$Work = $env:ASOFT26_WORK,
     [string]$Name = 'w1',
-    [string]$Disk = 'root.qcow2',
-    [string]$Tc = 'root.tc',
+    # The base disk and its trust cache. -Wallpaper ios26 (default): root.qcow2, iOS 26's own
+    # wallpaper (MercuryPoster, drawn by the guest's Metal on the host GPU; needs metal2vulkan's
+    # `windows` branch at 56705098 or later). -Wallpaper collections: root-collections.qcow2, the
+    # iOS 17 Collections wallpaper of build step 3.6, lighter on the guest's CPU. -Disk/-Tc name
+    # another pair.
+    [ValidateSet('ios26', 'collections')][string]$Wallpaper = 'ios26',
+    [string]$Disk = '',
+    [string]$Tc = '',
     # -Persist: keep what iOS writes (settings, apps) in $UserDisk, a qcow2 overlay on $Disk; the
     # base image stays as built. -Reset deletes the overlay first (back to the base state).
     # -Keep instead writes straight into $Disk. Neither: a throwaway overlay in $TmpDir.
     [switch]$Persist,
     [switch]$Reset,
-    [string]$UserDisk = 'root26-user.qcow2',
+    # (one per base disk: an overlay holds its base's name, and each base has its own trust cache)
+    [string]$UserDisk = '',
     [switch]$Keep,
     [string]$TmpDir = 'tmp',
     # -Net: a virtio-net NIC on QEMU's user-mode network (10.0.2.15, NAT, no inbound). Whether
@@ -46,6 +54,11 @@ $ErrorActionPreference = 'Stop'
 if (-not $Work) { $Work = Join-Path $PSScriptRoot 'work' }
 $Work = (Resolve-Path $Work).Path
 function In-Work([string]$p) { if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $Work $p } }
+$base = @{ ios26 = @('root.qcow2', 'root.tc', 'root26-user.qcow2')
+           collections = @('root-collections.qcow2', 'root-collections.tc', 'root-collections-user.qcow2') }[$Wallpaper]
+if (-not $Disk) { $Disk = $base[0] }
+if (-not $Tc) { $Tc = $base[1] }
+if (-not $UserDisk) { $UserDisk = $base[2] }
 $Disk = In-Work $Disk
 $Tc = In-Work $Tc
 $UserDisk = In-Work $UserDisk

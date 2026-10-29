@@ -35,13 +35,12 @@ same GPU stack on Linux; this is the Windows host.
 | **Window** | The ASoftware window and side bar of the iOS 16 build: Home, Lock, App switcher, volume, screenshots, full screen, pasted text |
 | **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay, `-Keep` writes the base image |
 | **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
-| **Wallpaper** | The Collections (iOS 17) wallpaper on the lock and home screens, after the PosterBoard patch in build step 3 |
+| **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 3.6) |
 | **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 100 s after start (160 s before our TCG changes: `notes`), Settings opens in about 4 s, a scroll answers in 0.3 s |
 
-<img src="screenshots/lock-screen.png" width="30%" alt="Lock screen"> <img src="screenshots/home-screen.png" width="30%" alt="Home screen"> <img src="screenshots/settings.png" width="30%" alt="Settings">
+<img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen in the window"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
 
-Not yet: the dynamic (Mercury) wallpapers draw black, so the default is switched to a Collections one;
-quick boot and saved states (the GPU device blocks migration for now), `.ipa` installs, a clean
+Not yet: quick boot and saved states (the GPU device blocks migration for now), `.ipa` installs, a clean
 shutdown from the window (closing it quits at once; the default overlay makes that harmless), audio,
 the App Store and Apple ID services. Calculator stops the VM: it asks
 for a two-plane texture format (`MTLPixelFormatRGB8_444_2P`) that metal2vulkan does not have yet. For about 3 minutes after the
@@ -215,16 +214,22 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
       (PosterBoard's purgeable-file call, which HFS+ refuses).
    4. `apply-apps.sh`, then `root26-nowatchdog.py`.
    5. Add the patched subcache's CDHash.
-   6. The wallpaper: the default poster is MercuryPoster (`space.dynamic`), whose Metal output never
-      reaches the screen here (black). PosterBoard picks the Collections poster instead for two
-      product types only (`_defaultLockScreenWallpaperExtensionIdentifier`, a `B.EQ`); make it
-      unconditional with a second 4-byte patch on the same subcache,
+   6. The wallpaper: iOS 26's default poster, MercuryPoster (`space.dynamic`), is a 3D scene its
+      Metal draws; it needs metal2vulkan's `windows` branch at 56705098 or later (before that it
+      drew black: its uniforms are bound 4 bytes past a multiple of 16, which iOS allows and the
+      translator read 4 bytes early). Boot once with `-Keep` and leave it for 6 minutes:
+      PosterBoard's first run writes the poster store, and the throwaway overlay of a normal start
+      would redo that every time.
+      Optional, a lighter wallpaper (the poster's extension costs the emulated CPU): iOS 17's
+      Collections one. PosterBoard picks it for two product types only
+      (`_defaultLockScreenWallpaperExtensionIdentifier`, a `B.EQ`); make it unconditional with a
+      second 4-byte patch on the same subcache,
       `dsc-patch.py $ASOFT26/dscpatch 0x22066ebc0 a0000054 05000014 $ASOFT26/dscpatch-wp`, write
-      that `.42` into the image as in `apply-apps.sh` (`cat >`, keeping the hard link), delete
-      PosterBoard's `Library/Application Support/PRBPosterExtensionDataStore` in its data container
-      (its first run then sets up wallpaper 7565), and add the new CDHash to the trust cache.
-      Then boot once with `-Keep` and leave it for 6 minutes: PosterBoard's first run writes the
-      poster store, and the throwaway overlay of a normal start would redo that every time.
+      that `.42` into an overlay `root-collections.qcow2` on `root.qcow2` as in `apply-apps.sh`
+      (`cat >`, keeping the hard link), delete PosterBoard's
+      `Library/Application Support/PRBPosterExtensionDataStore` in its data container (its first
+      run then sets up wallpaper 7565), copy `root.tc` to `root-collections.tc` with the new
+      CDHash added, and bake the store as above with `-Wallpaper collections -Keep`.
 
 Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 100 s; press Home (F1).
 
@@ -292,9 +297,11 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 - **Pencere:** iOS 16 sürümündeki ASoftware penceresi ve yan çubuğu.
 - **Hız:** i7-13700HX'te kilit ekranı açılıştan yaklaşık 100 sn sonra geliyor, Ayarlar yaklaşık 4 sn'de
   açılıyor, kaydırma 0,3 sn'de tepki veriyor.
+- **Duvar kağıdı:** iOS 26'nın kendi duvar kağıdı (MercuryPoster: iOS'un Metal'inin ekran kartında
+  çizdiği 3B sahne), üstünde Liquid Glass saat; `-Wallpaper collections` iOS 17 Collections duvar kağıdı
+  (derleme adımı 3.6, misafir CPU'suna daha hafif).
 
-**Henüz yok:** dinamik (Mercury) duvar kağıtları siyah çiziliyor, bu yüzden varsayılan Collections
-duvar kağıdına çevrildi (derleme adımı 3.6); hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, pencereden
+**Henüz yok:** hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, pencereden
 temiz kapanış (kapatmak hemen çıkar; varsayılan geçici overlay bunu zararsız kılar), ses, App Store ve
 Apple ID hizmetleri. Hesap Makinesi VM'i durduruyor: metal2vulkan'ın henüz desteklemediği iki düzlemli
 bir doku biçimi (`MTLPixelFormatRGB8_444_2P`) istiyor.
