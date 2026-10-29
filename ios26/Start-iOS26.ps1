@@ -12,12 +12,29 @@
 #   qemu\                          qemu-sptm built for Windows, with reims-vgpu's DLLs
 # Outputs (serial, logs) go to <Work>\runs\<Name>. QMP 127.0.0.1:4453 and HMP 4452 stay open
 # for tools; the guest's serial console is on 127.0.0.1:4451.
-#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Disk root.qcow2] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8]
+# The disk, as the iOS 16 launcher: by default iOS writes to a throwaway overlay (-snapshot),
+# -Persist keeps its changes in a user overlay on the base image, -Keep writes the base image.
+#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Disk root.qcow2] [-Persist [-Reset]] [-Keep]
+#                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8]
 param(
     [string]$Work = $env:ASOFT26_WORK,
     [string]$Name = 'w1',
     [string]$Disk = 'root.qcow2',
     [string]$Tc = 'root.tc',
+    # -Persist: keep what iOS writes (settings, apps) in $UserDisk, a qcow2 overlay on $Disk; the
+    # base image stays as built. -Reset deletes the overlay first (back to the base state).
+    # -Keep instead writes straight into $Disk. Neither: a throwaway overlay in $TmpDir.
+    [switch]$Persist,
+    [switch]$Reset,
+    [string]$UserDisk = 'root26-user.qcow2',
+    [switch]$Keep,
+    [string]$TmpDir = 'tmp',
+    # -Net: a virtio-net NIC on QEMU's user-mode network (10.0.2.15, NAT, no inbound). Whether
+    # this kernel drives it has not been checked yet; off until it is.
+    [switch]$Net,
+    # -Page4K: 4K softmmu pages (QEMU's default). Without it the guest's 16K pages are kept
+    # whole in QEMU's TLB: one page walk per page instead of four (lock screen 135 -> 110-120 s)
+    [switch]$Page4K,
     [switch]$NoGl,
     # pauth-impdef: TCG's cheap pointer-authentication algorithm instead of QARMA5 (iOS 26 is
     # arm64e: PAC instructions in every function); -Cpu max for the architected one
@@ -31,6 +48,8 @@ $Work = (Resolve-Path $Work).Path
 function In-Work([string]$p) { if ([IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $Work $p } }
 $Disk = In-Work $Disk
 $Tc = In-Work $Tc
+$UserDisk = In-Work $UserDisk
+$TmpDir = In-Work $TmpDir
 foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', "dtree-smp$Smp", 'rd-shell.hfs')) {
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
 }
@@ -39,6 +58,51 @@ $O = Join-Path $Work "runs\$Name"
 New-Item -ItemType Directory -Force $O | Out-Null
 $exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
 if (-not (Test-Path $exe)) { $exe = Join-Path $Work 'qemu\qemu-system-aarch64.exe' }
+
+# Two QEMUs writing one disk would wreck it (QEMU's image locking does not work on Windows)
+$written = if ($Persist) { $UserDisk } elseif ($Keep) { $Disk } else { '' }
+if ($written) {
+    $leaf = [IO.Path]::GetFileName($written)
+    $other = Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($leaf) } | Select-Object -First 1
+    if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
+}
+
+# qemu-img: next to the QEMU, an installed QEMU, or the WSL distro the disk was built in
+function New-Overlay([string]$base, [string]$overlay) {
+    # Next to the base image the backing path is relative, so WSL tools (qemu-nbd) open it too
+    $backing = if ((Split-Path $overlay) -eq (Split-Path $base)) { Split-Path $base -Leaf } else { $base }
+    $qemuImg = Join-Path (Split-Path $exe) 'qemu-img.exe'
+    if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
+    if (Test-Path $qemuImg) {
+        & $qemuImg create -q -f qcow2 -b $backing -F qcow2 $overlay
+    } else {
+        $wsl = '/mnt/' + $overlay.Substring(0, 1).ToLower() + ($overlay.Substring(2) -replace '\\', '/')
+        wsl -d ios-emu -u root -- qemu-img create -q -f qcow2 -b $backing -F qcow2 $wsl
+    }
+    if ($LASTEXITCODE) { throw "qemu-img could not create $overlay" }
+}
+
+$snapshot = @()
+if ($Persist) {
+    if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk }
+    if (-not (Test-Path $UserDisk)) {
+        New-Overlay $Disk $UserDisk
+        Write-Host "New user disk $UserDisk (on $Disk)"
+    }
+    $Disk = $UserDisk
+} elseif (-not $Keep) {
+    # -snapshot keeps its overlay in %TEMP% (C:): next to the disks instead, so the copy-on-write
+    # traffic stays on their drive
+    New-Item -ItemType Directory -Force $TmpDir | Out-Null
+    $env:TMPDIR = $TmpDir
+    $env:TEMP = $TmpDir
+    $env:TMP = $TmpDir
+    $snapshot = @('-snapshot')
+    Write-Host "Throwaway run: what iOS writes is dropped at exit (-Persist keeps it)"
+}
+
+$env:ASOFT_PAGE_BITS = if ($Page4K) { '12' } else { '14' }
 $env:REIMS_VGPU_LOG = 'warn'
 Remove-Item Env:REIMS_VGPU_TRACE -ErrorAction SilentlyContinue
 $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
@@ -66,6 +130,7 @@ $qargs = @(
     '-device', 'usb-kbd,bus=xhci.0,port=1,id=ukbd',
     '-device', 'usb-touchscreen,bus=xhci.0,port=2,id=utouch',
     '-device', 'usb-consumer,bus=xhci.0,port=3,id=ucons'
-)
+) + $snapshot
+if ($Net) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 $q = Start-Process -FilePath $exe -ArgumentList $qargs -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
 "started $exe pid $($q.Id) -> $O"

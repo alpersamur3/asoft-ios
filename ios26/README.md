@@ -33,12 +33,17 @@ same GPU stack on Linux; this is the Windows host.
 | **iOS** | Lock screen, home screen with the system apps, Settings and its pages, Weather |
 | **Input** | Mouse as the touchscreen (tap, swipe, scroll), the PC keyboard, Home, side button and volume |
 | **Window** | The ASoftware window and side bar of the iOS 16 build: Home, Lock, App switcher, volume, screenshots, full screen, pasted text |
-| **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 100 s after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
+| **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay, `-Keep` writes the base image |
+| **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
+| **Wallpaper** | The Collections (iOS 17) wallpaper on the lock and home screens, after the PosterBoard patch in build step 3 |
+| **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 100 s after start (160 s before our TCG changes: `notes`), Settings opens in about 4 s, a scroll answers in 0.3 s |
 
 <img src="screenshots/lock-screen.png" width="30%" alt="Lock screen"> <img src="screenshots/home-screen.png" width="30%" alt="Home screen"> <img src="screenshots/settings.png" width="30%" alt="Settings">
 
-Not yet: the wallpaper (black), quick boot and saved states (the GPU device blocks migration for
-now), `.ipa` installs, audio, the App Store and Apple ID services. Calculator stops the VM: it asks
+Not yet: the dynamic (Mercury) wallpapers draw black, so the default is switched to a Collections one;
+quick boot and saved states (the GPU device blocks migration for now), `.ipa` installs, a clean
+shutdown from the window (closing it quits at once; the default overlay makes that harmless), audio,
+the App Store and Apple ID services. Calculator stops the VM: it asks
 for a two-plane texture format (`MTLPixelFormatRGB8_444_2P`) that metal2vulkan does not have yet. For about 3 minutes after the
 lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
 
@@ -210,8 +215,22 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
       (PosterBoard's purgeable-file call, which HFS+ refuses).
    4. `apply-apps.sh`, then `root26-nowatchdog.py`.
    5. Add the patched subcache's CDHash.
+   6. The wallpaper: the default poster is MercuryPoster (`space.dynamic`), whose Metal output never
+      reaches the screen here (black). PosterBoard picks the Collections poster instead for two
+      product types only (`_defaultLockScreenWallpaperExtensionIdentifier`, a `B.EQ`); make it
+      unconditional with a second 4-byte patch on the same subcache,
+      `dsc-patch.py $ASOFT26/dscpatch 0x22066ebc0 a0000054 05000014 $ASOFT26/dscpatch-wp`, write
+      that `.42` into the image as in `apply-apps.sh` (`cat >`, keeping the hard link), delete
+      PosterBoard's `Library/Application Support/PRBPosterExtensionDataStore` in its data container
+      (its first run then sets up wallpaper 7565), and add the new CDHash to the trust cache.
 
 Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 100 s; press Home (F1).
+
+The disk works as in the iOS 16 launcher: by default iOS writes to a throwaway overlay and the
+image is as built again at the next start; `-Persist` keeps what iOS writes (settings, apps) in
+`root26-user.qcow2`, an overlay on the base image, and `-Persist -Reset` drops that overlay first;
+`-Keep` writes the base image itself. Two launchers on one disk refuse to start. `-Net` adds a
+virtio-net NIC on QEMU's user-mode network (see *What works*).
 
 ### The guest's GPU driver
 
@@ -272,9 +291,15 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 - **Hız:** i7-13700HX'te kilit ekranı açılıştan yaklaşık 100 sn sonra geliyor, Ayarlar yaklaşık 4 sn'de
   açılıyor, kaydırma 0,3 sn'de tepki veriyor.
 
-**Henüz yok:** duvar kağıdı (siyah), hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, ses, App Store ve
+**Henüz yok:** dinamik (Mercury) duvar kağıtları siyah çiziliyor, bu yüzden varsayılan Collections
+duvar kağıdına çevrildi (derleme adımı 3.6); hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, pencereden
+temiz kapanış (kapatmak hemen çıkar; varsayılan geçici overlay bunu zararsız kılar), ses, App Store ve
 Apple ID hizmetleri. Hesap Makinesi VM'i durduruyor: metal2vulkan'ın henüz desteklemediği iki düzlemli
 bir doku biçimi (`MTLPixelFormatRGB8_444_2P`) istiyor.
+
+**Başlatıcı:** disk iOS 16 başlatıcısındaki gibi; varsayılan geçici overlay, `-Persist` iOS'un yazdıklarını
+kullanıcı overlay'inde tutar, `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15).
+16K softmmu sayfası varsayılan (`-Page4K` eskisi): kilit ekranı 135 → ~100 sn.
 
 **Gerçekten ekran kartı mı?** Yukarıdaki *Is it really the GPU?* bölümünde Windows'un kendi sayaçlarıyla
 ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,0 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %36'ya kadar
