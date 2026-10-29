@@ -223,6 +223,8 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
       that `.42` into the image as in `apply-apps.sh` (`cat >`, keeping the hard link), delete
       PosterBoard's `Library/Application Support/PRBPosterExtensionDataStore` in its data container
       (its first run then sets up wallpaper 7565), and add the new CDHash to the trust cache.
+      Then boot once with `-Keep` and leave it for 6 minutes: PosterBoard's first run writes the
+      poster store, and the throwaway overlay of a normal start would redo that every time.
 
 Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 100 s; press Home (F1).
 
