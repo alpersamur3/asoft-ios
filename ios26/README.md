@@ -186,7 +186,10 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
 2. `mktc.py -2 root.tc iphone/*.trustcache root26.qcow2.hashes`: the trust cache.
 3. `mk-root26g.sh root26.qcow2 root26g.qcow2`: the partitioned disk (system and a 16 GB Data volume).
 4. Through `root26-do.sh root26g.qcow2 'python3 SCRIPT $R ...'`, in this order:
-   1. `root26-prefs.py`, `root26-sb-undiag.py`, `root26-bbd-fix.py`
+   1. `root26-prefs.py`, `root26-sb-undiag.py`, `root26-bbd-fix.py`. `root26-prefs.py` also turns
+      the side button's press and hold off: under TCG iOS reads a click that wakes the display as
+      a press and hold, which opened Siri. On a disk built before 2026-10-29, run it again on the
+      top overlay (it is idempotent).
    2. *by hand:* `/private/var/keybags/systembag.kb`, a plist with `KeyBagKeys` = the data `SWEET`
       (owner root, mode 0600)
    3. `root26-churn.py on`, `root26-dbg-off.py`

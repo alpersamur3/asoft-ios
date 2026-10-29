@@ -15,6 +15,8 @@ Writes (Data volume, /private/var):
                    (if its system container exists yet)
   audio            VirtualAudio HAL plug-in disabled, MediaToolbox
                    StartRecorderServer off (mediaserverd crash loop w/o a GPU)
+  accessibility    the side button's press and hold off (a click that wakes the
+                   display read as one opened Siri)
 Build/version are read from the image's SystemVersion.plist. Idempotent.
 launchd/containers are done separately by root26-tweaks.py at build time.
 """
@@ -127,6 +129,11 @@ def main():
                            'SilentICDPUpgrade')})
     merge_pref(root, 'com.apple.managedconfiguration.notbackedup', {
         'LockdownActivationIndicatesCloudConfigurationAvailable': False})
+    # Side button press and hold: off (Accessibility > Side Button > Press and Hold to Speak),
+    # what Siri's "Don't Use Siri" sets. Under TCG the release of a click that wakes the display
+    # reaches backboardd after its long-press timer, which opened Siri's setup sheet; Siri has
+    # no network here anyway.
+    merge_pref(root, 'com.apple.Accessibility', {'HomeButtonAssistantPreference': 2})
 
 
 if __name__ == '__main__':

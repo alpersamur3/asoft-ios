@@ -48,7 +48,9 @@ param(
     # arm64e: PAC instructions in every function); -Cpu max for the architected one
     [string]$Cpu = 'max,pauth-impdef=on',
     # vCPUs: 4 or 8 (dtree-smpN from dt-root26smp.py --cpus N)
-    [ValidateSet(4, 8)][int]$Smp = 4
+    [ValidateSet(4, 8)][int]$Smp = 4,
+    # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
+    [string[]]$Extra = @()
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Work) { $Work = Join-Path $PSScriptRoot 'work' }
@@ -145,5 +147,6 @@ $qargs = @(
     '-device', 'usb-consumer,bus=xhci.0,port=3,id=ucons'
 ) + $snapshot
 if ($Net) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
+$qargs += $Extra
 $q = Start-Process -FilePath $exe -ArgumentList $qargs -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
 "started $exe pid $($q.Id) -> $O"
