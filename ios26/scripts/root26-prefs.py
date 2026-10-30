@@ -17,6 +17,9 @@ Writes (Data volume, /private/var):
                    StartRecorderServer off (mediaserverd crash loop w/o a GPU)
   accessibility    the side button's press and hold off (a click that wakes the
                    display read as one opened Siri)
+  display          Auto-Lock 5 min (not 1) and the Lock Screen dark after 60 s (not
+                   6: SBMinimumLockscreenIdleTime). Auto-Lock Never kept the side button
+                   from locking the Home Screen here, so 5 min, the longest other choice
 Build/version are read from the image's SystemVersion.plist. Idempotent.
 launchd/containers are done separately by root26-tweaks.py at build time.
 """
@@ -104,6 +107,24 @@ def audio(root):
         print('StartRecorderServer off', os.path.relpath(conf, root))
 
 
+def auto_lock(root, seconds):
+    """Settings > Display & Brightness > Auto-Lock, as Settings writes it: the user setting and the
+    effective settings managed configuration derives from it."""
+    d = os.path.join(root, 'private/var/mobile/Library/UserConfigurationProfiles')
+    path = os.path.join(d, 'UserSettings.plist')
+    data = load(path) if os.path.exists(path) else {}
+    data.setdefault('restrictedValue', {})['maxInactivity'] = {'value': seconds}
+    os.makedirs(d, exist_ok=True)
+    save(path, data, MOBILE, MOBILE, 0o644)
+    for p in ('EffectiveUserSettings.plist', 'PublicInfo/PublicEffectiveUserSettings.plist'):
+        fp = os.path.join(d, p)
+        if os.path.exists(fp):
+            e = load(fp)
+            e.setdefault('restrictedValue', {}).setdefault('maxInactivity', {})['value'] = seconds
+            save(fp, e, MOBILE, MOBILE, 0o644)
+    print('auto-lock', seconds, 's')
+
+
 def main():
     if len(sys.argv) != 2 or not os.path.isdir(os.path.join(sys.argv[1], 'System/Library/xpc')):
         sys.exit(__doc__)
@@ -117,6 +138,7 @@ def main():
         'DMUserDataDisposition': {'SyntheticDidUpgrade': False, 'buildVersion': build}})
     merge_pref(root, 'com.apple.springboard', {
         'BKNoWatchdogs': True,
+        'SBMinimumLockscreenIdleTime': 60,
         'FBLaunchWatchdogExceptions': {'com.apple.purplebuddy': 100.0},
         'MCForceShowCloudConfigurationUI': False})
     merge_pref(root, 'com.apple.purplebuddy', {
@@ -134,6 +156,7 @@ def main():
     # reaches backboardd after its long-press timer, which opened Siri's setup sheet; Siri has
     # no network here anyway.
     merge_pref(root, 'com.apple.Accessibility', {'HomeButtonAssistantPreference': 2})
+    auto_lock(root, 300)
 
 
 if __name__ == '__main__':

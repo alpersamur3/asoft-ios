@@ -200,6 +200,10 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
       goes dark in 7 s, the side button locks and wakes, and the work after a start ends in about 15
       minutes instead of 30. See vphone-cli's `Research/Guest/service_trimming.md` before cutting
       more: CommCenter, cloudd, mobileassetd, sleepd and siriactionsd make the guest worse when off.
+   5. `root26-trim.py on`: vphone-cli's trimmed service profile for 26.6.2 (120 jobs, as launchd
+      overrides in `disabled.plist`; `off` undoes it). `root26-prefs.py` also sets Auto-Lock to
+      5 minutes and the Lock Screen to go dark after 60 s instead of 6. On an older disk, run both
+      on the top overlay.
 5. Boot it once (`Start-iOS26.ps1 -Disk root26g.qcow2`) and quit. Then, again through
    `root26-do.sh`, run `root26-persona.py on` and `root26-mgcache.py reset`. `root26-do.sh` replays
    the HFS+ journal first.
