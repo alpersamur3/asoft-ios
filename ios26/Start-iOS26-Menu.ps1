@@ -70,6 +70,21 @@ function Pick-Folder([string]$description, [string]$start) {
     return $null
 }
 
+function Pick-File([string]$title, [string]$filter) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $dlg = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Title = $title
+        $dlg.Filter = $filter
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { return $dlg.FileName }
+    } catch {
+        Write-Host $title
+        $typed = Read-Host 'Path (blank to cancel)'
+        if ($typed) { return $typed }
+    }
+    return $null
+}
+
 function Ask-YesNo([string]$q, [bool]$default) {
     $suffix = if ($default) { '[Y/n]' } else { '[y/N]' }
     $a = Read-Host "$q $suffix"
@@ -130,11 +145,16 @@ function Show-Menu($cfg) {
         Write-Host ('  Network   : {0}  (.ipa installs need it)' -f $(if ($cfg.Net) { 'on' } else { 'off' }))
         Write-Host ('  vCPUs     : {0}' -f $cfg.Smp)
         Write-Host ''
+        if ($script:InstallIpa) { Write-Host ('  .ipa to install: {0}' -f [IO.Path]::GetFileName($script:InstallIpa)) -ForegroundColor Green }
         Write-Host '  [S] Start      [W] Wallpaper   [D] Disk mode   [N] Network'
-        Write-Host '  [G] GPU driver [C] vCPUs       [R] Reset saved state (persist)   [Q] Quit'
+        Write-Host '  [G] GPU driver [C] vCPUs       [I] Install .ipa   [R] Reset state   [Q] Quit'
         switch ((Read-Host 'Choose').ToUpper()) {
             'S' { return $true }
             '' { return $true }
+            'I' {
+                $picked = Pick-File 'Select an .ipa to install' 'iOS apps (*.ipa)|*.ipa|All files (*.*)|*.*'
+                if ($picked) { $script:InstallIpa = $picked; Write-Host "Will install $([IO.Path]::GetFileName($picked)) on Start." }
+            }
             'W' { $cfg.Wallpaper = if ($cfg.Wallpaper -eq 'ios26') { 'collections' } else { 'ios26' } }
             'D' {
                 $cfg.DiskMode = switch ($cfg.DiskMode) { 'persist' { 'throwaway' } 'throwaway' { 'keep' } default { 'persist' } }
@@ -166,6 +186,7 @@ function Start-Emulator($cfg) {
         'throwaway' { }      # the default throwaway overlay
     }
     if ($cfg.Net) { $a += '-Net' }
+    if ($script:InstallIpa) { $a += @('-InstallIpa', $script:InstallIpa) }
     # GpuMode is a property of the disk (was the guest driver baked in?), not a launch flag: the
     # launcher runs pvg=reims either way, and host GL scaling (gl=on, the default) helps in both.
     Write-Host ''
@@ -175,6 +196,7 @@ function Start-Emulator($cfg) {
 
 # --- main -------------------------------------------------------------------
 $script:ResetState = $false
+$script:InstallIpa = ''
 $cfg = Load-Config
 Ensure-Setup $cfg
 if ($SetupOnly) { Write-Host "Setup saved to $Config"; return }

@@ -57,6 +57,11 @@ param(
     # asoftinstalld daemon on the disk (see README.md, step 6). -NoIpa turns the server off.
     [string]$IpaDir = '',
     [switch]$NoIpa,
+    # -InstallIpa path.ipa: install the .ipa into an apps overlay with Install-Ipa.ps1 (direct
+    # placement into /Applications + trust cache + LaunchServices rebuild; the live installd path
+    # needs an APFS Data volume, this disk is HFS+) and boot it. Accumulates in <base>-apps.qcow2
+    # and <base-tc>-apps.tc, booted with -Keep. The guest must be shut down.
+    [string]$InstallIpa = '',
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -77,6 +82,17 @@ foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', "dtree-smp$Smp", 'rd-shell.hf
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
 }
 foreach ($f in @($Disk, $Tc)) { if (-not (Test-Path $f)) { throw "missing $f" } }
+# -InstallIpa: install the .ipa (direct placement) into the apps overlay, then boot that pair.
+if ($InstallIpa) {
+    $installer = Join-Path $PSScriptRoot 'Install-Ipa.ps1'
+    if (-not (Test-Path $installer)) { throw 'Install-Ipa.ps1 is not next to the launcher' }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $InstallIpa -Work $Work -Disk $Disk -Tc $Tc
+    if ($LASTEXITCODE) { throw 'Install-Ipa.ps1 failed' }
+    $Disk = ($Disk -replace '\.qcow2$', '') + '-apps.qcow2'
+    $Tc = ($Tc -replace '\.tc$', '') + '-apps.tc'
+    $Keep = $true
+    Write-Host "Booting the apps overlay with $([IO.Path]::GetFileName($InstallIpa)) installed"
+}
 $O = Join-Path $Work "runs\$Name"
 New-Item -ItemType Directory -Force $O | Out-Null
 $exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
