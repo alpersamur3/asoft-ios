@@ -23,10 +23,17 @@ REMOVE = {
     'com.apple.installcoordination_proxy',
     'com.apple.assistantd',
     'com.apple.assistant_cdmd',
-    'com.apple.mobileassetd',
     'com.apple.biomed',
     'com.apple.biomesyncd',
     'com.apple.triald',
+    # Measured 2026-10-30 (notes: IOS26-BOOT-SERVICES): DumpPanic crashes every 2 min for ever
+    # (RunAtLoad, KeepAlive Crashed) and ReportCrash writes a report each time; the others do
+    # nothing without a network and cost 58-75 s of guest CPU each in the first 38 min. Do not cut
+    # geod (navd spins, 833 s), cloudd (transparencyd retries CloudKit), mobileassetd or CommCenter.
+    'com.apple.DumpPanic',
+    'com.apple.amsengagementd',
+    'com.apple.mediaanalysisd',
+    'com.apple.photoanalysisd',
     # M2 frame-chase extras (low risk; re-add dasd if SpringBoard needs it):
     'com.asoft.spindump',   # our diagnostic sampler (empty output, CPU sink)
     'com.apple.dasd',       # background activity scheduler

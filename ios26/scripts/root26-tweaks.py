@@ -8,7 +8,10 @@ launchd.plist (/System/Library/xpc, launchd's job cache; the original is kept
 as launchd.plist.orig):
   - com.asoft.bash: bash -i on /dev/console (the serial console), as in M1
   - _PanicOnCrash -> _PanicOnCrasX: a crashing daemon must not panic the system
-  - CommCenter jobs removed (no baseband)
+  CommCenter stays, baseband or not (launchd picks com.apple.CommCenter-noncellular on a tree
+  without one). Without it SpringBoard's SBTelephonyManager reconnects every second and resets
+  the idle timer each time: the display never sleeps, the Lock Screen is drawn at ~50 frames a
+  second for ever (a quarter of the guest's CPU), and the side button seems dead.
 containers: /private/var/containers/{Bundle,Data/System,Shared/SystemGroup,Temp}
 Idempotent.
 """
@@ -43,16 +46,13 @@ def launchd(root):
         if '_PanicOnCrash' in job:
             job['_PanicOnCrasX'] = job.pop('_PanicOnCrash')
             renamed += 1
-    removed = [k for k, j in jobs.items() if j.get('Label') in ('com.apple.CommCenter',)]
-    for k in removed:
-        del jobs[k]
     jobs['/System/Library/LaunchDaemons/com.asoft.bash.plist'] = BASH_JOB
     with open(path, 'wb') as f:
         plistlib.dump(plist, f, fmt=plistlib.FMT_BINARY)
     os.chown(path, st.st_uid, st.st_gid)
     os.chmod(path, st.st_mode & 0o7777)
     print(f'launchd.plist: {len(jobs)} daemons, {renamed} _PanicOnCrash renamed, '
-          f'{len(removed)} CommCenter removed, com.asoft.bash added')
+          'com.asoft.bash added')
 
 
 def containers(root):

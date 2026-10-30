@@ -191,7 +191,15 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
       top overlay (it is idempotent).
    2. *by hand:* `/private/var/keybags/systembag.kb`, a plist with `KeyBagKeys` = the data `SWEET`
       (owner root, mode 0600)
-   3. `root26-churn.py on`, `root26-dbg-off.py`
+   3. `root26-churn.py on`, `root26-dbg-off.py`. `root26-churn.py` also takes out DumpPanic, which
+      crashes every two minutes for ever, and three daemons that do nothing offline.
+   4. On a disk built before 2026-10-30: `root26-commcenter.py` on the top overlay. The old
+      `root26-tweaks.py` removed CommCenter, and without it SpringBoard resets its idle timer every
+      second: the display never slept, the Lock Screen was drawn for ever (half the guest's CPU in
+      the first 30 minutes) and the side button seemed dead. Measured with it back: the Lock Screen
+      goes dark in 7 s, the side button locks and wakes, and the work after a start ends in about 15
+      minutes instead of 30. See vphone-cli's `Research/Guest/service_trimming.md` before cutting
+      more: CommCenter, cloudd, mobileassetd, sleepd and siriactionsd make the guest worse when off.
 5. Boot it once (`Start-iOS26.ps1 -Disk root26g.qcow2`) and quit. Then, again through
    `root26-do.sh`, run `root26-persona.py on` and `root26-mgcache.py reset`. `root26-do.sh` replays
    the HFS+ journal first.
