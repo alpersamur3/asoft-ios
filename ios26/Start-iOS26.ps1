@@ -16,7 +16,9 @@
 # The disk, as the iOS 16 launcher: by default iOS writes to a throwaway overlay (-snapshot),
 # -Persist keeps its changes in a user overlay on the base image, -Keep writes the base image.
 #   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep]
-#                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8]
+#                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
+# .ipa: the side bar's "Install .ipa…" (or dropping files into <Work>\ipa) installs apps while
+# iOS runs, through scripts\ipa-server.py and the guest's asoftinstalld; this turns -Net on.
 param(
     [string]$Work = $env:ASOFT26_WORK,
     [string]$Name = 'w1',
@@ -49,6 +51,12 @@ param(
     [string]$Cpu = 'max,pauth-impdef=on',
     # vCPUs: 4 or 8 (dtree-smpN from dt-root26smp.py --cpus N)
     [ValidateSet(4, 8)][int]$Smp = 4,
+    # .ipa installs, as the iOS 16 launcher: drop .ipa files into $IpaDir (or use the side bar's
+    # "Install .ipa…") while iOS runs; scripts\ipa-server.py serves them to the guest's
+    # asoftinstalld, which fetches them over QEMU's user network (so this turns -Net on). Needs the
+    # asoftinstalld daemon on the disk (see README.md, step 6). -NoIpa turns the server off.
+    [string]$IpaDir = '',
+    [switch]$NoIpa,
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -124,6 +132,37 @@ $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
 # no window-close=off: the research VM has no power key wired, closing quits
 $display = 'gtk,show-cursor=on,sidebar=on,show-menubar=off,zoom-to-fit=on'
 if (-not $NoGl) { $display += ',gl=on' }
+
+# .ipa installs (as the iOS 16 launcher): start the host .ipa server and point the guest at it.
+# The side bar's "Install .ipa…" copies files into $env:ASOFT_IPA_DIR; asoftinstalld on the guest
+# fetches them from http://10.0.2.2:8765 and installs them, so the guest needs the user network.
+$ipaServer = $null
+if (-not $NoIpa) {
+    if (-not $IpaDir) { $IpaDir = In-Work 'ipa' }
+    New-Item -ItemType Directory -Force $IpaDir | Out-Null
+    $ipaScript = Join-Path $PSScriptRoot 'scripts\ipa-server.py'
+    $python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+    if (-not $python) { $python = (Get-Command py -ErrorAction SilentlyContinue).Source }
+    if ((Test-Path $ipaScript) -and $python) {
+        # don't start a second server if one already holds the port
+        $busy = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
+        if (-not $busy) {
+            $pyArgs = if ($python -like '*\py.exe') { @('-3.12', "`"$ipaScript`"", '--dir', "`"$IpaDir`"") }
+                      else { @("`"$ipaScript`"", '--dir', "`"$IpaDir`"") }
+            $ipaServer = Start-Process $python -WindowStyle Hidden -PassThru -ArgumentList $pyArgs
+            Write-Host "Drop .ipa files into $IpaDir to install them (the guest fetches http://10.0.2.2:8765)"
+        } else {
+            Write-Host ".ipa server already on :8765; reusing it"
+        }
+        $env:ASOFT_IPA_DIR = $IpaDir                 # the side bar's Install .ipa copies here
+        if (-not $Net) {
+            $Net = $true                             # the guest fetches the .ipa over the user network
+            Write-Host "Turned -Net on so the guest reaches the .ipa server (10.0.2.2); -NoIpa to skip"
+        }
+    } else {
+        Write-Host "No .ipa server (needs scripts\ipa-server.py and Python); side bar Install .ipa stays off"
+    }
+}
 $boot = "serial=3 -v debug=0x14e cpus=$Smp rd=disk0s1 wdt=-1 keepsyms=1 -noprogress launchd_unsecure_cache=1 launchd_disable_all_timeouts=1 aks-endpoint=0 cpu_boot_timeout_secs=30"
 $qargs = @(
     '-name', '"ASoftware iOS 26"',
@@ -142,7 +181,11 @@ $qargs = @(
     '-qmp', 'tcp:127.0.0.1:4453,server=on,wait=off',
     # the touchscreen's port reports PORTSC.DR: iOS takes it as the built-in digitizer
     '-device', 'qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2',
-    '-device', 'usb-kbd,bus=xhci.0,port=1,id=ukbd',
+    # idle-reports=off: iOS 26 gives the keyboard a 24 ms HID idle rate, so QEMU repeated the
+    # unchanged report ~60x/s and iOS's HID driver spent ~168 s of CPU on it in the first 22 min
+    # (notes/IOS26-BOOT-SERVICES.md). off stops the repeats. This is our own usb-kbd property
+    # (qemu-sptm ios26 4eee4e5 and later); an older QEMU rejects it ("not found") and will not boot.
+    '-device', 'usb-kbd,bus=xhci.0,port=1,id=ukbd,idle-reports=off',
     '-device', 'usb-touchscreen,bus=xhci.0,port=2,id=utouch',
     '-device', 'usb-consumer,bus=xhci.0,port=3,id=ucons'
 ) + $snapshot

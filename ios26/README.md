@@ -43,8 +43,7 @@ same GPU stack on Linux; this is the Windows host.
 
 Not yet: quick boot and saved states (the GPU device blocks migration for now), `.ipa` installs, a clean
 shutdown from the window (closing it quits at once; the default overlay makes that harmless), audio,
-the App Store and Apple ID services. Calculator stops the VM: it asks
-for a two-plane texture format (`MTLPixelFormatRGB8_444_2P`) that metal2vulkan does not have yet. For about 3 minutes after the
+the App Store and Apple ID services. For about 3 minutes after the
 lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
 
 ## Is it really the GPU?
@@ -252,6 +251,38 @@ image is as built again at the next start; `-Persist` keeps what iOS writes (set
 `-Keep` writes the base image itself. Two launchers on one disk refuse to start. `-Net` adds a
 virtio-net NIC on QEMU's user-mode network (see *What works*).
 
+### Start menu and setup (Start-iOS26.cmd, Install-iOS26.ps1)
+
+As the iOS 16 launcher does, `Start-iOS26.cmd` offers the start options every time and remembers
+your setup. The menu's choices (work folder, wallpaper, disk mode, network, vCPUs) are saved in
+`%LOCALAPPDATA%\ASoftware iOS 26\ios26.config.json`, so later starts reuse them; `Start-iOS26.cmd
+-NoMenu` starts at once with the saved setup, and `Start-iOS26.ps1 ...` is still the launcher with
+every option.
+
+The first run (or `Install-iOS26.ps1`) asks where the work folder is and whether you have the
+guest GPU driver, with a folder picker, and saves the path. Without a driver iOS runs *GPU-less*:
+it draws on the CPU and the host only shows the frames — it reaches the home screen, but everything
+is slower; add the driver later and rebuild the disk (step 5.2) to turn the GPU on. The driver is
+baked into the disk when the disk is built, so this records where it is, it is not read at run time.
+
+`Install-iOS26.ps1` runs that setup, then lists which build outputs the work folder already has and
+which the *Build* steps above still produce, and makes a Start-menu shortcut. It does not download
+Apple's files or build the disk: iOS 26 is a research preview, so that is the *Build* pipeline, by
+hand where a step says so.
+
+The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
+rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
+**65e09172** or later (the screen-off cover needs it). Rebuild QEMU (step 1) if yours is older.
+
+`.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
+(`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
+in the iOS 16 build) runs on the disk, fetches the `.ipa` and reaches installd. But installd wants
+an APFS volume and the disk's Data volume is HFS+, so the *live* install stops there (error -4). An
+app from an `.ipa` does run on iOS 26 another way: place its `.app` into `/Applications` with its
+Mach-O's CDHash in the trust cache and rebuild LaunchServices, exactly as the system apps are
+installed (step 5.3 / `apply-apps.sh`). Tested with a small Hello app: it appears on the home screen
+and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
+
 ### The guest's GPU driver
 
 `AppleParavirtGPUMetalIOGPUFamily.bundle` is Apple firmware content. It is not in this repository
@@ -266,6 +297,10 @@ and never will be: vphone-cli stopped shipping it for the same reason. Extract y
 
 ## Tools
 
+- `Start-iOS26.cmd` / `Start-iOS26-Menu.ps1`: the start menu (above). `Install-iOS26.ps1`: setup
+  and the build-output checklist.
+- `scripts/ipa-server.py`: serves a Windows folder of `.ipa` files to the guest's `asoftinstalld`
+  (the launcher starts it; the guest fetches `http://10.0.2.2:8765`).
 - `qmp.py`: taps and swipes over QMP, for scripts and tests.
 - `console.py`: the guest's root shell on the serial console (127.0.0.1:4451).
 - `ppmfix.py`: decodes QEMU's PPM screendumps correctly. QEMU pads rows to 4 bytes, so a
@@ -321,8 +356,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 
 **Henüz yok:** hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, pencereden
 temiz kapanış (kapatmak hemen çıkar; varsayılan geçici overlay bunu zararsız kılar), ses, App Store ve
-Apple ID hizmetleri. Hesap Makinesi VM'i durduruyor: metal2vulkan'ın henüz desteklemediği iki düzlemli
-bir doku biçimi (`MTLPixelFormatRGB8_444_2P`) istiyor.
+Apple ID hizmetleri.
 
 **Başlatıcı:** disk iOS 16 başlatıcısındaki gibi; varsayılan geçici overlay, `-Persist` iOS'un yazdıklarını
 kullanıcı overlay'inde tutar, `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15).
