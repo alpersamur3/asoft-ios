@@ -17,8 +17,9 @@
 # -Persist keeps its changes in a user overlay on the base image, -Keep writes the base image.
 #   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep]
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
-# .ipa: the side bar's "Install .ipa…" (or dropping files into <Work>\ipa) installs apps while
-# iOS runs, through scripts\ipa-server.py and the guest's asoftinstalld; this turns -Net on.
+#                   [-InstallIpa app.ipa]
+# .ipa: the side bar's "Install .ipa..." (or dropping files into <Work>\ipa, or -InstallIpa) installs
+# the app by direct placement on the NEXT start (Install-Ipa.ps1); after the button, restart iOS.
 param(
     [string]$Work = $env:ASOFT26_WORK,
     [string]$Name = 'w1',
@@ -51,16 +52,12 @@ param(
     [string]$Cpu = 'max,pauth-impdef=on',
     # vCPUs: 4 or 8 (dtree-smpN from dt-root26smp.py --cpus N)
     [ValidateSet(4, 8)][int]$Smp = 4,
-    # .ipa installs, as the iOS 16 launcher: drop .ipa files into $IpaDir (or use the side bar's
-    # "Install .ipa…") while iOS runs; scripts\ipa-server.py serves them to the guest's
-    # asoftinstalld, which fetches them over QEMU's user network (so this turns -Net on). Needs the
-    # asoftinstalld daemon on the disk (see README.md, step 6). -NoIpa turns the server off.
+    # .ipa installs: the side bar's "Install .ipa..." copies files into $IpaDir (default <Work>\ipa);
+    # each .ipa there is installed by direct placement on the next start (the disk can't be written
+    # while iOS runs). -NoIpa turns it off.
     [string]$IpaDir = '',
     [switch]$NoIpa,
-    # -InstallIpa path.ipa: install the .ipa into an apps overlay with Install-Ipa.ps1 (direct
-    # placement into /Applications + trust cache + LaunchServices rebuild; the live installd path
-    # needs an APFS Data volume, this disk is HFS+) and boot it. Accumulates in <base>-apps.qcow2
-    # and <base-tc>-apps.tc, booted with -Keep. The guest must be shut down.
+    # -InstallIpa path.ipa: install this .ipa (direct placement) into the apps overlay and boot it.
     [string]$InstallIpa = '',
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
@@ -82,16 +79,38 @@ foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', "dtree-smp$Smp", 'rd-shell.hf
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
 }
 foreach ($f in @($Disk, $Tc)) { if (-not (Test-Path $f)) { throw "missing $f" } }
-# -InstallIpa: install the .ipa (direct placement) into the apps overlay, then boot that pair.
-if ($InstallIpa) {
-    $installer = Join-Path $PSScriptRoot 'Install-Ipa.ps1'
-    if (-not (Test-Path $installer)) { throw 'Install-Ipa.ps1 is not next to the launcher' }
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $InstallIpa -Work $Work -Disk $Disk -Tc $Tc
-    if ($LASTEXITCODE) { throw 'Install-Ipa.ps1 failed' }
-    $Disk = ($Disk -replace '\.qcow2$', '') + '-apps.qcow2'
-    $Tc = ($Tc -replace '\.tc$', '') + '-apps.tc'
-    $Keep = $true
-    Write-Host "Booting the apps overlay with $([IO.Path]::GetFileName($InstallIpa)) installed"
+# .ipa installs by direct placement (the live installd path needs an APFS Data volume; this disk is
+# HFS+). ASOFT_IPA_DIR is set so the side bar's "Install .ipa..." is enabled; it copies files into
+# $IpaDir. The disk cannot be written while iOS runs, so each .ipa there (and -InstallIpa) is
+# installed on the NEXT start into an apps overlay (Install-Ipa.ps1: the .app into /Applications +
+# trust cache + LaunchServices rebuild), booted and kept. So after the button, close and reopen
+# iOS; installed apps persist in the apps overlay. -NoIpa turns all this off.
+if (-not $NoIpa) {
+    if (-not $IpaDir) { $IpaDir = In-Work 'ipa' }
+    New-Item -ItemType Directory -Force $IpaDir | Out-Null
+    $env:ASOFT_IPA_DIR = $IpaDir
+    $appsDisk = ($Disk -replace '\.qcow2$', '') + '-apps.qcow2'
+    $appsTc = ($Tc -replace '\.tc$', '') + '-apps.tc'
+    $queue = @(Get-ChildItem $IpaDir -Filter *.ipa -File -ErrorAction SilentlyContinue)
+    if ($InstallIpa -and (Test-Path $InstallIpa)) { $queue += Get-Item $InstallIpa }
+    if ($queue) {
+        $installer = Join-Path $PSScriptRoot 'Install-Ipa.ps1'
+        if (-not (Test-Path $installer)) { throw 'Install-Ipa.ps1 is not next to the launcher' }
+        $inbox = (Resolve-Path $IpaDir).Path
+        foreach ($ipa in $queue) {
+            Write-Host "Installing $($ipa.Name) (direct placement)..."
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName -Work $Work -Disk $Disk -Tc $Tc
+            $ok = ($LASTEXITCODE -eq 0)
+            if ($ipa.DirectoryName -eq $inbox) {
+                $done = Join-Path $IpaDir $(if ($ok) { 'Installed' } else { 'Failed' })
+                New-Item -ItemType Directory -Force $done | Out-Null
+                Move-Item $ipa.FullName (Join-Path $done $ipa.Name) -Force
+            } elseif (-not $ok) {
+                throw "Install-Ipa.ps1 failed for $($ipa.Name)"
+            }
+        }
+    }
+    if (Test-Path $appsDisk) { $Disk = $appsDisk; $Tc = $appsTc; $Keep = $true }
 }
 $O = Join-Path $Work "runs\$Name"
 New-Item -ItemType Directory -Force $O | Out-Null
@@ -149,36 +168,6 @@ $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
 $display = 'gtk,show-cursor=on,sidebar=on,show-menubar=off,zoom-to-fit=on'
 if (-not $NoGl) { $display += ',gl=on' }
 
-# .ipa installs (as the iOS 16 launcher): start the host .ipa server and point the guest at it.
-# The side bar's "Install .ipa…" copies files into $env:ASOFT_IPA_DIR; asoftinstalld on the guest
-# fetches them from http://10.0.2.2:8765 and installs them, so the guest needs the user network.
-$ipaServer = $null
-if (-not $NoIpa) {
-    if (-not $IpaDir) { $IpaDir = In-Work 'ipa' }
-    New-Item -ItemType Directory -Force $IpaDir | Out-Null
-    $ipaScript = Join-Path $PSScriptRoot 'scripts\ipa-server.py'
-    $python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-    if (-not $python) { $python = (Get-Command py -ErrorAction SilentlyContinue).Source }
-    if ((Test-Path $ipaScript) -and $python) {
-        # don't start a second server if one already holds the port
-        $busy = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
-        if (-not $busy) {
-            $pyArgs = if ($python -like '*\py.exe') { @('-3.12', "`"$ipaScript`"", '--dir', "`"$IpaDir`"") }
-                      else { @("`"$ipaScript`"", '--dir', "`"$IpaDir`"") }
-            $ipaServer = Start-Process $python -WindowStyle Hidden -PassThru -ArgumentList $pyArgs
-            Write-Host "Drop .ipa files into $IpaDir to install them (the guest fetches http://10.0.2.2:8765)"
-        } else {
-            Write-Host ".ipa server already on :8765; reusing it"
-        }
-        $env:ASOFT_IPA_DIR = $IpaDir                 # the side bar's Install .ipa copies here
-        if (-not $Net) {
-            $Net = $true                             # the guest fetches the .ipa over the user network
-            Write-Host "Turned -Net on so the guest reaches the .ipa server (10.0.2.2); -NoIpa to skip"
-        }
-    } else {
-        Write-Host "No .ipa server (needs scripts\ipa-server.py and Python); side bar Install .ipa stays off"
-    }
-}
 $boot = "serial=3 -v debug=0x14e cpus=$Smp rd=disk0s1 wdt=-1 keepsyms=1 -noprogress launchd_unsecure_cache=1 launchd_disable_all_timeouts=1 aks-endpoint=0 cpu_boot_timeout_secs=30"
 $qargs = @(
     '-name', '"ASoftware iOS 26"',
