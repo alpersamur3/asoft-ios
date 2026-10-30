@@ -41,7 +41,11 @@ same GPU stack on Linux; this is the Windows host.
 
 <img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen in the window"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
 
-Not yet: quick boot and saved states (the GPU device blocks migration for now), `.ipa` installs, a clean
+Saved states work: the side bar's *Save state* and *Saved states…* (about 3.7 GB each, written to the
+disk iOS runs on, so a throwaway run loses them at exit). A QEMU started on a saved state
+(`-Extra '-loadvm','NAME'`) is at the guest's screen in about 8 s.
+
+Not yet: quick boot from the window (closing it does not save yet), a live `.ipa` install, a clean
 shutdown from the window (closing it quits at once; the default overlay makes that harmless), audio,
 the App Store and Apple ID services. For about 3 minutes after the
 lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
@@ -284,7 +288,9 @@ hand where a step says so.
 
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
-**65e09172** or later (the screen-off cover needs it). Rebuild QEMU (step 1) if yours is older.
+**65e09172** or later (the screen-off cover needs it). Saved states need qemu-sptm **52f3606** and
+reims-vgpu **c81dfdcf** or later, built together (the older QEMU keeps the buttons off). Rebuild QEMU
+(step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
