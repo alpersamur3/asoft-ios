@@ -29,6 +29,7 @@ $default = [ordered]@{
     GpuMode   = ''          # 'gpu' | 'gpuless' | '' (not chosen yet)
     Wallpaper = 'ios26'     # 'ios26' | 'collections'
     DiskMode  = 'persist'   # 'throwaway' | 'persist' | 'keep'
+    QuickBoot = $true       # closing the window saves the state, the next start resumes it
     Net       = $true
     Smp       = 4
 }
@@ -142,12 +143,14 @@ function Show-Menu($cfg) {
         Write-Host ('  GPU       : {0}{1}' -f $cfg.GpuMode, $(if ($cfg.GpuDriver) { " ($($cfg.GpuDriver))" } else { '' }))
         Write-Host ('  Wallpaper : {0}' -f $cfg.Wallpaper)
         Write-Host ('  Disk      : {0}' -f $cfg.DiskMode)
+        Write-Host ('  Quick boot: {0}' -f $(if ($cfg.DiskMode -eq 'throwaway') { 'off (needs a disk that keeps its changes)' } elseif ($cfg.QuickBoot) { 'on (about 3.7 GB on the disk)' } else { 'off' }))
         Write-Host ('  Network   : {0}  (.ipa installs need it)' -f $(if ($cfg.Net) { 'on' } else { 'off' }))
         Write-Host ('  vCPUs     : {0}' -f $cfg.Smp)
         Write-Host ''
         if ($script:InstallIpa) { Write-Host ('  .ipa to install: {0}' -f [IO.Path]::GetFileName($script:InstallIpa)) -ForegroundColor Green }
         Write-Host '  [S] Start      [W] Wallpaper   [D] Disk mode   [N] Network'
-        Write-Host '  [G] GPU driver [C] vCPUs       [I] Install .ipa   [R] Reset state   [Q] Quit'
+        Write-Host '  [G] GPU driver [C] vCPUs       [B] Quick boot     [I] Install .ipa'
+        Write-Host '  [R] Reset state   [Q] Quit'
         switch ((Read-Host 'Choose').ToUpper()) {
             'S' { return $true }
             '' { return $true }
@@ -160,6 +163,7 @@ function Show-Menu($cfg) {
                 $cfg.DiskMode = switch ($cfg.DiskMode) { 'persist' { 'throwaway' } 'throwaway' { 'keep' } default { 'persist' } }
             }
             'N' { $cfg.Net = -not $cfg.Net }
+            'B' { $cfg.QuickBoot = -not $cfg.QuickBoot }
             'C' { $cfg.Smp = if ($cfg.Smp -eq 4) { 8 } else { 4 } }
             'G' {
                 $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' (Split-Path $cfg.GpuDriver)
@@ -186,6 +190,7 @@ function Start-Emulator($cfg) {
         'throwaway' { }      # the default throwaway overlay
     }
     if ($cfg.Net) { $a += '-Net' }
+    if (-not $cfg.QuickBoot) { $a += '-NoQuickBoot' }
     if ($script:InstallIpa) { $a += @('-InstallIpa', $script:InstallIpa) }
     # GpuMode is a property of the disk (was the guest driver baked in?), not a launch flag: the
     # launcher runs pvg=reims either way, and host GL scaling (gl=on, the default) helps in both.

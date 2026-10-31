@@ -6,7 +6,7 @@
 
 <img src="screenshots/ios26-gpu.gif" width="420" alt="iOS 26 in the ASoftware window: Settings, scrolling, General, the home screen">
 
-<sub>Real time, on Windows 11 with an RTX 4080 Laptop: Settings (opened once before), scrolling, General, Home, the home screen's pages.</sub>
+<sub>In real time, the pauses between gestures cut, on Windows 11 with an RTX 4080 Laptop: Settings (opened once before), scrolling, General, Home, the home screen's pages.</sub>
 
 English · [Türkçe](#turkce)
 
@@ -34,21 +34,23 @@ same GPU stack on Linux; this is the Windows host.
 | **Input** | Mouse as the touchscreen (tap, swipe, scroll), the PC keyboard, Home, side button and volume |
 | **Gestures** | A Face ID iPhone's (an iPhone 16 Pro's layout: Dynamic Island, its status bar): swipe up to open and to go home, swipe up and hold for the app switcher, Control Center from the top right, Notification Center from the top left, back from the left edge. A drag from the display's left edge becomes iOS's back gesture (a quick swipe is too fast for the emulated app), and the side bar has Back and App switcher |
 | **Window** | The ASoftware window and side bar of the iOS 16 build: Home, Lock, App switcher, volume, screenshots, full screen, pasted text |
-| **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay, `-Keep` writes the base image |
+| **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay (the start menu's default), `-Keep` writes the base image |
+| **Quick boot** | On a disk that keeps its changes: closing the window saves iOS as it is, and the next start goes on from there, its screen in about 8 s. `-NoQuickBoot`, or `[B]` in the menu, boots iOS every time |
+| **Saved states** | The side bar's *Save state* and *Saved states…* |
 | **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
 | **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 3.6) |
-| **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 100 s after start (160 s before our TCG changes: `notes`), Settings opens in about 4 s, a scroll answers in 0.3 s |
+| **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 2 minutes after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
 
-<img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen in the window"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
+<img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen with iOS 17's Collections wallpaper"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
 
-Saved states work: the side bar's *Save state* and *Saved states…* (about 3.7 GB each, written to the
-disk iOS runs on, so a throwaway run loses them at exit). A QEMU started on a saved state
-(`-Extra '-loadvm','NAME'`) is at the guest's screen in about 8 s.
+A saved state, and quick boot's, is about 3.7 GB on the disk iOS runs on: leave that much free. A
+throwaway run loses them at exit. After a quick boot iOS's clock goes on from where it was saved, not
+from the time now: the time away is missing until iOS boots again.
 
-Not yet: quick boot from the window (closing it does not save yet), a live `.ipa` install, a clean
-shutdown from the window (closing it quits at once; the default overlay makes that harmless), audio,
-the App Store and Apple ID services. For about 3 minutes after the
-lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
+Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
+shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
+services. App switcher cards show a blank page, not the app's last screen. For about 3 minutes after
+the lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
 
 ## Is it really the GPU?
 
@@ -59,18 +61,17 @@ GPU columns. Measured on the QEMU process while iOS 26 ran, on a laptop with two
 
 | The QEMU process, from the lock screen on | RTX 4080 Laptop | Intel UHD (the other GPU) |
 | --- | --- | --- |
-| Dedicated GPU memory | **1.5 to 2.0 GB** | none (0.24 GB shared) |
-| 3D engine | **bursts up to 36 %** when iOS draws | flat, 2 to 8 % |
+| Dedicated GPU memory | **1.5 to 2.2 GB** | none (0.24 GB shared) |
+| 3D engine | **bursts up to 80 %** when iOS draws | flat, 2 to 12 % |
 
 <img src="screenshots/gpu-chart.png" width="760" alt="GPU use of the QEMU process over a run: memory and 3D engine on the RTX 4080, the Intel GPU flat">
 
-QEMU's memory on the RTX 4080 climbs as iOS boots and loads its interface. The 3D engine works in
-bursts, when the lock screen comes up, as Settings opens and scrolls, and at each Home and swipe, then
-waits: iOS's CPU work is emulated and keeps four host cores busy, so the CPU, not the GPU, sets the
-pace. On the idle home screen iOS keeps drawing, most likely the Clock icon's live hands. Measured on
-2026-10-27, in the run the GIF above comes from, on Windows 11, i7-13700HX, RTX 4080 Laptop (driver
-610.74), 4 vCPUs, with [`scripts/gpu-sample.ps1`](scripts/gpu-sample.ps1). Two engine samples above
-100 %, a glitch of Windows' formatted counters, are left out.
+QEMU's memory on the RTX 4080 climbs as iOS boots and loads its interface, most of it as the lock
+screen comes up, at about 130 s. The 3D engine works in bursts, when the lock screen comes up, as
+Settings opens and scrolls, and at each Home and swipe, then waits: iOS's CPU work is emulated and
+keeps four host cores busy, so the CPU, not the GPU, sets the pace. Measured on 2026-10-31, in the run
+the GIF above comes from, on Windows 11, i7-13700HX, RTX 4080 Laptop (driver 610.74), 4 vCPUs, with
+[`scripts/gpu-sample.ps1`](scripts/gpu-sample.ps1), drawn by [`scripts/gpu-chart.py`](scripts/gpu-chart.py).
 
 **2. What iOS sends.** reims-vgpu can trace the paravirtual GPU's command stream
 (`REIMS_VGPU_TRACE`). We counted it up to the lock screen:
@@ -78,10 +79,10 @@ pace. On the idle home screen iOS keeps drawing, most likely the Clock icon's li
   every surface on the CPU and the host only shows them.
 - **With the driver:** iOS sent 573 Metal command buffers and drew into 70 render-target surfaces.
 
-The picture differs too. The dock's platter, a translucent material, appears only when iOS has its
-Metal driver:
+The picture differs too. Without its Metal driver (the same disk with the bundle deleted) iOS has no
+wallpaper, no dock platter and blank icons, as those are drawn with Metal:
 
-<img src="screenshots/cpu-vs-gpu.png" width="560" alt="The home screen without and with the guest GPU driver">
+<img src="screenshots/cpu-vs-gpu.png" width="760" alt="The home screen in the window, without and with the guest GPU driver">
 
 **3. The library's log.** At start, reims-vgpu names the device it runs the guest's Metal on, and
 metal2vulkan names the Vulkan driver it translates for:
@@ -259,12 +260,16 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
    touch: no home gesture, app switcher or edge swipe back). Write that `.03` into the image as
    `apply-apps.sh` writes `.42` and add the CDHash it prints (to `root-collections.tc` too).
 
-Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 100 s; press Home (F1).
+Then run `Start-iOS26.ps1 -Work D:\ios26`. The lock screen comes after about 2 minutes; press Home (F1).
 
 The disk works as in the iOS 16 launcher: by default iOS writes to a throwaway overlay and the
 image is as built again at the next start; `-Persist` keeps what iOS writes (settings, apps) in
-`root26-user.qcow2`, an overlay on the base image, and `-Persist -Reset` drops that overlay first;
-`-Keep` writes the base image itself. Two launchers on one disk refuse to start. `-Net` adds a
+`root26-user.qcow2`, an overlay on the base image, with the `.ipa`s you install, and `-Persist -Reset`
+drops that overlay first; `-Keep` writes the base image itself. On a disk that keeps its changes
+closing the window saves the machine's state there, as its snapshot `asoft-quick`, and the next start
+resumes it (QEMU deletes the state once the machine runs; one it cannot resume, of another build or
+other options, is dropped and iOS boots). `-NoQuickBoot` boots every time, and an `.ipa` install drops
+the state. Two launchers on one disk refuse to start. `-Net` adds a
 virtio-net NIC on QEMU's user-mode network (see *What works*).
 
 ### Start menu and setup (Start-iOS26.cmd, Install-iOS26.ps1)
@@ -288,9 +293,10 @@ hand where a step says so.
 
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
-**65e09172** or later (the screen-off cover needs it). Saved states need qemu-sptm **52f3606** and
-reims-vgpu **c81dfdcf** or later, built together (the older QEMU keeps the buttons off). Rebuild QEMU
-(step 1) if yours is older.
+**65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
+**52f3606**, reims-vgpu **e919fd74** and metal2vulkan `windows` **50086fc0** or later, built together
+(an older QEMU keeps the buttons off, and an older metal2vulkan ends the emulator some seconds after
+Home and a page swipe). Rebuild QEMU (step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
@@ -361,7 +367,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 - **Giriş:** fare dokunmatik ekran gibi çalışıyor (dokunma, kaydırma), PC klavyesi, Home, yan tuş ve
   ses tuşları.
 - **Pencere:** iOS 16 sürümündeki ASoftware penceresi ve yan çubuğu.
-- **Hız:** i7-13700HX'te kilit ekranı açılıştan yaklaşık 100 sn sonra geliyor, Ayarlar yaklaşık 4 sn'de
+- **Hız:** i7-13700HX'te kilit ekranı açılıştan yaklaşık 2 dk sonra geliyor, Ayarlar yaklaşık 4 sn'de
   açılıyor, kaydırma 0,3 sn'de tepki veriyor.
 - **Hareketler:** Face ID'li iPhone düzeni (iPhone 16 Pro: Dynamic Island, onun status bar'ı): yukarı
   kaydırıp açma ve eve dönme, kaydırıp bekleyince uygulama değiştirici, sağ üstten Denetim Merkezi, sol
@@ -372,17 +378,22 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
   çizdiği 3B sahne), üstünde Liquid Glass saat; `-Wallpaper collections` iOS 17 Collections duvar kağıdı
   (derleme adımı 3.6, misafir CPU'suna daha hafif).
 
-**Henüz yok:** hızlı açılış ve kayıtlı durumlar, `.ipa` kurma, pencereden
-temiz kapanış (kapatmak hemen çıkar; varsayılan geçici overlay bunu zararsız kılar), ses, App Store ve
-Apple ID hizmetleri.
+**Kayıtlı durumlar ve hızlı açılış:** yan çubuğun *Save state* ve *Saved states…* düğmeleri çalışıyor.
+Değişikliklerini tutan bir diskte pencereyi kapatmak iOS'u olduğu gibi kaydeder, sonraki açılış oradan
+devam eder, ekran yaklaşık 8 sn'de gelir (`-NoQuickBoot` ya da menüde `[B]` her seferinde baştan açar).
+Her kayıt, iOS'un çalıştığı diskte yaklaşık 3,7 GB tutar; geçici koşuda çıkışta kaybolur.
+
+**Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
+kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
+yerine boş sayfa gösteriyor.
 
 **Başlatıcı:** disk iOS 16 başlatıcısındaki gibi; varsayılan geçici overlay, `-Persist` iOS'un yazdıklarını
-kullanıcı overlay'inde tutar, `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15).
+ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün varsayılanı), `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15).
 16K softmmu sayfası varsayılan (`-Page4K` eskisi): kilit ekranı 135 → ~100 sn.
 
 **Gerçekten ekran kartı mı?** Yukarıdaki *Is it really the GPU?* bölümünde Windows'un kendi sayaçlarıyla
-ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,0 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %36'ya kadar
-çıkıyor; diğer GPU (Intel) ne yapılırsa yapılsın %2-8'de düz kalıyor.
+ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,2 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %80'e kadar
+çıkıyor; diğer GPU (Intel) ne yapılırsa yapılsın %2-12'de düz kalıyor.
 
 **Derleme:** adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar dilden bağımsız). Misafirin GPU
 sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım yazılımı içeriğidir, bu repoda

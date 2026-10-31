@@ -15,7 +15,7 @@
 # for tools; the guest's serial console is on 127.0.0.1:4451.
 # The disk, as the iOS 16 launcher: by default iOS writes to a throwaway overlay (-snapshot),
 # -Persist keeps its changes in a user overlay on the base image, -Keep writes the base image.
-#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep]
+#   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep] [-NoQuickBoot]
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
 #                   [-InstallIpa app.ipa]
 # .ipa: the side bar's "Install .ipa..." (or dropping files into <Work>\ipa, or -InstallIpa) installs
@@ -57,6 +57,10 @@ param(
     # while iOS runs). -NoIpa turns it off.
     [string]$IpaDir = '',
     [switch]$NoIpa,
+    # Quick boot, on a disk that keeps what iOS writes (-Persist, -Keep or an apps overlay): closing
+    # the window saves the machine's state (memory and devices, about 3.7 GB) in that disk, as its
+    # snapshot asoft-quick, and the next start resumes it in seconds. -NoQuickBoot boots iOS every time.
+    [switch]$NoQuickBoot,
     # -InstallIpa path.ipa: install this .ipa (direct placement) into the apps overlay and boot it.
     [string]$InstallIpa = '',
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
@@ -79,6 +83,23 @@ foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', "dtree-smp$Smp", 'rd-shell.hf
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
 }
 foreach ($f in @($Disk, $Tc)) { if (-not (Test-Path $f)) { throw "missing $f" } }
+$exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
+if (-not (Test-Path $exe)) { $exe = Join-Path $Work 'qemu\qemu-system-aarch64.exe' }
+$userTc = ($Tc -replace '\.tc$', '') + '-user.tc'
+if ($Persist -and $Reset) {
+    foreach ($f in @($UserDisk, $userTc)) { if (Test-Path $f) { Remove-Item $f } }
+}
+$qemuImg = Join-Path (Split-Path $exe) 'qemu-img.exe'
+if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
+$quickSnapshot = 'asoft-quick'
+function Get-QuickState([string]$disk) {
+    if ((Test-Path $disk) -and (Test-Path $qemuImg)) {
+        & $qemuImg snapshot -l -U $disk | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" }
+    }
+}
+function Remove-QuickState([string]$disk) {
+    if (Get-QuickState $disk) { & $qemuImg snapshot -d $quickSnapshot $disk }
+}
 # .ipa installs by direct placement (the live installd path needs an APFS Data volume; this disk is
 # HFS+). ASOFT_IPA_DIR is set so the side bar's "Install .ipa..." is enabled; it copies files into
 # $IpaDir. The disk cannot be written while iOS runs, so each .ipa there (and -InstallIpa) is
@@ -91,15 +112,20 @@ if (-not $NoIpa) {
     $env:ASOFT_IPA_DIR = $IpaDir
     $appsDisk = ($Disk -replace '\.qcow2$', '') + '-apps.qcow2'
     $appsTc = ($Tc -replace '\.tc$', '') + '-apps.tc'
+    # Under -Persist an .ipa goes into the user overlay itself, on an apps overlay a run without
+    # -Persist left, if any: one disk holds what iOS writes and the apps
+    if ($Persist -and (Test-Path $appsDisk)) { $Disk = $appsDisk; $Tc = $appsTc }
     $queue = @(Get-ChildItem $IpaDir -Filter *.ipa -File -ErrorAction SilentlyContinue)
     if ($InstallIpa -and (Test-Path $InstallIpa)) { $queue += Get-Item $InstallIpa }
     if ($queue) {
         $installer = Join-Path $PSScriptRoot 'Install-Ipa.ps1'
         if (-not (Test-Path $installer)) { throw 'Install-Ipa.ps1 is not next to the launcher' }
         $inbox = (Resolve-Path $IpaDir).Path
+        $into = if ($Persist) { @('-AppsDisk', $UserDisk, '-AppsTc', $userTc) } else { @() }
+        Remove-QuickState $(if ($Persist) { $UserDisk } else { $appsDisk })
         foreach ($ipa in $queue) {
             Write-Host "Installing $($ipa.Name) (direct placement)..."
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName -Work $Work -Disk $Disk -Tc $Tc
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName -Work $Work -Disk $Disk -Tc $Tc @into
             $ok = ($LASTEXITCODE -eq 0)
             if ($ipa.DirectoryName -eq $inbox) {
                 $done = Join-Path $IpaDir $(if ($ok) { 'Installed' } else { 'Failed' })
@@ -110,12 +136,11 @@ if (-not $NoIpa) {
             }
         }
     }
-    if (Test-Path $appsDisk) { $Disk = $appsDisk; $Tc = $appsTc; $Keep = $true }
+    if (-not $Persist -and (Test-Path $appsDisk)) { $Disk = $appsDisk; $Tc = $appsTc; $Keep = $true }
 }
+if ($Persist -and (Test-Path $userTc)) { $Tc = $userTc }
 $O = Join-Path $Work "runs\$Name"
 New-Item -ItemType Directory -Force $O | Out-Null
-$exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
-if (-not (Test-Path $exe)) { $exe = Join-Path $Work 'qemu\qemu-system-aarch64.exe' }
 
 # Two QEMUs writing one disk would wreck it (QEMU's image locking does not work on Windows)
 $written = if ($Persist) { $UserDisk } elseif ($Keep) { $Disk } else { '' }
@@ -124,6 +149,17 @@ if ($written) {
     $other = Get-CimInstance Win32_Process -Filter "Name like 'qemu-system%'" |
         Where-Object { $_.CommandLine -and $_.CommandLine.Contains($leaf) } | Select-Object -First 1
     if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
+}
+
+# Quick boot: resume the state the window saved when it was closed, if any (QEMU deletes it once
+# the machine runs). It belongs to the disk as it was then, so a start without quick boot drops it,
+# and so does an .ipa install, above.
+$quickBoot = $written -and -not $NoQuickBoot -and (Test-Path $qemuImg)
+$savedState = if ($written) { Get-QuickState $written }
+if ($savedState -and -not $quickBoot) {
+    Remove-QuickState $written
+    $savedState = $null
+    Write-Host 'Dropped the saved state (quick boot is off)'
 }
 
 # qemu-img: next to the QEMU, an installed QEMU, or the WSL distro the disk was built in
@@ -143,7 +179,6 @@ function New-Overlay([string]$base, [string]$overlay) {
 
 $snapshot = @()
 if ($Persist) {
-    if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk }
     if (-not (Test-Path $UserDisk)) {
         New-Overlay $Disk $UserDisk
         Write-Host "New user disk $UserDisk (on $Disk)"
@@ -167,6 +202,7 @@ $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
 # no window-close=off: the research VM has no power key wired, closing quits
 $display = 'gtk,show-cursor=on,sidebar=on,show-menubar=off,zoom-to-fit=on'
 if (-not $NoGl) { $display += ',gl=on' }
+if ($quickBoot) { $display += ',quick-boot=on' }
 
 $boot = "serial=3 -v debug=0x14e cpus=$Smp rd=disk0s1 wdt=-1 keepsyms=1 -noprogress launchd_unsecure_cache=1 launchd_disable_all_timeouts=1 aks-endpoint=0 cpu_boot_timeout_secs=30"
 $qargs = @(
@@ -196,5 +232,23 @@ $qargs = @(
 ) + $snapshot
 if ($Net) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 $qargs += $Extra
-$q = Start-Process -FilePath $exe -ArgumentList $qargs -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
+function Start-Qemu([string[]]$more) {
+    Start-Process -FilePath $exe -ArgumentList ($qargs + $more) -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
+}
+if ($savedState) {
+    Write-Host 'Resuming the state saved when the window was closed'
+    $q = Start-Qemu @('-loadvm', $quickSnapshot)
+    $null = $q.Handle       # ExitCode, once it has ended, needs the handle taken
+    # QEMU failed, the state still there: it could not be resumed (another QEMU build, other
+    # options) and the machine never ran. Drop it and boot iOS instead.
+    $until = (Get-Date).AddMinutes(5)
+    while (-not $q.HasExited -and (Get-Date) -lt $until -and (Get-QuickState $written)) { Start-Sleep -Seconds 2 }
+    if ($q.HasExited -and $q.ExitCode -and (Get-QuickState $written)) {
+        Write-Host 'The saved state could not be resumed; booting iOS'
+        Remove-QuickState $written
+        $q = Start-Qemu @()
+    }
+} else {
+    $q = Start-Qemu @()
+}
 "started $exe pid $($q.Id) -> $O"

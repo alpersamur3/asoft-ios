@@ -18,7 +18,7 @@ iOS 16, ready to install · **new:** iOS 26, drawn by your PC's GPU
 
 <img src="ios26/screenshots/ios26-gpu.gif" width="420" alt="iOS 26 in the ASoftware window: Settings, scrolling, General, the home screen">
 
-<sub>iOS 26.6.2 on Windows 11, in real time: iOS's own Metal draws the interface, on an NVIDIA RTX 4080 through Vulkan.</sub>
+<sub>iOS 26.6.2 in the ASoftware window on Windows 11, in real time with the pauses between gestures cut: iOS's own Metal draws the interface, on an NVIDIA RTX 4080 through Vulkan.</sub>
 
 English · [Türkçe](#turkce)
 
@@ -32,7 +32,7 @@ English · [Türkçe](#turkce)
 | **Graphics** | The CPU | **The PC's GPU**: iOS's own Metal, through Vulkan |
 | **iOS** | 16.7.16 of the iPhone X | 26.6.2 of the iPhone 16, on the kernel of Apple's research VM |
 | **Apps** | Safari with real web pages, `.ipa` installs | The system apps, Settings |
-| **Quick boot** | Yes: iOS goes on in seconds | Not yet |
+| **Quick boot** | Yes: iOS goes on in seconds | Yes: iOS goes on in seconds |
 | **Start** | [Install](#install) | [`ios26/`](ios26/README.md) |
 
 Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gpu).
@@ -176,7 +176,7 @@ QEMU on Windows (`qemu/build-windows.sh` or `qemu-win.yml`), the helper VM on Li
 | **Grafik** | İşlemci | **Bilgisayarın ekran kartı**: iOS'un kendi Metal'i, Vulkan üzerinden |
 | **iOS** | iPhone X'in 16.7.16'sı | iPhone 16'nın 26.6.2'si, Apple'ın araştırma VM'inin çekirdeğinde |
 | **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Sistem uygulamaları, Ayarlar |
-| **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Henüz yok |
+| **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Var: iOS saniyeler içinde kaldığı yerden devam eder |
 | **Başlangıç** | [Kurulum](#kurulum) | [`ios26/`](ios26/README.md#turkce) |
 
 Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu). Aşağısı iOS 16 hakkında.
