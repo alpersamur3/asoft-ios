@@ -1,11 +1,12 @@
 # Build the Windows release package: what Install-ASoftware.ps1 installs from, in one zip.
 #   powershell -ExecutionPolicy Bypass -File installer\Make-Release.ps1 -Version 0.1.0 [-QemuDist DIR]
 # The repository's tracked files (git archive: no research\ or other local files), the helper VM
-# (installer/helper/build-*.sh), the newest kernel build (xnu\out-*) and our QEMU build
-# (qemu/build-windows.sh). Nothing of Apple's: the installer downloads iOS from Apple.
+# (installer/helper/build-*.sh), the newest kernel build (xnu\out-*) and our QEMU build, the one
+# iOS 26 runs on too (ios26/scripts/win-build.sh's dist). Nothing of Apple's: the installer
+# downloads iOS from Apple.
 param(
     [Parameter(Mandatory = $true)] [string]$Version,
-    [string]$QemuDist = 'C:\asoft-build\dist',
+    [string]$QemuDist = 'C:\asoft-build\ios26\dist-win',
     [string]$Out = "$PSScriptRoot\..\release"
 )
 $ErrorActionPreference = 'Stop'
@@ -27,14 +28,16 @@ $kernel = Get-ChildItem "$repo\xnu\out-*\kernel.development.sweet" | Sort-Object
 New-Item -ItemType Directory -Force "$stage\xnu\$($kernel.Directory.Name)" | Out-Null
 Copy-Item $kernel.FullName "$stage\xnu\$($kernel.Directory.Name)\"
 if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "no QEMU build in $QemuDist" }
-robocopy $QemuDist "$stage\qemu\bin" /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+robocopy $QemuDist "$stage\qemu\bin" /MIR /XD backup-* /NFL /NDL /NJH /NJS /NP | Out-Null
+$qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUILD.txt") -join '; ' } else { 'see its --version' }
 
 @"
 # Where the binaries in this package come from
 
-- ``qemu\bin``: QEMU 11.1.2 (GPL v2) with the patches in qemu/patches of
-  https://github.com/alpersamur3/asoft-ios at $(git -C $repo rev-parse --short HEAD), built by
-  qemu/build-windows.sh; the DLLs next to it are MSYS2's UCRT64 packages (GTK, GLib, SDL2,
+- ``qemu\bin``: QEMU 11.1 (GPL v2) of https://github.com/alpersamur3/qemu-sptm, branch ios26
+  ($qemuBuild), with reims-vgpu (https://github.com/alpersamur3/reims-vgpu, branch windows) and
+  metal2vulkan (https://github.com/alpersamur3/metal2vulkan, branch windows) in it, built by
+  ios26/scripts/win-build.sh; the DLLs next to it are MSYS2's UCRT64 packages (GTK, GLib, ANGLE,
   libslirp and others, under their own licenses; sources at https://packages.msys2.org).
 - ``xnu\$($kernel.Directory.Name)``: Apple's XNU (APSL 2.0) with xnu/patches, built by
   .github/workflows/xnu.yml.

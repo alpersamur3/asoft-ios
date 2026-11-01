@@ -67,7 +67,7 @@ $repo = Split-Path $here
 # windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.01 is
 # qemu-sptm ios26 ad92276 (-M vresearch) with reims-vgpu windows ae389a2c and metal2vulkan windows
 # fbb1ae35. For a new build, installer\Make-QemuPackage.ps1 prints this line.
-$QemuRelease = @{ Version = '2026.11.01'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-ad92276/asoft-ios26-qemu-2026.11.01.zip'; Sha256 = 'BCAAFD82748A0BBBF625C8E7C0F59AAC61172634E65FAEE792DE562ACBFAC1C9' }
+$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-9fa4e67/asoft-ios26-qemu-2026.11.01b.zip'; Sha256 = '39DA37FD900344A65E8CB3E8D68FC454ABBA7E94077CCD44777BD28B30B3298D' }
 # -QemuFrom source: the checkouts README.md step 1 clones, and the oldest commit of each the
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
@@ -75,7 +75,7 @@ $Sources = @(
     @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = '44a9dac6' }
     @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = 'e5b58af7' }
 )
-# MSYS2 UCRT64 packages: qemu/build-windows.sh's, plus Rust (reims-vgpu) and GMP (nettle's hogweed)
+# MSYS2 UCRT64 packages: QEMU's build dependencies, plus Rust (reims-vgpu) and GMP (nettle's hogweed)
 $MsysPackages = @('bison', 'diffutils', 'flex', 'git', 'grep', 'make', 'sed', 'tar', 'gzip', 'curl') +
     @('binutils', 'gcc', 'pkgconf', 'ninja', 'python', 'python-certifi', 'python-setuptools', 'python-wheel',
       'glib2', 'pixman', 'zstd', 'capstone', 'libslirp', 'gtk3', 'libepoxy', 'angleproject', 'SDL2', 'rust', 'gmp' |

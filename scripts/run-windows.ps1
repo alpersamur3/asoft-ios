@@ -9,12 +9,14 @@ param(
     # 4, not 8: each broadcast TLB flush stops every vCPU, and with 8 the boot was slower
     # (bench 2026-10-21: lock screen 100-118 s with 4 vs 128-164 s with 8)
     [int]$Cpus = 4,
-    # Our QEMU 11.1.2 build (qemu/patches, .github/workflows/qemu-win.yml): the GTK
-    # console refreshes at most every 30 ms (the stock one redrew at the monitor's 144 Hz with the
-    # BQL held), and with window-close=off closing the window powers iOS down (0003). Falls back
-    # to the installed QEMU when the build is not there.
-    # 0004 titles the window with -name alone ("ASoftware iOS"); --version says "(ASoftware)"
-    [string]$Qemu = "$Work\qemu\v11.1.2-asoft\qemu-system-aarch64.exe",
+    # Our QEMU build, the one iOS 26 runs on too (qemu-sptm's ios26 branch, README.md "QEMU"): the
+    # GTK console refreshes at most every 30 ms (the stock one redrew at the monitor's 144 Hz with
+    # the BQL held), and with window-close=off closing the window powers iOS down (0003). An older
+    # install's QEMU 11.1.2 (work\qemu\v11.1.2-asoft) when there is no newer one; the installed QEMU
+    # when neither is there.
+    # 0004 titles the window with -name alone ("ASoftware iOS")
+    [string]$Qemu = $(if (Test-Path "$Work\qemu\qemu-system-aarch64.exe") { "$Work\qemu\qemu-system-aarch64.exe" }
+                      else { "$Work\qemu\v11.1.2-asoft\qemu-system-aarch64.exe" }),
     # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake); 0103 sets the
     # clock from the host's after a pause or a quick boot
     [string]$Kernel = "$PSScriptRoot\..\xnu\out-0103\kernel.development.sweet",
@@ -49,7 +51,7 @@ param(
     [switch]$Reset,
     [string]$UserDisk = "$Work\root\ios16-user.qcow2",
     [switch]$Keep,
-    # Quick boot (qemu/patches/0009), with -Persist: closing the window saves the machine's state
+    # Quick boot (our QEMU's 0009), with -Persist: closing the window saves the machine's state
     # (memory and devices, about 3 GB) in $UserDisk, as its snapshot asoft-quick, and the next
     # start resumes it in seconds. -NoQuickBoot boots iOS every time.
     [switch]$NoQuickBoot,
@@ -99,7 +101,7 @@ if ($written) {
     if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
 }
 
-# qemu-img of our build (qemu/build-windows.sh), else of an installed QEMU
+# qemu-img of our build (next to its exe), else of an installed QEMU
 $qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
 if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
 

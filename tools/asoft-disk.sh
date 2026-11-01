@@ -45,7 +45,7 @@ else
     modprobe nbd max_part=8 2>/dev/null || true
     mkdir -p $MNT
     ro=; [ "$cmd" = list ] && ro=--read-only
-    # The quick boot's saved state (qemu/patches/0009) holds the disk as it was then: written
+    # The quick boot's saved state (our QEMU's 0009) holds the disk as it was then: written
     # now, the disk would no longer match it
     if [ -z "$ro" ] && qemu-img snapshot -l "$disk" | grep -qw asoft-quick; then
         qemu-img snapshot -d asoft-quick "$disk" && echo "dropped the quick boot state"

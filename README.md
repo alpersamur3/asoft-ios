@@ -123,14 +123,14 @@ iOS starts in seconds with quick boot.
 | iOS image from Apple (IPSW) | 6.2 GB | removed (kept with `-KeepIpsw`) |
 | iOS disk | 11.7 GB | 12.2 GB after the first start |
 | Room to build it | 7 GB | removed |
-| App, QEMU, Python, kernel | 0.3 GB | 0.3 GB |
+| App, QEMU, Python, kernel | 0.7 GB | 0.7 GB |
 | A saved state (quick boot, *Save state*) | | about 3 GB each |
 | **Total** | **about 26 GB** | **about 13 GB**, plus what iOS stores as you use it |
 
 ## How it works
 
 ```
-Windows ── QEMU (virt, TCG, our patches: side bar, phone-shaped window, power key, quick boot)
+Windows ── QEMU (-M virt, TCG; our window: side bar, phone shape, power key, quick boot)
              └─ XNU kernel (ios-sweet + ASoftware patches: virtio disk/net/input, ramfb, AMFI, ...)
                   └─ iOS 16.7.16 userland of the iPhone X, unmodified, on one HFS+ disk
                        └─ asoftinstalld (ours): .ipa installs, time zone, region, clock
@@ -139,7 +139,6 @@ Windows ── QEMU (virt, TCG, our patches: side bar, phone-shaped window, powe
 | Path | What |
 | --- | --- |
 | `xnu/patches/` | Patches on Apple's XNU: 0001-0081 from ios-sweet, 0082 on for QEMU |
-| `qemu/` | Patches on QEMU 11.1.2 and the Windows build script |
 | `installer/` | The installer, and the helper VM (arm64 Linux) that builds the iOS disk |
 | `tools/` | Device tree, boot payload, QEMU launcher, iOS root builder, disk tool |
 | `apps/` | Our iOS programs: `asoftinstalld` and a test app |
@@ -147,8 +146,37 @@ Windows ── QEMU (virt, TCG, our patches: side bar, phone-shaped window, powe
 | `assets/` | The logo |
 
 Builds: the kernel and the iOS apps on macOS (`.github/workflows/xnu.yml`, `ios-apps.yml`),
-QEMU on Windows (`qemu/build-windows.sh` or `qemu-win.yml`), the helper VM on Linux
-(`installer/helper/build-*.sh`).
+QEMU on Windows ([below](#qemu)), the helper VM on Linux (`installer/helper/build-*.sh`).
+
+### QEMU
+
+iOS 16 and iOS 26 run on one QEMU build: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/ios26),
+branch `ios26` (QEMU 11.1 with jprx's research-VM work and our iOS 26 machine), built by
+[`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots iOS 16 as before,
+`-M vresearch` boots iOS 26. Both installers take its release package
+([`ios26-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)), and both
+launchers run it from `work\qemu`. The one-line install above still installs release 0.1.0, which
+carries the older QEMU 11.1.2 build; the next ASoftware release carries this one.
+
+Our window for iOS 16 was eight patches on QEMU 11.1.2 in `qemu/patches/`. They are commits on
+that branch now, unchanged:
+
+| Patch | Commit | What |
+| --- | --- | --- |
+| 0002 | [`141c6c6`](https://github.com/alpersamur3/qemu-sptm/commit/141c6c6) | The window refreshes at most every 30 ms |
+| 0003 | [`0b8513d`](https://github.com/alpersamur3/qemu-sptm/commit/0b8513d) | `window-close=off`: closing the window powers iOS down |
+| 0004 | [`bceefed`](https://github.com/alpersamur3/qemu-sptm/commit/bceefed) | The window title is `-name` alone |
+| 0005 | [`41c7c5b`](https://github.com/alpersamur3/qemu-sptm/commit/41c7c5b) | `zoom-to-fit` opens the window at the phone's shape |
+| 0006 | [`e35ca2b`](https://github.com/alpersamur3/qemu-sptm/commit/e35ca2b) | The side bar with the phone's buttons |
+| 0007 | [`96015e5`](https://github.com/alpersamur3/qemu-sptm/commit/96015e5) | The *Screen off* cover, from the kernel's Scroll Lock LED |
+| 0008 | [`ec0de47`](https://github.com/alpersamur3/qemu-sptm/commit/ec0de47) | ASoftware's look: logo, icon, dark side bar |
+| 0009 | [`b817605`](https://github.com/alpersamur3/qemu-sptm/commit/b817605) | Quick boot, saved states, pause, app switcher, wheel swipes, pasted text |
+
+`qemu/patches/`, `qemu/build-windows.sh` and the `qemu-win` workflow (stock and patched QEMU
+11.1.2, side by side) were removed: nothing ships that build any more, and keeping a second copy
+of the same patches in step with the branch would be work for a QEMU nobody runs. Their last
+version is in the history (`git show 4dd2fce:qemu/patches`), with the stock build the 30 ms
+refresh was measured against (2026-10-21).
 
 ## Credits and licenses
 
@@ -156,7 +184,8 @@ QEMU on Windows (`qemu/build-windows.sh` or `qemu-win.yml`), the helper VM on Li
   XNU port this project is built on.
 - This repository: MIT, see [LICENSE](LICENSE) (dipa-studio and ASoftware).
 - `xnu/patches/` modify Apple's XNU (Apple Public Source License 2.0); a kernel built from them is
-  under the APSL too. `qemu/patches/` modify QEMU (GPL v2).
+  under the APSL too. Our QEMU, [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm)
+  (a fork of [jprx/qemu-sptm](https://github.com/jprx/qemu-sptm)), is QEMU's GPL v2.
 - iOS is Apple's and is not distributed here. Apple, iPhone and iOS are trademarks of Apple Inc.
 
 ---
@@ -265,9 +294,23 @@ iOS hızlı açılışla saniyeler içinde açılır.
 | Apple'dan iOS kalıbı (IPSW) | 6,2 GB | silinir (`-KeepIpsw` ile kalır) |
 | iOS diski | 11,7 GB | ilk açılıştan sonra 12,2 GB |
 | Kurmak için gereken alan | 7 GB | silinir |
-| Uygulama, QEMU, Python, çekirdek | 0,3 GB | 0,3 GB |
+| Uygulama, QEMU, Python, çekirdek | 0,7 GB | 0,7 GB |
 | Kayıtlı durum (hızlı açılış, *Save state*) | | her biri yaklaşık 3 GB |
 | **Toplam** | **yaklaşık 26 GB** | **yaklaşık 13 GB**, artı kullandıkça iOS'un sakladıkları |
+
+### QEMU
+
+iOS 16 ve iOS 26 aynı QEMU derlemesinde çalışır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/ios26)
+deposunun `ios26` dalı (jprx'in araştırma VM'i çalışması ve bizim iOS 26 makinemizle QEMU 11.1),
+[`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir. `-M virt` iOS 16'yı eskisi gibi,
+`-M vresearch` iOS 26'yı açar. İki kurulum da onun sürüm paketini alır
+([`ios26-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)), iki başlatıcı da
+onu `work\qemu` içinden çalıştırır. Yukarıdaki tek satırlık kurulum hâlâ eski QEMU 11.1.2 derlemesini
+taşıyan 0.1.0 sürümünü kurar; bir sonraki ASoftware sürümü bunu taşıyacak. iOS 16 penceresinin QEMU 11.1.2 üzerindeki sekiz yaması (`qemu/patches/`, 0002-0009)
+artık bu dalda değiştirilmeden birer commit'tir (liste yukarıda, İngilizce bölümün *QEMU* başlığında).
+`qemu/patches/`, `qemu/build-windows.sh` ve `qemu-win` iş akışı kaldırıldı: o derlemeyi artık hiçbir şey
+dağıtmıyor, aynı yamaların ikinci bir kopyasını dalla eşit tutmak kimsenin çalıştırmadığı bir QEMU için
+emek olurdu. Son hâlleri geçmişte duruyor (`git show 4dd2fce:qemu/patches`).
 
 ### Emeği geçenler ve lisanslar
 
@@ -275,7 +318,8 @@ iOS hızlı açılışla saniyeler içinde açılır.
   (MIT): bu projenin üzerine kurulduğu XNU uyarlaması.
 - Bu repo: MIT, bkz. [LICENSE](LICENSE) (dipa-studio ve ASoftware).
 - `xnu/patches/` Apple'ın XNU'sunu değiştirir (Apple Public Source License 2.0); bunlardan derlenen
-  çekirdek de APSL'dir. `qemu/patches/` QEMU'yu değiştirir (GPL v2).
+  çekirdek de APSL'dir. QEMU'muz, [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm)
+  ([jprx/qemu-sptm](https://github.com/jprx/qemu-sptm) çatalı), QEMU'nun GPL v2 lisansındadır.
 - iOS Apple'ındır ve burada dağıtılmaz. Apple, iPhone ve iOS, Apple Inc.'in ticari markalarıdır.
 
 </details>

@@ -5,7 +5,7 @@
 param(
     [Parameter(Mandatory = $true)] [string]$Ipsw,
     [Parameter(Mandatory = $true)] [string]$Out,
-    [string]$Qemu = "$env:ASOFT_WORK\qemu\v11.1.2-asoft\qemu-system-aarch64.exe",
+    [string]$Qemu = "$env:ASOFT_WORK\qemu\qemu-system-aarch64.exe",
     # Image.gz and initrd.gz from installer/helper/build-*.sh
     [string]$Helper = "$PSScriptRoot\helper\out",
     # up to 8, as many as the PC has: apfs-fuse, rsync and the guest's kernel share them

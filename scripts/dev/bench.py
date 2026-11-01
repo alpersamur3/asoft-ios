@@ -35,7 +35,7 @@ SETTINGS_ICON = (0.621, 0.356)
 SAFARI_ICON = (0.5, 0.936)          # in the dock
 SAFARI_ADDRESS = (0.5, 0.879)       # "Search or enter website name" (bottom bar)
 QCODES = {'.': 'dot', '/': 'slash', '-': 'minus', ':': 'shift-semicolon'}
-QEMU = os.path.join(WORK, 'qemu', 'v11.1.2-asoft', 'qemu-system-aarch64.exe')
+QEMU = os.path.join(WORK, 'qemu', 'qemu-system-aarch64.exe')
 
 
 class QMP:

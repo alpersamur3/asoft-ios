@@ -12,10 +12,12 @@
 param(
     [string]$Dir = "$env:LOCALAPPDATA\ASoftware iOS",
     [string]$Ipsw = '',
-    # our QEMU build with its DLLs: the release package's qemu\bin, else qemu/build-windows.sh's
-    # dist or the qemu-win workflow artifact
+    # our QEMU build with its DLLs (the one iOS 26 runs on too): the release package's qemu\bin,
+    # else a folder of one (ios26/scripts/win-build.sh's dist); with neither, the package
+    # $QemuRelease names is downloaded
     [string]$QemuDist = $(if (Test-Path "$PSScriptRoot\..\qemu\bin\qemu-system-aarch64.exe") { "$PSScriptRoot\..\qemu\bin" }
-                          elseif ($env:ASOFT_WORK) { "$env:ASOFT_WORK\qemu\v11.1.2-asoft" } else { '' }),
+                          elseif ($env:ASOFT_WORK -and (Test-Path "$env:ASOFT_WORK\qemu\qemu-system-aarch64.exe")) { "$env:ASOFT_WORK\qemu" }
+                          else { '' }),
     [int]$Cpus = 4,
     # keep the downloaded IPSW once the iOS disk is built (6.2 GB; it can be downloaded again)
     [switch]$KeepIpsw,
@@ -39,11 +41,14 @@ $ipswUrl = 'https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/115
 $ipswSha256 = 'ECE1194F7E233E9109C5790A8D23A4564A10A254E15EC5B09978A343265568FB'
 $ipswSize = 6171035648
 $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
+# Our QEMU as a release package, the one ios26/Install-iOS26.ps1 downloads: qemu-sptm's ios26
+# branch (-M virt for iOS 16, -M vresearch for iOS 26) built by ios26/scripts/win-build.sh
+$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-9fa4e67/asoft-ios26-qemu-2026.11.01b.zip'; Sha256 = '39DA37FD900344A65E8CB3E8D68FC454ABBA7E94077CCD44777BD28B30B3298D' }
 
 # Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
 # and after iOS's first start, the room the helper unpacks the IPSW into, the rest, and a saved
-# state (the quick boot's, or one Save state makes) in the user disk
-$space = @{ Ipsw = 5.75; Disk = 11.7; DiskReady = 12.2; Scratch = 7.0; App = 0.3; State = 3.0 }
+# state (the quick boot's, or one Save state makes) in the user disk. Our QEMU is 0.5 of the app's
+$space = @{ Ipsw = 5.75; Disk = 11.7; DiskReady = 12.2; Scratch = 7.0; App = 0.7; State = 3.0 }
 
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
 
@@ -99,10 +104,22 @@ if ($src.Path -ne (Resolve-Path $Dir).Path) {
     if (-not $kernel) { throw "no kernel in $src\xnu\out-*" }
     robocopy $kernel.Directory.FullName "$Dir\xnu\$($kernel.Directory.Name)" kernel.development.sweet /NFL /NDL /NJH /NJS /NP | Out-Null
 }
-$qemuDir = "$work\qemu\v11.1.2-asoft"
+# work\qemu, as Install-iOS26.ps1 has it (an older install's QEMU 11.1.2 in work\qemu\v11.1.2-asoft
+# stays where it is; the launcher takes this one first)
+$qemuDir = "$work\qemu"
 if (-not (Test-Path "$qemuDir\qemu-system-aarch64.exe")) {
-    if (-not $QemuDist -or -not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw 'give -QemuDist: the folder of our QEMU build' }
-    robocopy $QemuDist $qemuDir /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($QemuDist) {
+        if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "$QemuDist has no qemu-system-aarch64.exe" }
+        robocopy $QemuDist $qemuDir /E /XD backup-* v11.1.2-asoft /NFL /NDL /NJH /NJS /NP | Out-Null
+    } else {
+        $zip = "$env:TEMP\asoft-ios26-qemu-$($QemuRelease.Version).zip"
+        Write-Host "Downloading our QEMU ($($QemuRelease.Url))"
+        Invoke-Tool curl.exe -fL --retry 3 -o $zip $QemuRelease.Url
+        if ($LASTEXITCODE) { throw "could not download $($QemuRelease.Url)" }
+        if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $QemuRelease.Sha256) { throw "$zip is not our QEMU package (SHA-256 differs)" }
+        Expand-Archive $zip $qemuDir -Force
+        Remove-Item $zip
+    }
 }
 $qemu = "$qemuDir\qemu-system-aarch64.exe"
 Write-Host (& $qemu --version | Select-Object -First 1)
