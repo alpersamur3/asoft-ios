@@ -53,7 +53,10 @@ already lost until one `-NoQuickBoot` boot). While it runs, the guest's clock ga
 hour (the counter's 41 ns tick at 24 MHz). *Restore* into an emulator that booted on its own needs
 reims-vgpu **ae389a2c** and metal2vulkan **fbb1ae35**: an older build kept the GPU addresses of heaps
 the running emulator had deleted, and the restored state came up with its dock flickering and black
-squares for icons.
+squares for icons. A state another run saved needs reims-vgpu **ac33003f** (newer than the release
+package's 44a9dac6): an older one kept Metal's own GPU ranges where the running emulator first made
+them and refused the state's buffers there, and the loaded screen froze while the guest's GPU
+restarted.
 
 Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
 shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
@@ -393,12 +396,15 @@ SHA-256; put that line into `Install-iOS26.ps1` and `installer\Install-ASoftware
 The published launcher needs a recent build: qemu-sptm `asoft` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
 **65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
-**52f3606**, reims-vgpu **44a9dac6** and metal2vulkan `windows` **e5b58af7** or later, built together
+**52f3606**, reims-vgpu **ac33003f** and metal2vulkan `windows` **e5b58af7** or later, built together
 (an older QEMU keeps the buttons off, an older metal2vulkan can end the emulator some seconds after
 Home and a page swipe, an older reims-vgpu can break the dock and the icons when *Restore* loads a
-state into a running emulator, and a pair older than these two can place a restored app's texture
-over another app's live one); the clock catching up after a load needs qemu-sptm **ad92276**.
-Rebuild QEMU (step 1) if yours is older.
+state into a running emulator, a pair older than reims-vgpu 44a9dac6 and metal2vulkan e5b58af7 can
+place a restored app's texture over another app's live one, and a reims-vgpu older than ac33003f
+can refuse the buffers of a state another run saved, its GPU restarting until the screen freezes);
+the clock catching up after a load needs qemu-sptm **ad92276**. The release package above
+(`asoft-9fa4e67`, reims-vgpu 44a9dac6) is older than this minimum; `-QemuFrom source` builds one
+that has it. Rebuild QEMU (step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
@@ -569,6 +575,10 @@ açılmış bir disk kaybettiği süreyi bir `-NoQuickBoot` açılışına kadar
 saati saatte yaklaşık 1 dk ileri gider. Kendi açılmış bir emülatöre *Restore* ile durum yüklemek
 reims-vgpu ae389a2c ve metal2vulkan fbb1ae35 ister: eski derleme çalışan emülatörün sildiği heap'lerin
 GPU adreslerini tutuyordu, yüklenen durumun dock'u yanıp sönüyor, ikonları siyah kare çıkıyordu.
+Başka bir çalışmanın kaydettiği durum reims-vgpu ac33003f ister (yayındaki QEMU paketindeki
+44a9dac6'dan yeni): eski derleme Metal'in kendi GPU aralıklarını emülatörün onları ilk yaptığı yerde
+tutuyor, durumun buffer'larını orada reddediyordu; yüklenen ekran donuyor, misafirin GPU'su yeniden
+başlıyordu.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı

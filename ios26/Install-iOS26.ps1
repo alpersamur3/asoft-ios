@@ -80,7 +80,7 @@ $QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
     @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'asoft'; Min = 'ad92276' }
-    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = '44a9dac6' }
+    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = 'ac33003f' }
     @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = 'e5b58af7' }
 )
 # MSYS2 UCRT64 packages: QEMU's build dependencies, plus Rust (reims-vgpu) and GMP (nettle's hogweed)
