@@ -3,10 +3,12 @@
 # bash scripts it writes to <Work>\install\sh) and leaves a marker per step in <Work>\install, so
 # running it again goes on where it stopped; redoing a disk step redoes the disk steps after it.
 #
-# What it cannot do for you:
-#   - the guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) is Apple's: you extract it
-#     (README.md, "The guest's GPU driver"). Without it iOS runs GPU-less (slower); give it later
-#     (the menu's [G]) and run this again: it redoes the GPU layer and the wallpaper.
+# The guest GPU driver (the menu's GpuMode): cloudos takes Apple's AppleParavirtGPUMetalIOGPUFamily.bundle
+# out of the cloudOS IPSW it downloads anyway (the OS image carries its own AEA key) and adds the
+# Metal compiler plugin cloudOS lacks, our CI build of vphone-cli's GraphicLoader ($GpuPluginRelease,
+# or -GpuPlugin FILE); gpu copies a bundle folder you chose as it is; gpuless has no GPU layer
+# (slower). Change it later (the menu's [G]) and run this again: it redoes the GPU layer and the
+# wallpaper. What it cannot do for you:
 #   - WSL itself: installing it needs an administrator and a restart; it says so and stops.
 # Our QEMU comes as a release package it downloads and checks ($QemuRelease below); -QemuFrom
 # source builds it in MSYS2 instead (hours), -QemuFrom <folder> copies a build you have.
@@ -23,6 +25,8 @@
 #                    cannot be downloaded and MSYS2 is installed: source); with none set, the
 #                    QEMU the work folder has, else source if MSYS2 is installed
 #     -CloudOsIpsw / -IPhoneIpsw FILE   take Apple's files from an IPSW you have
+#     -GpuPlugin FILE  the GPU driver's compiler plugin (GpuMode cloudos) from a file you have,
+#                    not the release's download
 #     -BakeMinutes N how long the wallpaper boot leaves iOS running once it is up (6)
 #     -KeepBuildFiles  keep the decrypted images and the intermediate disk (about 32 GB)
 # Folders, saved in the menu's config (%LOCALAPPDATA%\ASoftware iOS 26\ios26.config.json):
@@ -42,6 +46,7 @@ param(
     [string]$QemuFrom = 'auto',
     [string]$CloudOsIpsw = '',
     [string]$IPhoneIpsw = '',
+    [string]$GpuPlugin = '',
     [string]$From = '',
     [string]$Only = '',
     [switch]$DryRun,
@@ -103,7 +108,12 @@ $CloudOsFiles = [ordered]@{    # member = bytes; into <Work>\cloudos, as in the 
     'Firmware/all_flash/DeviceTree.vphone600ap.im4p' = 8043
     '094-39914-031.dmg'                              = 232783899
     'Firmware/094-39914-031.dmg.trustcache'          = 7967
+    # the OS image, only for the guest GPU driver (GpuMode cloudos; the gpu step removes it once
+    # used), and the trust cache that lists the driver's CDHash
+    '094-39278-029.dmg.aea'                          = 754974720
+    'Firmware/094-39278-029.dmg.aea.trustcache'      = 6287
 }
+$CloudOsGpuImage = '094-39278-029.dmg'    # the cloudOS OS (AEA; its key is in its own header)
 $OsImage = '094-97246-090.dmg'       # the OS (AEA)
 $SysOsImage = '094-95368-092.dmg'    # the SystemOS cryptex (AEA)
 $AppOsImage = '094-96441-094.dmg'    # the AppOS cryptex
@@ -121,10 +131,15 @@ $DscPosterBoard = @('0x220649088', 'f6179f1a20070034', '3600805239000014')
 $DscCollections = @('0x22066ebc0', 'a0000054', '05000014')
 $DscFiles = @('dyld_shared_cache_arm64e.42', 'dyld_shared_cache_arm64e.03')
 $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
+# The guest GPU driver's Metal compiler plugin (GpuMode cloudos), which no cloudOS has: not Apple's
+# but vphone-cli's GraphicLoader (MIT), built by .github/workflows/graphicloader.yml (arm64e, ad-hoc
+# signed) and published as a release of this repository: graphicloader-57bbc93 is vphone-cli 57bbc93,
+# workflow run 41327085946 (Xcode 26.6, iphoneos SDK 26.5), CDHash be31e476f1de117bbdc27942cab156d261f3b1f2
+$GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-57bbc93/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '903F2A449851586B579E74A7F08446AF997DA4FCCB7014B31CF5E9DAB10BB458' }
 # GB (10^9) a step adds on the work folder's drive at most, measured on our build; a build from
 # nothing peaks at about 55 GB (during partition) and keeps about 30 GB
-$Space = @{ cloudos = 0.3; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 23.5; apps = 3.5
-            gpu = 0.5; wallpaper = 3.0; collections = 1.5; qemu = 1.5 }
+$Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 23.5; apps = 3.5
+            gpu = 1.5; wallpaper = 3.0; collections = 1.5; qemu = 1.5 }
 
 # --- Output, running tools ---------------------------------------------------------------------
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
@@ -319,6 +334,33 @@ function Gpu-Driver {
     $c = Read-Config
     if ($c -and "$($c.GpuMode)" -ceq 'gpu' -and $c.GpuDriver) { return [string]$c.GpuDriver }
     $null
+}
+# Where the GPU layer's driver comes from: cloudos (Apple's bundle out of the cloudOS IPSW, with the
+# compiler plugin), folder (the bundle you chose, Gpu-Driver), or $null (GPU-less: no GPU layer)
+function Gpu-Route {
+    $c = Read-Config
+    if ($c -and "$($c.GpuMode)" -ceq 'cloudos') { return 'cloudos' }
+    if (Gpu-Driver) { return 'folder' }
+    $null
+}
+# The compiler plugin GpuMode cloudos adds: -GpuPlugin's file, else the release's download
+function Gpu-Plugin {
+    if ($GpuPlugin) { [IO.Path]::GetFullPath($GpuPlugin) } else { In-Work "downloads\$($GpuPluginRelease.Name)" }
+}
+function Plugin-Sig {
+    if (-not $GpuPlugin) { return $GpuPluginRelease.Sha256 }
+    $f = Gpu-Plugin
+    if (Test-Path $f -PathType Leaf) { (Get-FileHash $f -Algorithm SHA256).Hash } else { $f }
+}
+# why the gpu step (cloudos) cannot have the compiler plugin, or nothing
+function Plugin-Missing {
+    if ($GpuPlugin) {
+        if (Test-Path (Gpu-Plugin) -PathType Leaf) { return $null }
+        return "-GpuPlugin $(Gpu-Plugin) is not there"
+    }
+    if ($GpuPluginRelease.Url) { return $null }
+    'no release of the compiler plugin is set ($GpuPluginRelease): give the plugin with -GpuPlugin FILE, ' +
+        'or choose a driver bundle you have (the menu''s [G])'
 }
 function Want-Collections {
     # -Collections (remembered in the config as Collections; -NoCollections forgets it), or the
@@ -570,16 +612,26 @@ function Need-OsImage {
     $null = Run-Wsl 'decrypt-os' 'bash $S/m2-decrypt.sh'
     Drop-Aea $OsImage
 }
-function Drop-Aea([string]$image) {
+function Drop-Aea([string]$image, [string]$dir = 'iphone') {
     if ($KeepBuildFiles) { return }
-    Show-Cmd "del iphone\$image.aea   (decrypted; -KeepBuildFiles keeps it)"
+    Show-Cmd "del $dir\$image.aea   (decrypted; -KeepBuildFiles keeps it)"
     if (-not $DryRun) {
-        Remove-Item (In-Work "iphone\$image.aea"), (In-Work "install\got\$image.aea.ok") -ErrorAction SilentlyContinue
+        Remove-Item (In-Work "$dir\$image.aea"), (In-Work "install\got\$image.aea.ok") -ErrorAction SilentlyContinue
+    }
+}
+# The cloudOS OS image the GPU driver comes out of, and its trust cache. The gpu step removes the
+# image once used, so a gpu step redone later gets it again.
+function Need-GpuImage {
+    $aea = In-Work "cloudos\$CloudOsGpuImage.aea"
+    $need = if ($DryRun -or -not (Test-Path $aea)) { $CloudOsFiles["$CloudOsGpuImage.aea"] / 1e9 } else { 0 }
+    Need-Space ($need + $Space.gpu)
+    foreach ($m in "$CloudOsGpuImage.aea", "Firmware/$CloudOsGpuImage.aea.trustcache") {
+        Get-IpswMember (CloudOs-Source) $m (In-Work ('cloudos\' + ($m -replace '/', '\'))) $CloudOsFiles[$m]
     }
 }
 # The overlay the wallpaper step builds root.qcow2 on: the top of the disk chain
 function Top-Layer {
-    if (Gpu-Driver) { 'root26-gpu' } else { 'root26-apps' }
+    if (Gpu-Route) { 'root26-gpu' } else { 'root26-apps' }
 }
 # CDHashes from cdhash.py output
 function Hashes([string[]]$lines) { @($lines | ForEach-Object { if ("$_" -cmatch '^([0-9a-f]{40}) ') { $Matches[1] } }) }
@@ -598,8 +650,16 @@ function Do-Setup {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $menu -SetupOnly -Config $Config -Work $Work
     if ($LASTEXITCODE) { Fail 'the setup did not finish' }
     Save-Keys @{ Distro = $Distro; Src = $Src; Linux = $LinuxDir }
-    $d = Gpu-Driver
-    if ($d) { Say "GPU driver: $d" } else { Say 'GPU-less: iOS draws on the CPU (slower); the menu''s [G] adds a driver later' Yellow }
+    switch (Gpu-Route) {
+        'cloudos' { Say "GPU driver: Apple's, out of the cloudOS IPSW ($CloudOsGpuImage.aea), with the compiler plugin $(if ($GpuPlugin) { Gpu-Plugin } else { 'of our release' })" }
+        'folder' { Say "GPU driver: $(Gpu-Driver)" }
+        default { Say 'GPU-less: iOS draws on the CPU (slower); the menu''s [G] adds a driver later' Yellow }
+    }
+    # the gpu step comes hours later: a plugin it cannot have stops the run now
+    if ((Gpu-Route) -ceq 'cloudos' -and (Get-Mark 'gpu') -cne (Step-Sig 'gpu')) {
+        $why = Plugin-Missing
+        if ($why) { Fail $why }
+    }
     # the build's scripts, next to its files where WSL reads them (bash wants LF)
     New-Item -ItemType Directory -Force $dst | Out-Null
     $files = @(Get-ChildItem (Join-Path $here 'scripts') -File) +
@@ -817,6 +877,12 @@ function Do-Sysroot {
 function Do-CloudOs {
     Need-Space $Space.cloudos
     foreach ($m in $CloudOsFiles.Keys) {
+        # the OS image only for a GPU layer still to be made from it (the gpu step gets it again if
+        # it is not here)
+        if ($m -ceq "$CloudOsGpuImage.aea") {
+            if ((Gpu-Route) -cne 'cloudos') { Say "$m`: not needed (the GPU driver is not taken from cloudOS)" DarkGray; continue }
+            if ((Get-Mark 'gpu') -ceq (Step-Sig 'gpu')) { Say "$m`: its GPU driver is on the disk already"; continue }
+        }
         Get-IpswMember (CloudOs-Source) $m (In-Work ('cloudos\' + ($m -replace '/', '\'))) $CloudOsFiles[$m]
     }
 }
@@ -1083,22 +1149,44 @@ EOF
 
 function Do-Gpu {
     # 5.2: the guest GPU driver into /System/Library/Extensions (root:wheel, 755/644), its Mach-Os'
-    # CDHashes into the trust cache. Without one (GPU-less) there is no GPU layer.
-    $driver = Gpu-Driver
-    if (-not $driver) {
+    # CDHashes into the trust cache. GpuMode cloudos: Apple's bundle out of the cloudOS OS image
+    # (cloudos-gpu-driver.sh: its binary's CDHash must be in that image's trust cache) and the
+    # compiler plugin; gpu: the folder you chose, as it is. Without one (GPU-less) no GPU layer.
+    $route = Gpu-Route
+    if (-not $route) {
         Say 'GPU-less (no guest GPU driver in the config): no GPU layer' Yellow
         foreach ($f in 'root26-gpu.qcow2', 'root26-gpu.tc') { if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; if (-not $DryRun) { Remove-Item (In-Work $f); Drop-Owned $f } } }
         return
     }
-    if (-not $DryRun -and -not (Test-Path $driver -PathType Container)) {
-        Fail "the GPU driver folder $driver is not there: choose it again with the menu's [G] (Start-iOS26.cmd)"
-    }
-    Need-Space $Space.gpu
     $copy = In-Work "install\work\gpu\$GpuBundle"
-    Copy-Tree $driver $copy
+    if ($route -ceq 'cloudos') {
+        $driver = "cloudos\$CloudOsGpuImage.aea"
+        $plugin = Gpu-Plugin
+        $why = Plugin-Missing
+        if ($why) {
+            if ($DryRun) { Say "(a real run stops here) $why" Yellow } else { Fail $why }
+        } elseif (-not $GpuPlugin) {
+            Get-File $GpuPluginRelease.Url $plugin $GpuPluginRelease.Sha256
+        }
+        Need-GpuImage
+        Show-Cmd "del install\work\gpu (if there)"
+        if (-not $DryRun) { Remove-Item (In-Work 'install\work\gpu') -Recurse -Force -ErrorAction SilentlyContinue }
+        $body = 'bash $S/cloudos-gpu-driver.sh cloudos/{IMG}.aea install/work/gpu cloudos/Firmware/{IMG}.aea.trustcache'
+        $null = Run-Wsl 'gpu-driver' $body.Replace('{IMG}', $CloudOsGpuImage)
+        Show-Cmd "copy $plugin $copy"
+        if (-not $DryRun) { Copy-Item $plugin (Join-Path $copy $GpuPluginRelease.Name) -Force }
+    } else {
+        $driver = Gpu-Driver
+        if (-not $DryRun -and -not (Test-Path $driver -PathType Container)) {
+            Fail "the GPU driver folder $driver is not there: choose it again with the menu's [G] (Start-iOS26.cmd)"
+        }
+        Need-Space $Space.gpu
+        Copy-Tree $driver $copy
+    }
     $files = if ($DryRun) { @("$copy\...") } else { @(Get-ChildItem $copy -Recurse -File | ForEach-Object FullName) }
     $hashes = Hashes (Py 'cdhash.py' $files)
     if (-not $DryRun -and -not $hashes) { Fail "no signed Mach-O in $driver (is it $GpuBundle?)" }
+    if (-not $DryRun -and $route -ceq 'cloudos' -and $hashes.Count -lt 2) { Fail "the compiler plugin $plugin is not a signed Mach-O" }
     $list = In-Work 'install\work\gpu.hashes'
     Show-Cmd "$list = the CDHashes above"
     if (-not $DryRun) { New-Item -ItemType Directory -Force (Split-Path $list) | Out-Null; Set-Content $list $hashes -Encoding ASCII }
@@ -1117,6 +1205,8 @@ ls -l "$B" "$B"/*
 EOF
 '@
     $null = Run-Wsl 'gpu' $body.Replace('{BUNDLE}', $GpuBundle)
+    # the driver is out of it (a gpu step redone later gets the image again)
+    if ($route -ceq 'cloudos') { Drop-Aea $CloudOsGpuImage 'cloudos' }
 }
 
 function Do-Wallpaper {
@@ -1187,7 +1277,8 @@ function Do-Cleanup {
     if ($KeepBuildFiles) { Say '-KeepBuildFiles: the decrypted images and the build''s intermediates stay' DarkGray; return }
     # what only the build reads (a step redone later gets it again)
     $gone = @('os', 'dsc', 'dsc-wp', 'dscpatch', 'dscpatch-pb', 'dscpatch-edge', 'dscpatch-wp', 'install\work', 'root26.qcow2',
-              "iphone\$OsImage.aea", "iphone\$SysOsImage.aea", "install\got\$OsImage.aea.ok", "install\got\$SysOsImage.aea.ok")
+              "iphone\$OsImage.aea", "iphone\$SysOsImage.aea", "install\got\$OsImage.aea.ok", "install\got\$SysOsImage.aea.ok",
+              "cloudos\$CloudOsGpuImage.aea", "install\got\$CloudOsGpuImage.aea.ok")
     $bytes = 0
     $any = $false
     foreach ($rel in $gone) {
@@ -1274,7 +1365,7 @@ $Steps = @(
     @{ Id = 'persona';     Readme = '4.5';                  Kind = 'chain';  Title = 'Persona and MobileGestalt fixes' }
     @{ Id = 'activation';  Readme = '5.1';                  Kind = 'chain';  Title = 'Activation (root26-activation.qcow2)' }
     @{ Id = 'apps';        Readme = '5.3.1-5.3.5, 5.4';     Kind = 'chain';  Title = 'Apps, dyld cache patches, gestures (root26-apps.qcow2)' }
-    @{ Id = 'gpu';         Readme = '5.2';                  Kind = 'chain';  Title = 'The guest GPU driver (root26-gpu.qcow2), if you have it' }
+    @{ Id = 'gpu';         Readme = '5.2';                  Kind = 'chain';  Title = 'The guest GPU driver (root26-gpu.qcow2), unless GPU-less' }
     @{ Id = 'wallpaper';   Readme = '5.3.6';                Kind = 'chain';  Title = 'root.qcow2 and its wallpaper (boots iOS once)' }
     @{ Id = 'collections'; Readme = '5.3.6';                Kind = 'chain';  Title = 'The Collections wallpaper disk, if asked for' }
     @{ Id = 'cleanup';     Readme = '-';                    Kind = 'always'; Title = 'Remove what only the build needs' }
@@ -1295,7 +1386,7 @@ $Inputs = @{
 }
 function Assert-Inputs([string]$id) {
     $need = @($Inputs[$id] | Where-Object { $_ })
-    if ($id -ceq 'gpu' -and (Gpu-Driver)) { $need = @(@('root26-apps.qcow2', 'apps'), @('root26-apps.tc', 'apps')) }
+    if ($id -ceq 'gpu' -and (Gpu-Route)) { $need = @(@('root26-apps.qcow2', 'apps'), @('root26-apps.tc', 'apps')) }
     if ($id -ceq 'wallpaper') {
         $t = Top-Layer
         $by = if ($t -ceq 'root26-gpu') { 'gpu' } else { 'apps' }
@@ -1314,7 +1405,12 @@ function Assert-Inputs([string]$id) {
 # what a step's marker must say for it to count as done (others: done)
 function Step-Sig([string]$id) {
     switch -CaseSensitive ($id) {
-        'gpu' { $d = Gpu-Driver; if ($d) { return "gpu $d" } else { return 'gpuless' } }
+        # cloudos: a new image or plugin redoes the GPU layer
+        'gpu' {
+            $r = Gpu-Route
+            if ($r -ceq 'cloudos') { return "cloudos $CloudOsGpuImage plugin $(Plugin-Sig)" }
+            if ($r) { return "gpu $(Gpu-Driver)" } else { return 'gpuless' }
+        }
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
     }
     'done'
@@ -1481,7 +1577,7 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         }
         # the disk files it makes are the installer's from now on (before it runs: a resume after a
         # failure half way finds them listed)
-        $makes = $Writes[$s.Id] -and -not ($s.Id -ceq 'collections' -and -not (Want-Collections)) -and -not ($s.Id -ceq 'gpu' -and -not (Gpu-Driver))
+        $makes = $Writes[$s.Id] -and -not ($s.Id -ceq 'collections' -and -not (Want-Collections)) -and -not ($s.Id -ceq 'gpu' -and -not (Gpu-Route))
         if (-not $DryRun -and $makes) { Add-Owned $Writes[$s.Id] }
         Invoke-Step $s.Id
     } catch {

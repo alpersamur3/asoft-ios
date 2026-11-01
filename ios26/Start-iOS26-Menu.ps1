@@ -5,10 +5,12 @@
 # driver, the wallpaper, the disk mode, the network. First run (or an empty setting) asks for it,
 # with a folder picker for the work folder and the GPU driver; later starts reuse it.
 #
-# The guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle, which you extract yourself, see
-# README.md) is baked into the disk when the disk is built, not read at run time. So this records
-# where it is and whether the disk was built with it (GpuMode). Without it iOS draws on the CPU and
-# the host only shows the frames: it still reaches the home screen, but everything is slower.
+# The guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) is baked into the disk when the
+# disk is built, not read at run time. So this records where the installer takes it from (GpuMode):
+# cloudos, Apple's driver out of the cloudOS IPSW plus our build of its compiler plugin (the
+# installer does both); gpu, a bundle folder you have (GpuDriver); gpuless, none. Without it iOS
+# draws on the CPU and the host only shows the frames: it still reaches the home screen, but
+# everything is slower.
 #
 #   Start-iOS26-Menu.ps1 [-Work D:\ios26] [-NoMenu]   (-NoMenu: start at once with the saved setup)
 param(
@@ -25,8 +27,8 @@ $ErrorActionPreference = 'Stop'
 # --- config load/save -------------------------------------------------------
 $default = [ordered]@{
     Work      = ''
-    GpuDriver = ''          # path to AppleParavirtGPUMetalIOGPUFamily.bundle, or '' for none
-    GpuMode   = ''          # 'gpu' | 'gpuless' | '' (not chosen yet)
+    GpuDriver = ''          # path to AppleParavirtGPUMetalIOGPUFamily.bundle (GpuMode gpu), or ''
+    GpuMode   = ''          # 'cloudos' | 'gpu' | 'gpuless' | '' (not chosen yet)
     Wallpaper = 'ios26'     # 'ios26' | 'collections'
     DiskMode  = 'persist'   # 'throwaway' | 'persist' | 'keep'
     QuickBoot = $true       # closing the window saves the state, the next start resumes it
@@ -88,13 +90,6 @@ function Pick-File([string]$title, [string]$filter) {
     return $null
 }
 
-function Ask-YesNo([string]$q, [bool]$default) {
-    $suffix = if ($default) { '[Y/n]' } else { '[y/N]' }
-    $a = Read-Host "$q $suffix"
-    if (-not $a) { return $default }
-    return $a -match '^[yYeE]'          # y or e(vet)
-}
-
 # --- setup: fill anything the config is missing -----------------------------
 function Ensure-Setup($cfg) {
     # work folder
@@ -107,12 +102,21 @@ function Ensure-Setup($cfg) {
         $cfg.Work = $picked
     }
     # GPU driver / GPU mode
-    if (-not $cfg.GpuMode) {
-        Write-Host ''
-        Write-Host 'The guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) makes iOS draw on your'
-        Write-Host "PC's GPU. You extract it yourself (README.md). It is baked into the disk when the disk"
-        Write-Host 'is built; this only records where it is.'
-        if (Ask-YesNo 'Do you have the guest GPU driver bundle?' $true) {
+    if (-not $cfg.GpuMode) { Choose-Gpu $cfg }
+    Save-Config $cfg
+}
+
+# --- where the installer takes the guest GPU driver from -------------------
+function Choose-Gpu($cfg) {
+    Write-Host ''
+    Write-Host 'The guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) makes iOS draw on your'
+    Write-Host "PC's GPU. It is baked into the disk when the installer builds it:"
+    Write-Host "  [1] Apple's, out of the cloudOS IPSW the installer downloads anyway, with its compiler"
+    Write-Host '      plugin (our build of vphone-cli''s GraphicLoader). No Mac needed. (default)'
+    Write-Host '  [2] A driver bundle folder you have (copied as it is, plugin included)'
+    Write-Host '  [3] None: GPU-less'
+    switch ((Read-Host 'Choose [1]').Trim()) {
+        '2' {
             $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' $(if ($cfg.GpuDriver) { Split-Path $cfg.GpuDriver })
             if ($picked) {
                 $cfg.GpuDriver = $picked
@@ -121,19 +125,20 @@ function Ensure-Setup($cfg) {
                     Write-Host "note: '$([IO.Path]::GetFileName($picked))' is not a *.bundle folder; keeping it anyway" -ForegroundColor Yellow
                 }
             } else {
-                $cfg.GpuMode = 'gpuless'
+                Write-Host 'No folder chosen: the driver comes from the cloudOS IPSW.'
+                $cfg.GpuDriver = ''
+                $cfg.GpuMode = 'cloudos'
             }
-        } else {
-            $cfg.GpuMode = 'gpuless'
         }
-        if ($cfg.GpuMode -eq 'gpuless') {
-            Write-Host ''
-            Write-Host 'Running GPU-less: iOS draws on the CPU and the host only shows the frames. It reaches' -ForegroundColor Yellow
-            Write-Host 'the home screen but everything is slower. Add the GPU driver later and rebuild the disk' -ForegroundColor Yellow
-            Write-Host 'to turn it on (README.md, step 5.2).' -ForegroundColor Yellow
-        }
+        '3' { $cfg.GpuDriver = ''; $cfg.GpuMode = 'gpuless' }
+        default { $cfg.GpuDriver = ''; $cfg.GpuMode = 'cloudos' }
     }
-    Save-Config $cfg
+    if ($cfg.GpuMode -eq 'gpuless') {
+        Write-Host ''
+        Write-Host 'Running GPU-less: iOS draws on the CPU and the host only shows the frames. It reaches' -ForegroundColor Yellow
+        Write-Host 'the home screen but everything is slower. Choose a driver later ([G]) and run' -ForegroundColor Yellow
+        Write-Host 'Install-iOS26.cmd again to turn it on (README.md, step 5.2).' -ForegroundColor Yellow
+    }
 }
 
 # --- the menu ---------------------------------------------------------------
@@ -142,7 +147,7 @@ function Show-Menu($cfg) {
         Write-Host ''
         Write-Host '  ASoftware iOS 26' -ForegroundColor Cyan
         Write-Host ('  Work      : {0}' -f $cfg.Work)
-        Write-Host ('  GPU       : {0}{1}' -f $cfg.GpuMode, $(if ($cfg.GpuDriver) { " ($($cfg.GpuDriver))" } else { '' }))
+        Write-Host ('  GPU       : {0}{1}' -f $cfg.GpuMode, $(if ($cfg.GpuMode -eq 'cloudos') { " (Apple's driver from the cloudOS IPSW)" } elseif ($cfg.GpuDriver) { " ($($cfg.GpuDriver))" } else { '' }))
         Write-Host ('  Wallpaper : {0}' -f $cfg.Wallpaper)
         Write-Host ('  Disk      : {0}' -f $cfg.DiskMode)
         Write-Host ('  Quick boot: {0}' -f $(if ($cfg.DiskMode -eq 'throwaway') { 'off (needs a disk that keeps its changes)' } elseif ($cfg.QuickBoot) { 'on (about 3.7 GB on the disk)' } else { 'off' }))
@@ -168,9 +173,11 @@ function Show-Menu($cfg) {
             'B' { $cfg.QuickBoot = -not $cfg.QuickBoot }
             'C' { $cfg.Smp = if ($cfg.Smp -eq 4) { 8 } else { 4 } }
             'G' {
-                $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' $(if ($cfg.GpuDriver) { Split-Path $cfg.GpuDriver })
-                if ($picked) { $cfg.GpuDriver = $picked; $cfg.GpuMode = 'gpu' }
-                else { if (Ask-YesNo 'No driver: run GPU-less (slower)?' $false) { $cfg.GpuDriver = ''; $cfg.GpuMode = 'gpuless' } }
+                $was = "$($cfg.GpuMode) $($cfg.GpuDriver)"
+                Choose-Gpu $cfg
+                if ("$($cfg.GpuMode) $($cfg.GpuDriver)" -cne $was) {
+                    Write-Host 'Run Install-iOS26.cmd to rebuild the GPU layer and the wallpaper with it.' -ForegroundColor Yellow
+                }
             }
             'R' { $cfg.DiskMode = 'persist'; $script:ResetState = $true; Write-Host 'The persist overlay will be reset on the next start.' }
             'Q' { return $false }

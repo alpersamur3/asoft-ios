@@ -21,10 +21,11 @@ same GPU stack on Linux; this is the Windows host.
 
 > [!WARNING]
 > A research preview, not a product. `Install-iOS26.cmd` runs the build below for you, but it
-> takes WSL, about 60 GB and several hours, it cannot get you the guest's GPU driver, and until we
+> takes WSL, about 60 GB and several hours, and until we
 > publish a QEMU package it builds QEMU too. Apple's security model is mostly switched off. Not
 > affiliated with Apple. No Apple software is in this repository or in our forks: you build
-> everything from your own downloads from Apple, and the guest's GPU driver you extract yourself.
+> everything from your own downloads from Apple, the guest's GPU driver too (the installer takes it
+> out of Apple's cloudOS IPSW on your PC).
 
 ## What works
 
@@ -139,13 +140,14 @@ on where it stopped, the downloads too. A failed step says which README step it 
 log is; fix the cause and run it again. It never rebuilds disks it did not make: a folder that has
 disks but no `install` folder is refused (`-List`, `-Check` and `-DryRun` still work there), and a
 disk you put into its own folder stops the step that would rebuild it until `-From` or `-Only` names
-that step. What it cannot do for you:
+that step.
 
-- **The guest's GPU driver** is Apple's ([below](#the-guests-gpu-driver)). Without it iOS runs
-  GPU-less. Give it later with the menu's **[G]** and run the installer again: it redoes only the
-  GPU layer and the wallpaper.
-- **WSL itself.** Installing it needs an administrator and a restart: the installer prints the
-  command and stops. Run it, restart, and run the installer again.
+The guest's GPU driver needs no Mac: the installer takes Apple's bundle out of the cloudOS IPSW it
+downloads anyway and adds the Metal compiler plugin cloudOS lacks, built by our CI
+([below](#the-guests-gpu-driver)). A driver bundle of your own, or none (GPU-less), is the menu's
+**[G]**; change it and run the installer again: it redoes only the GPU layer and the wallpaper.
+What it cannot do for you is **WSL itself**: installing it needs an administrator and a restart, so
+the installer prints the command and stops. Run it, restart, and run the installer again.
 
 QEMU comes prebuilt: the installer downloads `asoft-ios26-qemu-2026.11.01.zip` (125 MB) from
 qemu-sptm's [`ios26-ad92276` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-ad92276)
@@ -204,6 +206,8 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
   - `Firmware/sptm.vresearch1.release.im4p`, `Firmware/txm.iphoneos.research.im4p`
   - `Firmware/all_flash/DeviceTree.vphone600ap.im4p`
   - the ramdisk `094-39914-031.dmg` and its trust cache
+  - for the GPU driver (5.2): the OS image `094-39278-029.dmg.aea` (755 MB, encrypted, but its key
+    is in its own AEA header) and its trust cache `Firmware/094-39278-029.dmg.aea.trustcache`
 - **iPhone17,3 iOS 26.6.2 (23G90)**: `ipsw-get.py URL MEMBER OUT` fetches single members of the IPSW
   into `$ASOFT26/iphone`:
   - `094-97246-090.dmg.aea` (the OS)
@@ -273,7 +277,10 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
    2. Put the result at `/usr/libexec/mobileactivationd` (same owner and mode) and add its new CDHash.
    3. We gave its entry the original's constraint category 3. `mktc.py` writes 0 for a text list;
       `amfi-lc-off=on` should make that work too, but we have not tried it.
-2. **GPU driver** (optional, see below): put `AppleParavirtGPUMetalIOGPUFamily.bundle` into
+2. **GPU driver** (optional, see below): `cloudos-gpu-driver.sh cloudos/094-39278-029.dmg.aea OUT
+   cloudos/Firmware/094-39278-029.dmg.aea.trustcache` (WSL, as root) takes
+   `AppleParavirtGPUMetalIOGPUFamily.bundle` out of the cloudOS OS image; add the compiler plugin
+   `libAppleParavirtCompilerPluginIOGPUFamily.dylib` to it. Put the bundle into
    `/System/Library/Extensions` (root:wheel, 755/644) and add the CDHashes of its Mach-Os. Without
    it, iOS draws on the CPU and reims only shows the frames; that also reaches the home screen.
 3. **Apps and wallpaper:**
@@ -326,12 +333,13 @@ your setup. The menu's choices (work folder, wallpaper, disk mode, network, vCPU
 -NoMenu` starts at once with the saved setup, and `Start-iOS26.ps1 ...` is still the launcher with
 every option.
 
-The first run (of the menu or of the installer) asks where the work folder is and whether you have
-the guest GPU driver, with a folder picker, and saves the path. Without a driver iOS runs *GPU-less*:
-it draws on the CPU and the host only shows the frames — it reaches the home screen, but everything
-is slower. The driver is baked into the disk when the disk is built, so this records where it is, it
-is not read at run time: to turn the GPU on later, choose the driver with the menu's **[G]** and run
-`Install-iOS26.cmd` again (it redoes the GPU layer, step 5.2, and the wallpaper).
+The first run (of the menu or of the installer) asks where the work folder is and where the guest
+GPU driver comes from: Apple's cloudOS IPSW (the default; the installer extracts it), a driver bundle
+folder you have (a folder picker), or none. Without a driver iOS runs *GPU-less*: it draws on the CPU
+and the host only shows the frames — it reaches the home screen, but everything is slower. The
+driver is baked into the disk when the disk is built, so this records the choice, it is not read at
+run time: to change it later, choose again with the menu's **[G]** and run `Install-iOS26.cmd` again
+(it redoes the GPU layer, step 5.2, and the wallpaper).
 
 `Install-iOS26.cmd` runs the whole *Build* above: that setup, the Windows checks, WSL and its tools,
 QEMU, only the needed members of Apple's two IPSWs (about 10.5 GB, resumable), the firmware, device
@@ -349,6 +357,7 @@ itself. Options:
 | `-Collections`, `-NoCollections` | Also builds `root-collections.qcow2` (5.3.6); remembered. Also on when the menu's wallpaper is *collections* |
 | `-QemuFrom auto\|release\|source\|FOLDER` | Where QEMU comes from. `auto`: the release package (`source` instead when it cannot be downloaded and MSYS2 is installed); with no package set, the work folder's QEMU, else `source` if MSYS2 is installed |
 | `-CloudOsIpsw FILE`, `-IPhoneIpsw FILE` | Takes Apple's files from IPSWs you already have |
+| `-GpuPlugin FILE` | Takes the GPU driver's compiler plugin from a file you have instead of our release |
 | `-KeepBuildFiles` | Keeps the decrypted images and the intermediate disk (about 32 GB) |
 | `-BakeMinutes N` | How long the wallpaper boot leaves iOS running once its UI is up (6) |
 | `-NoShortcut` | No Start-menu shortcut |
@@ -394,14 +403,32 @@ and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
 ### The guest's GPU driver
 
 `AppleParavirtGPUMetalIOGPUFamily.bundle` is Apple firmware content. It is not in this repository
-and never will be: vphone-cli stopped shipping it for the same reason. Extract your own:
+and never will be: vphone-cli stopped shipping it for the same reason. The installer (menu choice
+*cloudOS*, the default) makes it on your PC from your own download, in two parts:
 
-- **On an Apple silicon Mac:** [vphone-cli](https://github.com/Lakr233/vphone-cli)'s `fw prepare` copies it
-  from the cloudOS image. Its compiler plugin is built with
-  [GraphicLoader](https://github.com/Lakr233/vphone-cli/blob/main/VPhoneGuestComponents/GraphicLoader/README.md).
-- **Without a Mac:** vphone-linux's
-  [CREATE-ON-LINUX.md](https://github.com/YahiaAngelo/vphone-linux/blob/main/docs/CREATE-ON-LINUX.md)
-  gets it from a stock cloudOS restore under QEMU on Linux. We have not tried that route.
+- **The driver** comes out of the cloudOS 26.4b IPSW's OS image, `094-39278-029.dmg.aea`: the
+  23E5207q driver (64.4.4) that vphone-cli and vphone-linux get from a cloudOS restore, byte for byte.
+  Apple's key server no longer gives out cloudOS keys (403 for every build), but each cloudOS OS
+  image carries its AEA key in its own header (`encryption_key`), so `ipsw fw aea` decrypts it
+  offline. [`scripts/cloudos-gpu-driver.sh`](scripts/cloudos-gpu-driver.sh) decrypts the image,
+  mounts it read-only with apfs-fuse, copies the bundle, checks that its binary's CDHash
+  (`113e1e21…`) is in that IPSW's own trust cache and deletes the 1.4 GB image: about 20 s for the
+  whole GPU step here, the member read from a local IPSW.
+- **The Metal compiler plugin**, `libAppleParavirtCompilerPluginIOGPUFamily.dylib`, is in no cloudOS,
+  and without it backboardd crashes and iOS restarts into recovery. It is not Apple's:
+  [GraphicLoader](https://github.com/Lakr233/vphone-cli/blob/main/VPhoneGuestComponents/GraphicLoader/README.md)
+  in vphone-cli (MIT), 0xjohnnydev's clean-room reimplementation. Our workflow
+  [`graphicloader.yml`](../.github/workflows/graphicloader.yml) builds it with vphone-cli's own make
+  target (arm64e, ad-hoc signed); the installer downloads that build from the release
+  [graphicloader-57bbc93](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-57bbc93)
+  (vphone-cli 57bbc93, with its license and build record) and checks its SHA-256
+  (`$GpuPluginRelease`). `-GpuPlugin FILE` takes another build.
+
+The installer puts both CDHashes into the GPU layer's trust cache. Or bring a bundle of your own
+(menu choice *folder*), copied as it is with its plugin: [vphone-cli](https://github.com/Lakr233/vphone-cli)'s
+`fw prepare` makes one on an Apple silicon Mac, and vphone-linux's
+[CREATE-ON-LINUX.md](https://github.com/YahiaAngelo/vphone-linux/blob/main/docs/CREATE-ON-LINUX.md)
+from a stock cloudOS restore under QEMU on Linux (we have not tried that route).
 
 ## Tools
 
@@ -423,7 +450,9 @@ and never will be: vphone-cli stopped shipping it for the same reason. Extract y
   [steelbrain/metal2vulkan](https://github.com/steelbrain/metal2vulkan): the paravirtual Apple GPU
   on Vulkan and the Metal-to-Vulkan translator our Windows ports build on (their own licenses).
 - [vphone-cli](https://github.com/Lakr233/vphone-cli): research on the vphone600 guest (Setup
-  Assistant, activation, the guest GPU driver).
+  Assistant, activation, the guest GPU driver), and GraphicLoader, the GPU driver's compiler plugin
+  our CI builds (MIT; its source is 0xjohnnydev's clean-room
+  [metal-patch](https://github.com/0xjohnnydev/0xjohnnydev.github.io/blob/main/blog/assets/metal-patch/main.mm)).
 - [vphone-linux](https://github.com/YahiaAngelo/vphone-linux): the same guest and GPU stack on Linux.
 - The scripts in this folder are MIT, as is the rest of this repository.
 
@@ -442,11 +471,11 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 
 > [!WARNING]
 > Bir araştırma önizlemesi, ürün değil. `Install-iOS26.cmd` yukarıdaki derleme adımlarını sizin
-> yerinize yürütüyor, ama WSL, yaklaşık 60 GB ve birkaç saat istiyor; misafirin GPU sürücüsünü
-> getiremiyor ve biz bir QEMU paketi yayımlayana dek QEMU'yu da derliyor. Apple'ın güvenlik modeli
+> yerinize yürütüyor, ama WSL, yaklaşık 60 GB ve birkaç saat istiyor ve biz bir QEMU paketi
+> yayımlayana dek QEMU'yu da derliyor. Apple'ın güvenlik modeli
 > büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur:
-> her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de kendiniz
-> çıkarırsınız.
+> her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de (kurucu onu
+> sizin bilgisayarınızda Apple'ın cloudOS IPSW'sinden çıkarır).
 
 **Çalışanlar:**
 - **GPU:** iOS'un kendi Metal'i arayüzü çiziyor, Vulkan üzerinden ekran kartı çalıştırıyor.
@@ -500,6 +529,14 @@ açar; `-QemuFrom source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` eli
 yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
 uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
 dilden bağımsız). Misafirin GPU sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım
-yazılımı içeriğidir, bu repoda yoktur ve olmayacak; kurucu onu getiremez, sürücüsüz iOS GPU'suz çalışır.
-Kendiniz çıkarın: Apple silicon Mac'te vphone-cli'nin `fw prepare` komutuyla, ya da Mac olmadan
-vphone-linux'un anlattığı yolla; sonra menüde `[G]` ile seçip kurucuyu yeniden çalıştırın.
+yazılımı içeriğidir, bu repoda yoktur ve olmayacak. Mac gerekmez: kurucu onu zaten indirdiği cloudOS
+26.4b IPSW'sinin OS imajından (`094-39278-029.dmg.aea`) çıkarır. Apple'ın anahtar sunucusu cloudOS
+anahtarı vermiyor, ama her cloudOS OS imajı AEA anahtarını kendi başlığında taşıyor; `ipsw fw aea` onu
+çevrimdışı çözer, `scripts/cloudos-gpu-driver.sh` paketi alır ve ikilinin CDHash'inin (`113e1e21…`)
+IPSW'nin kendi trust cache'inde olduğuna bakar. cloudOS'ta olmayan Metal derleyici eklentisi
+(`libAppleParavirtCompilerPluginIOGPUFamily.dylib`; eklentisiz backboardd çöküyor) Apple'ın değil:
+vphone-cli'nin GraphicLoader'ı (MIT), bizim `graphicloader.yml` iş akışımız derliyor, kurucu onu
+[graphicloader-57bbc93](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-57bbc93)
+sürümünden indirip SHA-256'sını denetler (`-GpuPlugin DOSYA` başka bir derlemeyi alır).
+Menüde `[G]` ile kendi paketinizi (klasör) ya da GPU'suz çalışmayı seçebilirsiniz; seçimi değiştirince
+kurucuyu yeniden çalıştırın, yalnız GPU katmanını ve duvar kağıdını yeniden yapar.
