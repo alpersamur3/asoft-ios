@@ -10,20 +10,32 @@ diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents
      MTLMetalFunctionRef MTLMetalFunctionCreate(LLVMModuleRef sharedModule, const char *entryName);
      void MTLMetalLibInsertFunction(MTLMetalLibRef lib, MTLMetalFunctionRef func);
      LLVMMemoryBufferRef MTLWriteMetalLibToMemoryBuffer(MTLMetalLibRef lib);
-@@ -122,9 +122,10 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
-     // Downgrade the AIR module for this target
-     int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
-     if (!result) {
+@@ -119,12 +119,18 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+         return true; // error
+     }
+ 
+-    // Downgrade the AIR module for this target
+-    int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
+-    if (!result) {
 -        // Downgrade returned 0 = success with nothing to do
-+        // Downgrade returned 0: no code to give, so report it (true) without a message, as the
-+        // shipped plugin does; returning success here left outCode unset
-         *outError = nullptr;
+-        *outError = nullptr;
 -        return false; // success (no error)
-+        return true;
++    // Downgrade the AIR module for this target. MTLDowngradeAIRModule reads the module's
++    // !air.version without checking that it is there, and the modules OpenGL ES shaders become
++    // (AppleMetalGLRenderer's GL IR, newFunctionWithGLESIR) have none: MTLCompilerService crashed
++    // on each one and every OpenGL ES draw was dropped. A module without it goes on as it is.
++    if (LLVMGetNamedMetadataNumOperands(module, "air.version") > 0) {
++        int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
++        if (!result) {
++            // Downgrade returned 0: no code to give, so report it (true) without a message, as
++            // the shipped plugin does; returning success here left outCode unset
++            *outError = nullptr;
++            return true;
++        }
      }
  
      if (!_gpuCompiler) {
-@@ -156,13 +157,22 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+@@ -156,13 +162,22 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
          }
      }
  
@@ -49,7 +61,7 @@ diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents
      char *entryNameStr = nullptr;
      if (entryName && entryNameLen > 0) {
          entryNameStr = (char *)malloc(entryNameLen + 1);
-@@ -170,22 +180,14 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+@@ -170,22 +185,14 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
          entryNameStr[entryNameLen] = '\0';
      }
  

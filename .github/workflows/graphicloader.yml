@@ -11,6 +11,9 @@ name: graphicloader
 # MTLMetalLibCreateExecutableWithTriple: it takes the module's target triple, as the shipped
 # plugin passes it, not the shared module. Unpatched, the guest's libraries carry a garbage triple
 # and reims refuses them ("Invalid library file"), then aborts at a pipeline with no vertex function.
+# It also downgrades only modules that state !air.version: MTLDowngradeAIRModule reads it without
+# checking, and OpenGL ES shaders (AppleMetalGLRenderer's GL IR) compile to modules without it, so
+# MTLCompilerService crashed on each one and every OpenGL ES draw was dropped.
 #
 # The artifact holds the dylib, vphone-cli's LICENSE and GraphicLoader README, the patch, and
 # BUILD.txt. The installer downloads the dylib from a release of this repository
