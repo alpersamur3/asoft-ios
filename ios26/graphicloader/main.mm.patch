@@ -1,7 +1,16 @@
 diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents/GraphicLoader/main.mm
 --- a/VPhoneGuestComponents/GraphicLoader/main.mm
 +++ b/VPhoneGuestComponents/GraphicLoader/main.mm
-@@ -40,7 +40,7 @@ extern "C" {
+@@ -7,6 +7,8 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <cstdint>
++#include <cstdio>
++#include <dlfcn.h>
+ 
+ // --- LLVM C API (from libLLVM.dylib) ---
+ extern "C" {
+@@ -40,12 +42,287 @@ extern "C" {
      MTLGPUCompilerRef MTLGPUCompilerCreate(int version);
      void MTLGPUCompilerDestroy(MTLGPUCompilerRef compiler);
      int MTLDowngradeAIRModule(LLVMModuleRef module, const char *targetTriple, int flags);
@@ -10,32 +19,311 @@ diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents
      MTLMetalFunctionRef MTLMetalFunctionCreate(LLVMModuleRef sharedModule, const char *entryName);
      void MTLMetalLibInsertFunction(MTLMetalLibRef lib, MTLMetalFunctionRef func);
      LLVMMemoryBufferRef MTLWriteMetalLibToMemoryBuffer(MTLMetalLibRef lib);
-@@ -119,12 +119,18 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+ }
+ 
++// --- OpenGL ES modules ---
++// AppleMetalGLRenderer hands OpenGL ES shaders to the compiler as AIR modules of its own
++// (newFunctionWithGLESIR): target triple air64-apple-ios, !air.language_version "OpenGL ES GLSL",
++// no !air.version, and argument metadata that ends where Metal's compiler goes on with the address
++// space, type and name, as in a fragment shader's
++//   !{i32 0, !"air.buffer", !"air.buffer_size", i32 0, !"air.location_index", i32 12, i32 1, !"air.read"}
++// GPUCompiler reads !air.version without checking that it is there (MTLDowngradeAIRModule,
++// MetalModule::materialize) and the argument fields at fixed operand positions (Reflection::create,
++// under MTLMetalFunctionCreate), so MTLCompilerService crashed on each such module and every
++// OpenGL ES draw was dropped. completeGLESModule gives the module the AIR version of iOS 26's
++// Metal, 2.8, and each entry point's arguments and outputs the fields Metal's compiler writes,
++// from the LLVM types: for a buffer its address space and the size, alignment and name of what it
++// points to, then for each the type name and an argument name. The LLVM entry points it needs are
++// the guest libLLVM.dylib's, looked up at run time.
++namespace gles {
++
++typedef struct LLVMOpaqueContext *Context;
++typedef struct LLVMOpaqueType *Type;
++typedef struct LLVMOpaqueMetadata *Metadata;
++typedef struct LLVMOpaqueTargetData *TargetData;
++
++// LLVMTypeKind
++enum { HalfKind = 1, FloatKind = 2, DoubleKind = 3, IntegerKind = 8, StructKind = 10,
++       PointerKind = 12, VectorKind = 13, BFloatKind = 18 };
++
++enum { MaxOps = 64 };
++
++struct Api {
++    Context (*GetModuleContext)(LLVMModuleRef);
++    Type (*Int32TypeInContext)(Context);
++    LLVMValueRef (*ConstInt)(Type, unsigned long long, int);
++    LLVMValueRef (*MDStringInContext)(Context, const char *, unsigned);
++    LLVMValueRef (*MDNodeInContext)(Context, LLVMValueRef *, unsigned);
++    const char *(*GetMDString)(LLVMValueRef, unsigned *);
++    LLVMValueRef (*IsAMDNode)(LLVMValueRef);
++    LLVMValueRef (*IsAConstantInt)(LLVMValueRef);
++    unsigned long long (*ConstIntGetZExtValue)(LLVMValueRef);
++    void (*AddNamedMetadataOperand)(LLVMModuleRef, const char *, LLVMValueRef);
++    Metadata (*ValueAsMetadata)(LLVMValueRef);
++    Type (*TypeOf)(LLVMValueRef);
++    Type (*GlobalGetValueType)(LLVMValueRef);
++    Type (*GetReturnType)(Type);
++    unsigned (*CountParams)(LLVMValueRef);
++    LLVMValueRef (*GetParam)(LLVMValueRef, unsigned);
++    int (*GetTypeKind)(Type);
++    Type (*GetElementType)(Type);
++    unsigned (*GetVectorSize)(Type);
++    unsigned (*GetIntTypeWidth)(Type);
++    unsigned (*GetPointerAddressSpace)(Type);
++    unsigned (*CountStructElementTypes)(Type);
++    Type (*StructGetTypeAtIndex)(Type, unsigned);
++    const char *(*GetStructName)(Type);
++    TargetData (*GetModuleDataLayout)(LLVMModuleRef);
++    unsigned long long (*ABISizeOfType)(TargetData, Type);
++    unsigned (*ABIAlignmentOfType)(TargetData, Type);
++    // llvm::MDNode::replaceOperandWith(unsigned, llvm::Metadata *)
++    void (*ReplaceOperandWith)(Metadata, unsigned, Metadata);
++};
++
++static bool resolve(Api &a) {
++    struct Entry { void **slot; const char *name; };
++    const Entry entries[] = {
++        {(void **)&a.GetModuleContext, "LLVMGetModuleContext"},
++        {(void **)&a.Int32TypeInContext, "LLVMInt32TypeInContext"},
++        {(void **)&a.ConstInt, "LLVMConstInt"},
++        {(void **)&a.MDStringInContext, "LLVMMDStringInContext"},
++        {(void **)&a.MDNodeInContext, "LLVMMDNodeInContext"},
++        {(void **)&a.GetMDString, "LLVMGetMDString"},
++        {(void **)&a.IsAMDNode, "LLVMIsAMDNode"},
++        {(void **)&a.IsAConstantInt, "LLVMIsAConstantInt"},
++        {(void **)&a.ConstIntGetZExtValue, "LLVMConstIntGetZExtValue"},
++        {(void **)&a.AddNamedMetadataOperand, "LLVMAddNamedMetadataOperand"},
++        {(void **)&a.ValueAsMetadata, "LLVMValueAsMetadata"},
++        {(void **)&a.TypeOf, "LLVMTypeOf"},
++        {(void **)&a.GlobalGetValueType, "LLVMGlobalGetValueType"},
++        {(void **)&a.GetReturnType, "LLVMGetReturnType"},
++        {(void **)&a.CountParams, "LLVMCountParams"},
++        {(void **)&a.GetParam, "LLVMGetParam"},
++        {(void **)&a.GetTypeKind, "LLVMGetTypeKind"},
++        {(void **)&a.GetElementType, "LLVMGetElementType"},
++        {(void **)&a.GetVectorSize, "LLVMGetVectorSize"},
++        {(void **)&a.GetIntTypeWidth, "LLVMGetIntTypeWidth"},
++        {(void **)&a.GetPointerAddressSpace, "LLVMGetPointerAddressSpace"},
++        {(void **)&a.CountStructElementTypes, "LLVMCountStructElementTypes"},
++        {(void **)&a.StructGetTypeAtIndex, "LLVMStructGetTypeAtIndex"},
++        {(void **)&a.GetStructName, "LLVMGetStructName"},
++        {(void **)&a.GetModuleDataLayout, "LLVMGetModuleDataLayout"},
++        {(void **)&a.ABISizeOfType, "LLVMABISizeOfType"},
++        {(void **)&a.ABIAlignmentOfType, "LLVMABIAlignmentOfType"},
++        {(void **)&a.ReplaceOperandWith, "_ZN4llvm6MDNode18replaceOperandWithEjPNS_8MetadataE"},
++    };
++    for (const Entry &e : entries)
++        if (!(*e.slot = dlsym(RTLD_DEFAULT, e.name)))
++            return false;
++    return true;
++}
++
++static bool isString(const Api &a, LLVMValueRef v, const char *s) {
++    unsigned len = 0;
++    const char *str = v ? a.GetMDString(v, &len) : nullptr;
++    return str && len == strlen(s) && !memcmp(str, s, len);
++}
++
++// Metal's name of a scalar or vector type ("float4") or of a struct (its LLVM name without
++// "struct."), false for another type
++static bool typeName(const Api &a, Type t, char *out, size_t size) {
++    unsigned count = 0;
++    if (a.GetTypeKind(t) == VectorKind) {
++        count = a.GetVectorSize(t);
++        t = a.GetElementType(t);
++    }
++    const char *base = nullptr;
++    switch (a.GetTypeKind(t)) {
++    case HalfKind: base = "half"; break;
++    case FloatKind: base = "float"; break;
++    case DoubleKind: base = "double"; break;
++    case BFloatKind: base = "bfloat"; break;
++    case IntegerKind:
++        switch (a.GetIntTypeWidth(t)) {
++        case 1: base = "bool"; break;
++        case 8: base = "char"; break;
++        case 16: base = "short"; break;
++        case 32: base = "int"; break;
++        case 64: base = "long"; break;
++        }
++        break;
++    case StructKind:
++        if (!count) {
++            const char *name = a.GetStructName(t);
++            if (name && !strncmp(name, "struct.", 7))
++                name += 7;
++            snprintf(out, size, "%s", name && *name ? name : "struct");
++            return true;
++        }
++        break;
++    }
++    if (!base)
++        return false;
++    if (count)
++        snprintf(out, size, "%s%u", base, count);
++    else
++        snprintf(out, size, "%s", base);
++    return true;
++}
++
++// The argument or output node with Metal's fields appended, or nullptr when it has them already or
++// its type has no Metal name
++static LLVMValueRef completeArg(const Api &a, Context cx, TargetData td, LLVMValueRef node, Type type,
++                                const char *argName) {
++    unsigned n = LLVMGetMDNodeNumOperands(node);
++    if (n > MaxOps - 10)
++        return nullptr;
++    LLVMValueRef ops[MaxOps];
++    LLVMGetMDNodeOperands(node, ops);
++    bool buffer = false;
++    for (unsigned i = 0; i < n; i++) {
++        if (isString(a, ops[i], "air.arg_type_name") || isString(a, ops[i], "air.address_space"))
++            return nullptr;
++        if (isString(a, ops[i], "air.buffer") || isString(a, ops[i], "air.indirect_buffer"))
++            buffer = true;
++    }
++    Type i32 = a.Int32TypeInContext(cx);
++    char name[128];
++    if (buffer) {
++        if (a.GetTypeKind(type) != PointerKind)
++            return nullptr;
++        unsigned space = a.GetPointerAddressSpace(type);
++        type = a.GetElementType(type);
++        if (!typeName(a, type, name, sizeof name))
++            return nullptr;
++        ops[n++] = a.MDStringInContext(cx, "air.address_space", 17);
++        ops[n++] = a.ConstInt(i32, space, 0);
++        ops[n++] = a.MDStringInContext(cx, "air.arg_type_size", 17);
++        ops[n++] = a.ConstInt(i32, a.ABISizeOfType(td, type), 0);
++        ops[n++] = a.MDStringInContext(cx, "air.arg_type_align_size", 23);
++        ops[n++] = a.ConstInt(i32, a.ABIAlignmentOfType(td, type), 0);
++    } else if (!typeName(a, type, name, sizeof name)) {
++        return nullptr;
++    }
++    ops[n++] = a.MDStringInContext(cx, "air.arg_type_name", 17);
++    ops[n++] = a.MDStringInContext(cx, name, (unsigned)strlen(name));
++    ops[n++] = a.MDStringInContext(cx, "air.arg_name", 12);
++    ops[n++] = a.MDStringInContext(cx, argName, (unsigned)strlen(argName));
++    return a.MDNodeInContext(cx, ops, n);
++}
++
++// An entry point's node, !{fn, !{outputs...}, !{arguments...}}: each list whose nodes need fields
++// is replaced by a list of the completed nodes
++static void completeEntry(const Api &a, Context cx, TargetData td, LLVMValueRef entry) {
++    unsigned n = LLVMGetMDNodeNumOperands(entry);
++    if (n < 3 || n > 8)
++        return;
++    LLVMValueRef ops[8];
++    LLVMGetMDNodeOperands(entry, ops);
++    LLVMValueRef fn = ops[0];
++    if (!fn || a.IsAMDNode(fn))
++        return;
++    Type ret = a.GetReturnType(a.GlobalGetValueType(fn));
++    unsigned params = a.CountParams(fn);
++    for (unsigned k = 1; k <= 2; k++) {
++        LLVMValueRef list = ops[k];
++        unsigned count = list && a.IsAMDNode(list) ? LLVMGetMDNodeNumOperands(list) : 0;
++        if (!count || count > MaxOps)
++            continue;
++        LLVMValueRef items[MaxOps];
++        LLVMGetMDNodeOperands(list, items);
++        bool changed = false;
++        for (unsigned i = 0; i < count; i++) {
++            if (!items[i] || !a.IsAMDNode(items[i]))
++                continue;
++            Type type = nullptr;
++            char argName[32];
++            if (k == 1) {
++                // outputs: the return value, or its struct's members in order
++                if (a.GetTypeKind(ret) == StructKind) {
++                    if (i < a.CountStructElementTypes(ret))
++                        type = a.StructGetTypeAtIndex(ret, i);
++                } else if (count == 1) {
++                    type = ret;
++                }
++                snprintf(argName, sizeof argName, "out%u", i);
++            } else {
++                // arguments: !{i32 <parameter>, !"air.<kind>", ...}
++                unsigned argCount = LLVMGetMDNodeNumOperands(items[i]);
++                if (!argCount || argCount > MaxOps)
++                    continue;
++                LLVMValueRef argOps[MaxOps];
++                LLVMGetMDNodeOperands(items[i], argOps);
++                if (!argOps[0] || !a.IsAConstantInt(argOps[0]))
++                    continue;
++                unsigned index = (unsigned)a.ConstIntGetZExtValue(argOps[0]);
++                if (index < params)
++                    type = a.TypeOf(a.GetParam(fn, index));
++                snprintf(argName, sizeof argName, "arg%u", index);
++            }
++            if (!type)
++                continue;
++            if (LLVMValueRef done = completeArg(a, cx, td, items[i], type, argName)) {
++                items[i] = done;
++                changed = true;
++            }
++        }
++        if (changed)
++            a.ReplaceOperandWith(a.ValueAsMetadata(entry), k,
++                                 a.ValueAsMetadata(a.MDNodeInContext(cx, items, count)));
++    }
++}
++
++// nullptr, or why the module was left as it is
++static const char *completeGLESModule(LLVMModuleRef module) {
++    static Api a;
++    static const bool resolved = resolve(a);
++    if (!resolved)
++        return "OpenGL ES module: an LLVM entry point is missing";
++    Context cx = a.GetModuleContext(module);
++    TargetData td = a.GetModuleDataLayout(module);
++    static const char *const entryLists[] = {"air.vertex", "air.fragment", "air.kernel"};
++    for (const char *name : entryLists) {
++        unsigned count = LLVMGetNamedMetadataNumOperands(module, name);
++        if (!count || count > 16)
++            continue;
++        LLVMValueRef entries[16];
++        LLVMGetNamedMetadataOperands(module, name, entries);
++        for (unsigned i = 0; i < count; i++)
++            if (entries[i])
++                completeEntry(a, cx, td, entries[i]);
++    }
++    Type i32 = a.Int32TypeInContext(cx);
++    LLVMValueRef version[3] = {a.ConstInt(i32, 2, 0), a.ConstInt(i32, 8, 0), a.ConstInt(i32, 0, 0)};
++    a.AddNamedMetadataOperand(module, "air.version", a.MDNodeInContext(cx, version, 3));
++    return nullptr;
++}
++
++} // namespace gles
++
+ // --- Compiler target info struct (passed by Metal framework) ---
+ struct AppleParavirtCompilerTargetInfo {
+     const char *targetTriple;
+@@ -119,12 +396,21 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
          return true; // error
      }
  
--    // Downgrade the AIR module for this target
--    int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
--    if (!result) {
--        // Downgrade returned 0 = success with nothing to do
--        *outError = nullptr;
--        return false; // success (no error)
-+    // Downgrade the AIR module for this target. MTLDowngradeAIRModule reads the module's
-+    // !air.version without checking that it is there, and the modules OpenGL ES shaders become
-+    // (AppleMetalGLRenderer's GL IR, newFunctionWithGLESIR) have none: MTLCompilerService crashed
-+    // on each one and every OpenGL ES draw was dropped. A module without it goes on as it is.
-+    if (LLVMGetNamedMetadataNumOperands(module, "air.version") > 0) {
-+        int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
-+        if (!result) {
-+            // Downgrade returned 0: no code to give, so report it (true) without a message, as
-+            // the shipped plugin does; returning success here left outCode unset
-+            *outError = nullptr;
++    // An OpenGL ES shader's module states no AIR version; see gles::completeGLESModule
++    if (LLVMGetNamedMetadataNumOperands(module, "air.version") == 0) {
++        if (const char *why = gles::completeGLESModule(module)) {
++            *outError = why;
 +            return true;
 +        }
++    }
++
+     // Downgrade the AIR module for this target
+     int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
+     if (!result) {
+-        // Downgrade returned 0 = success with nothing to do
++        // Downgrade returned 0: no code to give, so report it (true) without a message, as
++        // the shipped plugin does; returning success here left outCode unset
+         *outError = nullptr;
+-        return false; // success (no error)
++        return true;
      }
  
      if (!_gpuCompiler) {
-@@ -156,13 +162,22 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+@@ -156,13 +442,22 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
          }
      }
  
@@ -61,7 +349,7 @@ diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents
      char *entryNameStr = nullptr;
      if (entryName && entryNameLen > 0) {
          entryNameStr = (char *)malloc(entryNameLen + 1);
-@@ -170,22 +185,14 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+@@ -170,22 +465,14 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
          entryNameStr[entryNameLen] = '\0';
      }
  
