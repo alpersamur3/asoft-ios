@@ -39,7 +39,7 @@ same GPU stack on Linux; this is the Windows host.
 | **Disk** | As the iOS 16 launcher: a throwaway overlay by default, `-Persist` keeps iOS's changes in a user overlay (the start menu's default), `-Keep` writes the base image |
 | **Quick boot** | On a disk that keeps its changes: closing the window saves iOS as it is, and the next start goes on from there, its screen in about 8 s. `-NoQuickBoot`, or `[B]` in the menu, boots iOS every time |
 | **Saved states** | The side bar's *Save state* and *Saved states…* |
-| **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
+| **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 and Safari loads pages from the internet through it (checked by hand with a real site; DNS and TLS timings not measured) |
 | **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 5.3.6) |
 | **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 2 minutes after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
 
@@ -514,7 +514,7 @@ kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartlar
 yerine boş sayfa gösteriyor.
 
 **Başlatıcı:** disk iOS 16 başlatıcısındaki gibi; varsayılan geçici overlay, `-Persist` iOS'un yazdıklarını
-ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün varsayılanı), `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15).
+ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün varsayılanı), `-Keep` taban görüntüye yazar. `-Net` virtio-net verir (en0, 10.0.2.15); Safari bu bağlantıyla internetteki sayfaları açar (gerçek bir siteyle elle denendi; DNS ve TLS süreleri ölçülmedi).
 16K softmmu sayfası varsayılan (`-Page4K` eskisi): kilit ekranı 135 → ~100 sn.
 
 **Gerçekten ekran kartı mı?** Yukarıdaki *Is it really the GPU?* bölümünde Windows'un kendi sayaçlarıyla
