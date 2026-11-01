@@ -133,9 +133,10 @@ $DscFiles = @('dyld_shared_cache_arm64e.42', 'dyld_shared_cache_arm64e.03')
 $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 # The guest GPU driver's Metal compiler plugin (GpuMode cloudos), which no cloudOS has: not Apple's
 # but vphone-cli's GraphicLoader (MIT), built by .github/workflows/graphicloader.yml (arm64e, ad-hoc
-# signed) and published as a release of this repository: graphicloader-57bbc93 is vphone-cli 57bbc93,
-# workflow run 41327085946 (Xcode 26.6, iphoneos SDK 26.5), CDHash be31e476f1de117bbdc27942cab156d261f3b1f2
-$GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-57bbc93/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '903F2A449851586B579E74A7F08446AF997DA4FCCB7014B31CF5E9DAB10BB458' }
+# signed) with ios26/graphicloader/main.mm.patch, published as a release of this repository:
+# graphicloader-57bbc93-p1 is vphone-cli 57bbc93 + that patch, workflow run 41334758482 (Xcode 26.6,
+# iphoneos SDK 26.5), CDHash b02948cceca185f863ebc5896a7ebac6cd00bcc6
+$GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-57bbc93-p1/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '6D7FD8FCC9BD62885997A9091081EB56C9E1D043CBB8A277607BA30EE144B6FE' }
 # GB (10^9) a step adds on the work folder's drive at most, measured on our build; a build from
 # nothing peaks at about 55 GB (during partition) and keeps about 30 GB
 $Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 23.5; apps = 3.5
