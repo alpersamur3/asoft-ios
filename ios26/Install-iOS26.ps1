@@ -752,6 +752,20 @@ function Wait-Running($g, [int]$seconds, [string]$what) {
     }
     Write-Progress -Activity 'iOS' -Completed
 }
+# The launcher gives iOS the PC's time zone, region and clock over the serial shell once it is up
+# (scripts\guest-clock.py, its log in the run folder): let it finish before Stop-Guest takes the
+# console, so the disk is made with them
+function Wait-PcTime($g) {
+    $log = Join-Path $g.Dir 'host-time.log'
+    Say "the PC's time zone, region and clock in iOS: $log"
+    if ($DryRun) { return }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMinutes -lt 10 -and (Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
+           Where-Object { $_.CommandLine -and $_.CommandLine.Contains($log) })) { Start-Sleep -Seconds 5 }
+    $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+    if ($lines) { foreach ($l in $lines) { Say "  $l" DarkGray } }
+    else { Say 'not set here (the launcher found no Python, or they were set before); the first start sets them' Yellow }
+}
 # sync the guest's disks, then quit QEMU (QMP); a QEMU that does not end is stopped
 function Stop-Guest($g, [switch]$NoSync) {
     $synced = $true
@@ -771,11 +785,13 @@ function Boot-Failed($g) { if (-not $DryRun -and (Guest-Alive $g)) { $null = Sto
 # that makes them comes later), and what iOS wrote on top of them (-Persist, .ipa installs) is kept
 # as .old, as the launcher cannot boot it any more.
 function Retire-Top([switch]$CollectionsOnly) {
-    $derived = @('root-collections.qcow2', 'root-collections.tc')
-    $user = @('root-collections-user.qcow2', 'root-collections-user.tc', 'root-collections-apps.qcow2', 'root-collections-apps.tc')
+    # (.host.txt: what the launcher gave iOS of the PC's time zone, region and clock on that disk)
+    $derived = @('root-collections.qcow2', 'root-collections.tc', 'root-collections.host.txt')
+    $user = @('root-collections-user.qcow2', 'root-collections-user.tc', 'root-collections-user.host.txt',
+              'root-collections-apps.qcow2', 'root-collections-apps.tc', 'root-collections-apps.host.txt')
     if (-not $CollectionsOnly) {
-        $derived = @('root.qcow2', 'root.tc') + $derived
-        $user = @('root26-user.qcow2', 'root-user.tc', 'root-apps.qcow2', 'root-apps.tc') + $user
+        $derived = @('root.qcow2', 'root.tc', 'root.host.txt') + $derived
+        $user = @('root26-user.qcow2', 'root-user.tc', 'root26-user.host.txt', 'root-apps.qcow2', 'root-apps.tc', 'root-apps.host.txt') + $user
     }
     foreach ($f in $derived) {
         if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; if (-not $DryRun) { Remove-Item (In-Work $f); Drop-Owned $f } }
@@ -1513,6 +1529,7 @@ function Do-Wallpaper {
     try {
         Wait-Ui $g 40
         Wait-Running $g ($BakeMinutes * 60) 'PosterBoard writes its poster store'
+        Wait-PcTime $g
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo the wallpaper' }
     } catch { Boot-Failed $g; throw }
 }
@@ -1559,6 +1576,7 @@ EOF
     try {
         Wait-Ui $g 40
         Wait-Running $g ($BakeMinutes * 60) 'PosterBoard sets the Collections wallpaper up'
+        Wait-PcTime $g
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo this step' }
     } catch { Boot-Failed $g; throw }
 }

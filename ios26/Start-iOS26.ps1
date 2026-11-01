@@ -18,6 +18,7 @@
 #   Start-iOS26.ps1 [-Work D:\ios26] [-Name w1] [-Wallpaper ios26|collections] [-Persist [-Reset]] [-Keep] [-NoQuickBoot]
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
 #                   [-InstallIpa app.ipa]
+#                   [-TimeZone Europe/Istanbul] [-Region TR] [-Clock 24|12]   (default: the PC's)
 # .ipa: the side bar's "Install .ipa..." (or dropping files into <Work>\ipa, or -InstallIpa) installs
 # the app by direct placement on the NEXT start (Install-Ipa.ps1); after the button, restart iOS.
 param(
@@ -63,6 +64,12 @@ param(
     [switch]$NoQuickBoot,
     # -InstallIpa path.ipa: install this .ipa (direct placement) into the apps overlay and boot it.
     [string]$InstallIpa = '',
+    # iOS's time zone (IANA name, Europe/Istanbul), region (TR) and clock (24 or 12); default the
+    # PC's. Each is applied when it differs from what was applied to the disk last, so a change
+    # made in iOS's Settings stays until the PC's own setting changes (below, "The PC's time")
+    [string]$TimeZone = '',
+    [string]$Region = '',
+    [ValidateSet('', '12', '24')] [string]$Clock = '',
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -162,6 +169,57 @@ if ($savedState -and -not $quickBoot) {
     Write-Host 'Dropped the saved state (quick boot is off)'
 }
 
+# The PC's time: its time zone, region format and 12/24-hour clock, found as the iOS 16 launcher
+# finds them. iOS 26 has no daemon to apply them at boot (iOS 16's asoftinstalld): once QEMU runs,
+# scripts\guest-clock.py does it over the serial root shell, before SpringBoard reads them. Only
+# the values that differ from what was applied to this disk last (<disk>.host.txt; a new overlay
+# starts from its base's) are applied, and only on a cold boot: a saved state is dropped for it.
+if (-not $TimeZone) {
+    # Windows ID to IANA name through the ICU that comes with Windows 10 1903+
+    try {
+        Add-Type -Namespace Asoft -Name Icu -MemberDefinition @'
+[DllImport("icu.dll", CharSet = CharSet.Unicode)]
+public static extern int ucal_getTimeZoneIDForWindowsID(string winid, int len, string region,
+    System.Text.StringBuilder id, int capacity, ref int status);
+'@
+        $id = New-Object System.Text.StringBuilder 64
+        $status = 0
+        $n = [Asoft.Icu]::ucal_getTimeZoneIDForWindowsID([TimeZoneInfo]::Local.Id, -1, $null, $id, 64, [ref]$status)
+        if ($status -le 0 -and $n -gt 0) { $TimeZone = $id.ToString(0, $n) }
+    } catch {
+        Write-Host "PC time zone not found ($($_.Exception.Message)); iOS keeps its own"
+    }
+}
+# tr-TR -> TR, a short time pattern with H (HH:mm) -> 24-hour
+$culture = Get-Culture
+if (-not $Region) { $Region = ($culture.Name -split '-')[-1] }
+if (-not $Clock) { $Clock = if ($culture.DateTimeFormat.ShortTimePattern -cmatch 'H') { '24' } else { '12' } }
+# -cmatch: a case-insensitive -match lowercases with the PC's culture, and in Turkish the I of
+# Istanbul becomes a dotless ı, which [a-z] does not hold
+$pcTime = [ordered]@{}
+if ($TimeZone -cmatch '^[A-Za-z0-9_+/-]+$') { $pcTime.TimeZone = $TimeZone }
+if ($Region -cmatch '^([A-Z]{2}|[0-9]{3})$') { $pcTime.Region = $Region }
+$pcTime.Clock = $Clock
+function Time-Mark([string]$disk) { ($disk -replace '\.qcow2$', '') + '.host.txt' }
+# A disk's mark, else its base's (the apps overlay's, root.qcow2's): Key=Value lines
+$markDisk = if ($written) { $written } else { $Disk }
+if (-not (Test-Path $markDisk)) { Remove-Item (Time-Mark $markDisk) -ErrorAction SilentlyContinue }   # -Reset
+$applied = @{}
+$from = @($markDisk, $Disk, ($Disk -replace '-apps\.qcow2$', '.qcow2')) | Where-Object { Test-Path (Time-Mark $_) } | Select-Object -First 1
+if ($from) {
+    foreach ($l in Get-Content (Time-Mark $from)) { if ("$l" -cmatch '^(\w+)=(.*)$') { $applied[$Matches[1]] = $Matches[2] } }
+    if ($written -and $from -ne $markDisk) { Copy-Item (Time-Mark $from) (Time-Mark $markDisk) }
+}
+$timeArgs = @()
+foreach ($k in $pcTime.Keys) {
+    if ($applied[$k] -cne $pcTime[$k]) { $timeArgs += @(@{ TimeZone = '--tz'; Region = '--region'; Clock = '--clock' }[$k], $pcTime[$k]) }
+}
+if ($timeArgs -and $savedState) {
+    Remove-QuickState $written
+    $savedState = $null
+    Write-Host "Dropped the saved state: the PC's time zone, region or clock is new to iOS, which takes it on a cold boot"
+}
+
 # qemu-img: next to the QEMU, an installed QEMU, or the WSL distro the disk was built in
 function New-Overlay([string]$base, [string]$overlay) {
     # Next to the base image the backing path is relative, so WSL tools (qemu-nbd) open it too
@@ -250,5 +308,18 @@ if ($savedState) {
     }
 } else {
     $q = Start-Qemu @()
+}
+if ($timeArgs) {
+    # pythonw: no console window. It ends with QEMU; on success it writes the disk's mark
+    $pyw = @((Join-Path $Work 'tools\python\pythonw.exe'), (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source) |
+        Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    if ($pyw) {
+        $a = @('-I', '-B', "`"$PSScriptRoot\scripts\guest-clock.py`"", '4451', '900', '--pid', $q.Id, '--log', "`"$O\host-time.log`"") + $timeArgs
+        if ($written) { $a += @('--state', "`"$(Time-Mark $written)`"") }
+        $null = Start-Process -FilePath $pyw -ArgumentList $a
+        Write-Host "Giving iOS the PC's $($timeArgs -join ' ') over its console once it is up ($O\host-time.log)"
+    } else {
+        Write-Host "No Python (the installer's tools\python or pythonw.exe on PATH): iOS keeps its own time zone, region and clock"
+    }
 }
 "started $exe pid $($q.Id) -> $O"

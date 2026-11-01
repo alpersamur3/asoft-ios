@@ -50,7 +50,21 @@ throwaway run loses them at exit. After a quick boot or a loaded state iOS's clo
 time away (qemu-sptm **ad92276** or later: XNU reads the hardware clock only at boot, so QEMU moves the
 guest's counter on when it loads a state; a disk quick-booted on an older build keeps the time it
 already lost until one `-NoQuickBoot` boot). While it runs, the guest's clock gains about a minute an
-hour (the counter's 41 ns tick at 24 MHz). *Restore* into an emulator that booted on its own needs
+hour (the counter's 41 ns tick at 24 MHz). iOS also takes the PC's time zone, region format and 24- or
+12-hour clock, as the iOS 16 build does: the launcher finds them (the Windows time zone through
+Windows' ICU, the region and the clock from Windows' region format; `-TimeZone Europe/Istanbul`,
+`-Region TR`, `-Clock 24` override them) and, on a cold boot, `scripts\guest-clock.py` sets in iOS
+each one that differs from what this disk was given last (`<disk>.host.txt` next to it) over the
+serial root shell: the time zone link, the region as iOS's Settings writes it (English with Türkiye:
+`AppleLocale` `en_TR`, first language `en-TR`) and the 24-hour switch, then restarts SpringBoard, as
+Settings does after a region change. A saved state is dropped for that once: that start is a full
+boot, and about 4 minutes in the lock screen restarts once with the new settings; the next window
+close saves a state with them. What you change in iOS's Settings stays until the PC's own setting
+changes. The installer sets them in its wallpaper boot. It needs Python (the installer's
+`tools\python`, or `pythonw.exe` on the PATH). With English and Türkiye the lock screen still writes
+its short date the US way (*Sun Nov 1*), as it does when you pick Türkiye in iOS's Settings
+yourself; iOS's own date formats are the Turkish ones there (19.08.2026, *19 August 2026
+Wednesday*). *Restore* into an emulator that booted on its own needs
 reims-vgpu **ae389a2c** and metal2vulkan **fbb1ae35**: an older build kept the GPU addresses of heaps
 the running emulator had deleted, and the restored state came up with its dock flickering and black
 squares for icons. A state another run saved needs reims-vgpu **ac33003f** (newer than the release
@@ -586,7 +600,21 @@ devam eder, ekran yaklaşık 8 sn'de gelir (`-NoQuickBoot` ya da menüde `[B]` h
 Her kayıt, iOS'un çalıştığı diskte yaklaşık 3,7 GB tutar; geçici koşuda çıkışta kaybolur. Yüklemeden
 sonra iOS'un saati aradaki süre kadar ileri gider (qemu-sptm ad92276 ve sonrası; eski yapıyla hızlı
 açılmış bir disk kaybettiği süreyi bir `-NoQuickBoot` açılışına kadar geride tutar). Çalışırken misafir
-saati saatte yaklaşık 1 dk ileri gider. Kendi açılmış bir emülatöre *Restore* ile durum yüklemek
+saati saatte yaklaşık 1 dk ileri gider. iOS bilgisayarın saat dilimini, bölge biçimini ve 24/12 saat
+ayarını da alır, iOS 16 sürümündeki gibi: başlatıcı bunları bulur (Windows saat dilimi Windows'un
+ICU'suyla, bölge ve saat Windows'un bölge biçiminden; `-TimeZone Europe/Istanbul`, `-Region TR`,
+`-Clock 24` ile ezilir) ve soğuk açılışta `scripts\guest-clock.py`, bu diske en son verilenden
+(`<disk>.host.txt`, diskin yanında) farklı olan her birini seri kök kabuğundan iOS'a yazar: saat dilimi
+bağlantısı, bölge iOS Ayarlar'ının yazdığı gibi (İngilizce ve Türkiye: `AppleLocale` `en_TR`, ilk dil
+`en-TR`) ve 24 saat anahtarı; sonra SpringBoard'u yeniden başlatır (Ayarlar da bölge değişince
+yapıyor). Bunun için kayıtlı durum bir kez bırakılır: o açılış tam açılıştır ve yaklaşık 4 dakika
+sonra kilit ekranı yeni ayarlarla bir kez yeniden başlar; sonraki pencere kapanışı onlarla bir durum
+kaydeder. iOS Ayarlar'ında yaptığınız değişiklik, bilgisayardaki ayar değişene kadar kalır. Kurucu
+bunları duvar kağıdı açılışında yazar. Python ister (kurucunun `tools\python`'ı ya da PATH'te
+`pythonw.exe`). İngilizce ve Türkiye ile kilit ekranı kısa tarihi yine ABD düzeninde yazar
+(*Sun Nov 1*); Türkiye'yi iOS Ayarlar'ından kendiniz seçince de öyle. iOS'un kendi tarih
+biçimleri Türk düzenindedir (19.08.2026, *19 August 2026 Wednesday*). Kendi açılmış bir emülatöre
+*Restore* ile durum yüklemek
 reims-vgpu ae389a2c ve metal2vulkan fbb1ae35 ister: eski derleme çalışan emülatörün sildiği heap'lerin
 GPU adreslerini tutuyordu, yüklenen durumun dock'u yanıp sönüyor, ikonları siyah kare çıkıyordu.
 Başka bir çalışmanın kaydettiği durum reims-vgpu ac33003f ister (yayındaki QEMU paketindeki
