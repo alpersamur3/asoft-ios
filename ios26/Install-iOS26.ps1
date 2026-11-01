@@ -1,21 +1,28 @@
 # ASoftware iOS 26 installer: from a fresh Windows PC to a bootable iOS 26 (the research preview),
-# as far as that can be scripted. It runs README.md's Build steps in order (the WSL ones through
-# bash scripts it writes to <Work>\install\sh) and leaves a marker per step in <Work>\install, so
-# running it again goes on where it stopped; redoing a disk step redoes the disk steps after it.
+# as far as that can be scripted. It runs README.md's Build steps in order (the Linux ones through
+# bash scripts it writes to <Work>\install\sh, run in WSL or in the helper VM: -Linux) and leaves a
+# marker per step in <Work>\install, so running it again goes on where it stopped; redoing a disk
+# step redoes the disk steps after it.
 #
 # The guest GPU driver (the menu's GpuMode): cloudos takes Apple's AppleParavirtGPUMetalIOGPUFamily.bundle
 # out of the cloudOS IPSW it downloads anyway (the OS image carries its own AEA key) and adds the
 # Metal compiler plugin cloudOS lacks, our CI build of vphone-cli's GraphicLoader ($GpuPluginRelease,
 # or -GpuPlugin FILE); gpu copies a bundle folder you chose as it is; gpuless has no GPU layer
 # (slower). Change it later (the menu's [G]) and run this again: it redoes the GPU layer and the
-# wallpaper. What it cannot do for you:
-#   - WSL itself: installing it needs an administrator and a restart; it says so and stops.
+# wallpaper.
+# The Linux steps (HFS+ and APFS disks) need Linux's file systems. -Linux wsl runs them in WSL 2,
+# which needs an administrator and a restart to install (the installer says so and stops); -Linux
+# helper runs them in the helper VM, installer\helper's small arm64 Linux in our QEMU, as the iOS 16
+# installer does: no WSL, no administrator, slower (TCG). There ipsw.exe (blacktop/ipsw for
+# Windows) decrypts Apple's images and unwraps the firmware on Windows itself.
 # Our QEMU comes as a release package it downloads and checks ($QemuRelease below); -QemuFrom
 # source builds it in MSYS2 instead (hours), -QemuFrom <folder> copies a build you have.
 #
 #   Install-iOS26.cmd [-Work D:\ios26] [-List] [-Check] [-DryRun] [-From STEP | -Only STEP] ...
 #     -List          the steps, the README.md step each one runs, and which are done
-#     -Check         what this PC has (Windows, WSL tools, QEMU, the outputs); changes nothing
+#     -Check         what this PC has (Windows, the Linux tools, QEMU, the outputs); changes nothing
+#     -Linux auto|wsl|helper   where the Linux steps run: WSL 2, or the helper VM; auto (the
+#                    default): WSL if it is installed, else the helper VM. Remembered
 #     -DryRun        print every command the steps would run; runs nothing
 #     -From STEP     redo STEP and every step after it; -Only STEP redoes just that one (a disk
 #                    step: the disk steps after it are redone on the next run)
@@ -56,7 +63,8 @@ param(
     [switch]$NoCollections,
     [ValidateRange(1, 120)][int]$BakeMinutes = 6,
     [switch]$KeepBuildFiles,
-    [switch]$NoShortcut
+    [switch]$NoShortcut,
+    [ValidateSet('', 'auto', 'wsl', 'helper')][string]$Linux = ''
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -94,6 +102,9 @@ $Pin = @{
     # GNU nettle for win-nettle.sh (-QemuFrom source)
     Nettle  = @('https://ftp.gnu.org/gnu/nettle/nettle-3.10.1.tar.gz',
                 'B0FCDD7FC0CDEA6E80DCF1DD85BA794AF0D5B4A57E26397EEE3BC193272D9132')
+    # blacktop/ipsw for Windows (-Linux helper), the version wsl-setup.sh puts in WSL
+    Ipsw    = @('https://github.com/blacktop/ipsw/releases/download/v3.1.739/ipsw_3.1.739_windows_x86_64.zip',
+                '43D311CF87FFAB0617845B10FBF45D38518D63CB09484FD00D30DA23B21D8A79')
 }
 # Apple's files, from Apple's servers: cloudOS 26.4b (23E5207q), the IPSW of the Private Cloud
 # Compute research VM (vphone600; the URL as vphone-cli's firmware catalog has it), and the
@@ -218,7 +229,7 @@ disk_tools() {
 	modprobe nbd max_part=0 2> /dev/null || true
 	if ! grep -q hfsplus /proc/filesystems; then
 		if [ ! -f "$HFSPLUS_KO" ]; then
-			echo "no hfsplus module for $KVER (WSL was updated?): run Install-iOS26.cmd -Only wsl"
+			echo "no hfsplus module for $KVER (WSL was updated?): run Install-iOS26.cmd -Only linux"
 			exit 1
 		fi
 		insmod "$HFSPLUS_KO"
@@ -248,8 +259,50 @@ overlay() {
 	qemu-img create -q -f qcow2 -b "$1" -F qcow2 "$new"
 	echo "$2: an overlay on $1"
 }
+# fresh PATH...: what the step makes anew, removed first
+fresh() {
+	local f
+	for f; do rm -rf "${A:?}/${f:?}"; done
+}
 '@
     $p.Replace('{NAME}', $name).Replace('{DISTRO}', $Distro).Replace('{A}', (To-Wsl $Work)).Replace('{L}', $LinuxDir)
+}
+# The same for the helper VM (-Linux helper, Run-Helper): its tools are in the VM, the disks are
+# QEMU's (linked where the files would be), and what the prelude's overlay and fresh do on the
+# Windows side the installer did before the VM started
+function Helper-Prelude([string]$name) {
+    $p = @'
+#!/bin/bash
+# Install-iOS26.ps1, {NAME}: written by the installer, run as root in the helper VM (installer\helper)
+set -euo pipefail
+export ASOFT26=/work ASOFT26_LINUX=/root/ios26
+A=$ASOFT26 L=$ASOFT26_LINUX S=$ASOFT26/scripts
+export A L S
+mkdir -p "$L"
+cd "$A"
+disk_tools() {
+	grep -q hfsplus /proc/filesystems || { echo "the helper VM's kernel has no hfsplus"; exit 1; }
+}
+in_root() {
+	local f
+	f=$(mktemp /tmp/asoft-in-root.XXXXXX)
+	cat > "$f"
+	bash "$S/root26-do.sh" "$A/$1" "set -euo pipefail; . $f"
+	rm -f "${f:?}"
+}
+overlay() {
+	[ -b "$A/${2:?}" ] || { echo "$2 is not one of this VM's disks"; exit 1; }
+	echo "$2: an overlay on $1"
+}
+fresh() { :; }
+'@
+    $p.Replace('{NAME}', $name)
+}
+# A Linux step's bash script, in WSL or in the helper VM (-Linux). The helper VM sees no Windows
+# folder: -Disks are the disks QEMU opens for it, -In the files (relative to the work folder) it
+# gets, -Out the files it hands back (Run-Helper); WSL ignores them.
+function Run-Linux([string]$name, [string]$body, [object[]]$Disks = @(), [string[]]$In = @(), [string[]]$Out = @()) {
+    if ($LinuxMode -ceq 'helper') { Run-Helper $name $body $Disks $In $Out } else { Run-Wsl $name $body }
 }
 function Run-Wsl([string]$name, [string]$body) {
     $file = Join-Path $Work "install\sh\$name.sh"
@@ -264,6 +317,142 @@ function Run-Wsl([string]$name, [string]$body) {
     [IO.File]::WriteAllText($file, $text, (New-Object System.Text.UTF8Encoding $false))
     $env:WSL_UTF8 = '1'
     Run 'wsl.exe' @('-d', $Distro, '-u', 'root', '--', 'bash', (To-Wsl $file))
+}
+
+# --- The helper VM (-Linux helper) -------------------------------------------------------------
+# installer\helper's arm64 Linux (the linux step copies it to <Work>\tools\helper) in our QEMU, as
+# the iOS 16 installer's Build-iOSDisk.ps1 runs it. Its job run (installer\helper\job-run.sh) takes
+# a tar on the disk with serial in: the step's script (Helper-Prelude and the body), scripts\, the
+# step's input files and .job\ (run: the script; disks: where each disk is linked, so the script
+# finds it where it would find the file; out: what to hand back), and puts the outputs on the disk
+# with serial out as a tar. QEMU opens the disks: the qcow2s with their backing chains, Apple's
+# images raw (a UDIF image's size must be a multiple of 512: apfs-fuse reads its trailer from the
+# disk's last sector).
+#   Disks: @{ rw = 'root26g.qcow2' }, @{ ro = "os/$OsImage" }, @{ new = 'root26.qcow2'; size = '32G' },
+#          each with at = where the script finds it, if not at that path in the work folder. The
+#          body's in_root DISK and overlay BASE NEW lines add DISK and NEW (rw).
+# The body's overlay and fresh lines are done here, before the VM starts.
+$HelperCpus = [Math]::Min(8, [Environment]::ProcessorCount)
+function Helper-Args([string]$job, [string[]]$drives) {
+    $h = In-Work 'tools\helper'
+    # cortex-a76, not max: pointer authentication, which max has, is slow under TCG
+    @('-M', 'virt', '-cpu', 'cortex-a76', '-smp', "$HelperCpus", '-m', '4G',
+      '-kernel', (Join-Path $h 'Image.gz'), '-initrd', (Join-Path $h 'initrd.gz'),
+      '-append', "console=ttyAMA0 loglevel=4 asoft.job=$job",
+      '-display', 'none', '-monitor', 'none', '-serial', 'stdio', '-no-reboot', '-nic', 'none') + $drives
+}
+function Helper-Drive([string]$file, [string]$id, [string]$format, [string]$more = '') {
+    # (a comma in a -drive file name is doubled)
+    @('-drive', "file=$($file -replace ',', ',,'),format=$format,if=none,id=$id$more", '-device', "virtio-blk-device,drive=$id,serial=$id")
+}
+function Helper-Done([string[]]$lines) {
+    $l = $lines | Where-Object { "$_" -cmatch '^ASOFT: done -?\d+' } | Select-Object -Last 1
+    if ($l -and "$l" -cmatch '^ASOFT: done (-?\d+)') { [int]$Matches[1] } else { $null }
+}
+function Plain-Rel([string]$p) { $p -cmatch '^[A-Za-z0-9_.+-]+(/[A-Za-z0-9_.+-]+)*$' -and $p -cnotmatch '(^|/)\.\.?(/|$)' }
+# a file's size through a link too
+function File-Size([string]$f) { $s = [IO.File]::OpenRead($f); try { $s.Length } finally { $s.Close() } }
+function Run-Helper([string]$name, [string]$body, [object[]]$disks, [string[]]$in, [string[]]$out) {
+    $img = In-Work 'qemu\qemu-img.exe'
+    $fresh = @([regex]::Matches($body, '(?m)^fresh (.+)$') | ForEach-Object { $_.Groups[1].Value.Trim() -split '\s+' })
+    $overlays = @([regex]::Matches($body, '(?m)^overlay (\S+) (\S+)\s*$') | ForEach-Object { , @($_.Groups[1].Value, $_.Groups[2].Value) })
+    $all = @($disks | Where-Object { $_ })
+    $named = @($all | ForEach-Object { if ($_.rw) { $_.rw } elseif ($_.ro) { $_.ro } else { $_.new } })
+    $used = @($overlays | ForEach-Object { $_[1] }) + @([regex]::Matches($body, '(?m)^in_root (\S+)') | ForEach-Object { $_.Groups[1].Value })
+    foreach ($d in $used) { if ($named -cnotcontains $d) { $all += @{ rw = $d }; $named += $d } }
+    # what is left for the VM once the overlays and removals are done here
+    $vm = @($body.Trim() -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -cnotmatch '^(disk_tools|overlay \S+ \S+|fresh .+)$' })
+    $file = In-Work "install\sh\$name.sh"
+    if ($DryRun) {
+        foreach ($f in $fresh) { Show-Cmd "del $f   (if there)" }
+        foreach ($o in $overlays) { Show-Cmd "qemu-img create -f qcow2 -b $($o[0]) -F qcow2 $($o[1])" }
+        foreach ($d in $all) { if ($d.new) { Show-Cmd "qemu-img create -f qcow2 $($d.new) $($d.size)" } }
+        if (-not $vm) { return , @() }
+        Show-Cmd "helper VM ($HelperCpus CPUs), job run: bash /work/install/sh/$name.sh   (the prelude, then:)"
+        foreach ($l in ($body.Trim() -split "`n")) { Write-Host ('      ' + $l.TrimEnd()) -ForegroundColor DarkGray }
+        foreach ($d in $all) {
+            $what = if ($d.ro) { "$($d.ro) (read-only)" } elseif ($d.new) { "$($d.new) (new)" } else { $d.rw }
+            Show-Cmd ("  disk $what" + $(if ($d.at) { " at $($d.at)" } else { '' }))
+        }
+        if ($in) { Show-Cmd "  in: $($in -join ' ')" }
+        if ($out) { Show-Cmd "  out: $($out -join ' ')" }
+        return , @()
+    }
+    foreach ($f in $fresh) {
+        if (-not (Plain-Rel $f)) { Fail "fresh $f`: not a plain relative path" }
+        if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; Remove-Item (In-Work $f) -Recurse -Force }
+    }
+    foreach ($o in $overlays) {
+        Remove-Item (In-Work $o[1]) -ErrorAction SilentlyContinue
+        $null = Run $img @('create', '-q', '-f', 'qcow2', '-b', $o[0], '-F', 'qcow2', (In-Work $o[1]))
+        Say "$($o[1]): an overlay on $($o[0])"
+    }
+    foreach ($d in $all) {
+        if (-not $d.new) { continue }
+        Remove-Item (In-Work $d.new) -ErrorAction SilentlyContinue
+        $null = Run $img @('create', '-q', '-f', 'qcow2', (In-Work $d.new), "$($d.size)")
+    }
+    if (-not $vm) { return , @() }
+
+    $dir = In-Work "install\helper\$name"
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+    New-Item -ItemType Directory -Force (Join-Path $dir '.job'), (Split-Path $file) | Out-Null
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $text = ((Helper-Prelude $name) + "`n" + $body.Trim() + "`n") -replace "`r`n", "`n"
+    [IO.File]::WriteAllText($file, $text, $utf8)
+    $drives = @()
+    $links = @()
+    $i = 0
+    foreach ($d in $all) {
+        $rel = if ($d.rw) { $d.rw } elseif ($d.ro) { $d.ro } else { $d.new }
+        $f = In-Work ($rel -replace '/', '\')
+        if (-not (Test-Path $f -PathType Leaf)) { Fail "$rel is not in $Work" }
+        $format = if ($f -like '*.qcow2') { 'qcow2' } else { 'raw' }
+        if ($format -ceq 'raw' -and (File-Size $f) % 512) { Fail "$rel is $(File-Size $f) bytes, not a multiple of 512: the helper VM cannot read it as a disk" }
+        $more = if ($d.ro) { ',readonly=on' } elseif ($d.new) { ',cache=unsafe' } else { '' }
+        $drives += Helper-Drive $f "d$i" $format $more
+        $links += "d$i $(if ($d.at) { $d.at } else { $rel })"
+        $i++
+    }
+    [IO.File]::WriteAllText((Join-Path $dir '.job\run'), "install/sh/$name.sh`n", $utf8)
+    [IO.File]::WriteAllText((Join-Path $dir '.job\disks'), (($links -join "`n") + "`n"), $utf8)
+    [IO.File]::WriteAllText((Join-Path $dir '.job\out'), $(if ($out) { ($out -join "`n") + "`n" } else { '' }), $utf8)
+    $items = @('scripts', "install/sh/$name.sh") + @($in | Where-Object { $_ })
+    foreach ($p in $items) { if (-not (Plain-Rel $p) -or -not (Test-Path (In-Work $p))) { Fail "the helper VM's input $p is not in $Work" } }
+    $tar = Join-Path $dir 'in.tar'
+    $outQ = Join-Path $dir 'out.qcow2'
+    $outT = Join-Path $dir 'out.tar'
+    try {
+        $null = Run 'tar.exe' (@('-cf', $tar, '-C', $Work) + $items + @('-C', $dir, '.job')) -Quiet
+        $null = Run $img @('create', '-q', '-f', 'qcow2', $outQ, '8G')
+        $drives = (Helper-Drive $tar 'in' 'raw' ',readonly=on') + (Helper-Drive $outQ 'out' 'qcow2' ',cache=unsafe') + $drives
+        Say "the helper VM ($HelperCpus CPUs, TCG) runs $name.sh"
+        $t0 = Get-Date
+        $lines = Run (In-Work 'qemu\qemu-system-aarch64.exe') (Helper-Args 'run' $drives)
+        $rc = Helper-Done $lines
+        Say ("helper VM: {0:N1} min, exit {1}" -f ((Get-Date) - $t0).TotalMinutes, $(if ($null -eq $rc) { 'unknown' } else { $rc }))
+        if ($rc -ne 0) { Fail "the helper VM's $name.sh failed (its output is above and in the step's log)" }
+        if ($out) {
+            $l = $lines | Where-Object { "$_" -cmatch '^ASOFT: out \d+' } | Select-Object -Last 1
+            if (-not $l -or "$l" -cnotmatch '^ASOFT: out (\d+)') { Fail 'the helper VM handed nothing back' }
+            $mb = [Math]::Ceiling([double]$Matches[1] / 1MB)
+            $null = Run $img @('dd', '-f', 'qcow2', '-O', 'raw', 'bs=1M', "count=$mb", "if=$outQ", "of=$outT")
+            $null = Run 'tar.exe' @('-xf', $outT, '-C', $Work)
+            Say "back from the helper VM: $($out -join ', ')"
+        }
+    } finally {
+        Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    , $lines
+}
+
+# ipsw.exe (blacktop/ipsw for Windows; the linux step puts it in <Work>\tools\ipsw): with -Linux
+# helper, what the Linux steps' ipsw does (decrypt Apple's images, unwrap the firmware) runs here
+function Ipsw([string[]]$argv, [switch]$Quiet) { Run (In-Work 'tools\ipsw\ipsw.exe') $argv -Quiet:$Quiet }
+# ipsw fw aea AEA -o DIR, as sysos.sh, m2-decrypt.sh and cloudos-gpu-driver.sh run it
+function Decrypt-Aea([string]$aea, [string]$dir) {
+    if (-not $DryRun) { New-Item -ItemType Directory -Force $dir | Out-Null }
+    $null = Ipsw @('fw', 'aea', $aea, '-o', $dir)
 }
 
 # url -> file, resumable (curl -C -), its SHA-256 checked
@@ -610,7 +799,8 @@ function Need-OsImage {
         Get-IpswMember (IPhone-Source) "$OsImage.aea" (In-Work "iphone\$OsImage.aea") $IPhoneFiles["$OsImage.aea"]
     }
     Need-Space 8.2
-    $null = Run-Wsl 'decrypt-os' 'bash $S/m2-decrypt.sh'
+    if ($LinuxMode -ceq 'helper') { Decrypt-Aea (In-Work "iphone\$OsImage.aea") (In-Work 'os') }
+    else { $null = Run-Wsl 'decrypt-os' 'bash $S/m2-decrypt.sh' }
     Drop-Aea $OsImage
 }
 function Drop-Aea([string]$image, [string]$dir = 'iphone') {
@@ -642,7 +832,7 @@ function Do-Setup {
     $menu = Join-Path $here 'Start-iOS26-Menu.ps1'
     Show-Cmd "md $Work"
     Show-Cmd "powershell -File $(Q $menu) -SetupOnly -Config $(Q $Config) -Work $Work"
-    Show-Cmd "config: Distro=$Distro Src=$Src Linux=$LinuxDir"
+    Show-Cmd "config: Distro=$Distro Src=$Src Linux=$LinuxDir LinuxMode=$Linux"
     $dst = In-Work 'scripts'
     Show-Cmd "copy ios26\scripts, ios26\installer\wsl-setup.sh, scripts\wsl-build-hfsplus.sh -> $dst (.sh with LF)"
     if ($DryRun) { return }
@@ -650,7 +840,7 @@ function Do-Setup {
     # the menu owns the config: the work folder, and the GPU driver question (a folder picker)
     & powershell -NoProfile -ExecutionPolicy Bypass -File $menu -SetupOnly -Config $Config -Work $Work
     if ($LASTEXITCODE) { Fail 'the setup did not finish' }
-    Save-Keys @{ Distro = $Distro; Src = $Src; Linux = $LinuxDir }
+    Save-Keys @{ Distro = $Distro; Src = $Src; Linux = $LinuxDir; LinuxMode = $Linux }
     switch (Gpu-Route) {
         'cloudos' { Say "GPU driver: Apple's, out of the cloudOS IPSW ($CloudOsGpuImage.aea), with the compiler plugin $(if ($GpuPlugin) { Gpu-Plugin } else { 'of our release' })" }
         'folder' { Say "GPU driver: $(Gpu-Driver)" }
@@ -679,7 +869,7 @@ function Do-Setup {
 function Do-Prereq([switch]$Report) {
     # $Report (-Check): say what is missing instead of failing
     if ($DryRun) {
-        Say 'would check: Windows 10 2004+ 64-bit, cores and RAM, Vulkan loader, curl/tar/robocopy, free space, WSL' DarkGray
+        Say "would check: Windows 10 2004+ 64-bit, cores and RAM, Vulkan loader, curl/tar/robocopy, free space, WSL (the Linux steps: $LinuxMode)" DarkGray
         return
     }
     $bad = @()
@@ -701,19 +891,60 @@ function Do-Prereq([switch]$Report) {
     $free = Free-GB
     $color = if ($free -lt 56) { 'Yellow' } else { 'Gray' }
     Say ("{0:N1} GB free on {1}: a build from nothing needs about 55 GB there at its peak and keeps about 30 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
-    Say ("C: has {0:N1} GB free (WSL's disk: the hfsplus module build takes about 5 GB)" -f (([IO.DriveInfo]::new('C:\')).AvailableFreeSpace / 1e9)) DarkGray
     $w = Get-Wsl
-    if (-not $w.Ok) {
-        Say 'WSL: not installed (the wsl step says how)' Yellow
+    if ($LinuxMode -ceq 'helper') {
+        Say "the Linux steps: the helper VM (-Linux helper$(if (-not $w.Ok) { '; WSL is not installed' }))"
+    } elseif (-not $w.Ok) {
+        Say 'WSL: not installed (the linux step says how; -Linux helper needs none)' Yellow
     } elseif ($w.Distros.ContainsKey($Distro)) {
         Say "WSL: $Distro (WSL $($w.Distros[$Distro]))"
     } else {
-        Say "WSL: no distro $Distro yet (the wsl step makes it); have: $(@($w.Distros.Keys) -join ', ')" Yellow
+        Say "WSL: no distro $Distro yet (the linux step makes it); have: $(@($w.Distros.Keys) -join ', ')" Yellow
+    }
+    if ($LinuxMode -ceq 'wsl') {
+        Say ("C: has {0:N1} GB free (WSL's disk: the hfsplus module build takes about 5 GB)" -f (([IO.DriveInfo]::new('C:\')).AvailableFreeSpace / 1e9)) DarkGray
     }
     $msys = Test-Path 'C:\msys64\usr\bin\bash.exe'
     Say "MSYS2 (for -QemuFrom source): $(if ($msys) { 'C:\msys64' } else { 'not installed' })" DarkGray
     if ($bad) {
         if ($Report) { foreach ($b in $bad) { Say "missing: $b" Yellow } } else { Fail ('missing: ' + ($bad -join '; ')) }
+    }
+}
+
+function Do-Linux {
+    if ($LinuxMode -ceq 'helper') { Do-Helper } else { Do-Wsl }
+}
+# -Linux helper: ipsw.exe, the helper VM (installer\helper\out, from build-kernel.sh and
+# build-rootfs.sh or the ASoftware release package), and its self-test
+function Do-Helper {
+    $zip = In-Work 'downloads\ipsw_3.1.739_windows_x86_64.zip'
+    Get-File $Pin.Ipsw[0] $zip $Pin.Ipsw[1]
+    $to = In-Work 'tools\ipsw'
+    Show-Cmd "Expand-Archive $zip $to"
+    if (-not $DryRun) { Expand-Archive $zip $to -Force }
+    $null = Ipsw @('version')
+    $from = Join-Path $repo 'installer\helper\out'
+    $h = In-Work 'tools\helper'
+    Show-Cmd "copy $from\Image.gz, initrd.gz -> $h"
+    if (-not $DryRun) {
+        foreach ($f in 'Image.gz', 'initrd.gz') {
+            if (-not (Test-Path (Join-Path $from $f))) {
+                Fail ("no helper VM in $from ($f): build it (installer\helper\build-kernel.sh and build-rootfs.sh, " +
+                      'README.md "Without WSL"), copy it there from the ASoftware release package, or use -Linux wsl')
+            }
+        }
+        New-Item -ItemType Directory -Force $h | Out-Null
+        Copy-Item (Join-Path $from 'Image.gz'), (Join-Path $from 'initrd.gz') $h -Force
+    }
+    $qemu = In-Work 'qemu\qemu-system-aarch64.exe'
+    if (-not $DryRun -and -not (Test-Path $qemu)) { Fail "no $qemu (the qemu step puts it there)" }
+    # the tools the steps use, in the VM (installer\helper\job-selftest.sh)
+    $lines = Run $qemu (Helper-Args 'selftest' @())
+    if (-not $DryRun -and (Helper-Done $lines) -ne 0) { Fail 'the helper VM''s self-test failed (its output is above)' }
+    # an older helper (the iOS 16 installer's before 2026-11-02) has no job-run.sh, sgdisk or awk
+    if (-not $DryRun -and -not ($lines -cmatch '^\s*ASOFT: ok   test -x /asoft/job-run\.sh')) {
+        Fail ("the helper VM in $from is too old for the iOS 26 steps (no job-run.sh): build it again " +
+              '(README.md "Without WSL") or use -Linux wsl')
     }
 }
 
@@ -735,7 +966,7 @@ function Do-Wsl {
         if ("$($w.Distros[$Distro])" -cne '2') { Fail "$Distro is a WSL $($w.Distros[$Distro]) distro; the build needs WSL 2: wsl --set-version $Distro 2" }
     }
     # apt packages, ipsw, apfs-fuse, python3, the hfsplus module (built for this WSL kernel)
-    $null = Run-Wsl 'wsl' 'bash $S/wsl-setup.sh install'
+    $null = Run-Wsl 'linux' 'bash $S/wsl-setup.sh install'
 }
 
 function Do-Python {
@@ -921,7 +1152,19 @@ if [ -f iphone/{SYSOS}.aea ]; then bash $S/sysos.sh; fi
 if [ -f iphone/{OS}.aea ]; then bash $S/m2-decrypt.sh; fi
 ls -l os/{SYSOS} os/{OS}
 '@
-    $null = Run-Wsl 'decrypt' $body.Replace('{OS}', $OsImage).Replace('{SYSOS}', $SysOsImage)
+    if ($LinuxMode -ceq 'helper') {
+        # the same with ipsw.exe
+        foreach ($i in $SysOsImage, $OsImage) {
+            $aea = In-Work "iphone\$i.aea"
+            if (-not $DryRun -and -not (Test-Path $aea) -and -not (Test-Path (In-Work "os\$i"))) { Fail "neither iphone\$i.aea nor os\$i`: run Install-iOS26.cmd -From iphone" }
+            if ($DryRun -or (Test-Path $aea)) {
+                if (-not $DryRun) { Remove-Item (In-Work "os\$i") -ErrorAction SilentlyContinue }
+                Decrypt-Aea $aea (In-Work 'os')
+            }
+        }
+    } else {
+        $null = Run-Wsl 'decrypt' $body.Replace('{OS}', $OsImage).Replace('{SYSOS}', $SysOsImage)
+    }
     # 8.2 GB: the OS is read decrypted from now on (the SystemOS .aea stays until the root is built)
     Drop-Aea $OsImage
 }
@@ -933,7 +1176,22 @@ ipsw img4 im4p extract cloudos/Firmware/all_flash/DeviceTree.vphone600ap.im4p -o
 bash $S/kdec.sh
 bash $S/unwrap-fw.sh
 '@
-    $null = Run-Wsl 'firmware' $body
+    if ($LinuxMode -cne 'helper') { $null = Run-Wsl 'firmware' $body; return }
+    # the same with ipsw.exe
+    if (-not $DryRun) { New-Item -ItemType Directory -Force (In-Work 'cloud'), (In-Work 'fw') | Out-Null }
+    $null = Ipsw @('img4', 'im4p', 'extract', (In-Work 'cloudos\Firmware\all_flash\DeviceTree.vphone600ap.im4p'), '-o', (In-Work 'cloud\vphone600ap.adt'))
+    foreach ($k in 'research', 'release') {
+        $null = Ipsw @('kernel', 'dec', (In-Work "cloudos\kernelcache.$k.vphone600"), '-o', (In-Work 'cloud'))
+        $kexts = Ipsw @('kernel', 'kexts', (In-Work "cloud\kernelcache.$k.vphone600.decompressed")) -Quiet
+        if (-not $DryRun) { Set-Content (In-Work "cloud\kexts.$k.txt") $kexts; Say "kexts.$k.txt: $(@($kexts).Count) lines" }
+    }
+    $null = Ipsw @('img4', 'im4p', 'extract', (In-Work 'cloudos\Firmware\sptm.vresearch1.release.im4p'), '-o', (In-Work 'fw\sptm'))
+    $null = Ipsw @('img4', 'im4p', 'extract', (In-Work 'cloudos\Firmware\txm.iphoneos.research.im4p'), '-o', (In-Work 'fw\txm'))
+    Show-Cmd 'copy cloud\kernelcache.research.vphone600.decompressed fw\bootkc; copy cloud\vphone600ap.adt fw\dtree.orig'
+    if (-not $DryRun) {
+        Copy-Item (In-Work 'cloud\kernelcache.research.vphone600.decompressed') (In-Work 'fw\bootkc') -Force
+        Copy-Item (In-Work 'cloud\vphone600ap.adt') (In-Work 'fw\dtree.orig') -Force
+    }
 }
 
 function Do-DeviceTree {
@@ -952,14 +1210,22 @@ function Do-Ramdisk {
 disk_tools
 SYSROOT_TAR=$A/downloads/ios_sysroot.tar.gz bash $S/sysroot-check.sh
 mkdir -p $L/rd cloud
-ipsw img4 im4p extract cloudos/094-39914-031.dmg -o $L/rd/rd.apfs
+# (the helper VM has it as a disk already, unwrapped by ipsw.exe)
+[ -b $L/rd/rd.apfs ] || ipsw img4 im4p extract cloudos/094-39914-031.dmg -o $L/rd/rd.apfs
 cp cloudos/Firmware/094-39914-031.dmg.trustcache cloud/rd.trustcache.im4p
 bash $S/mk-ramdisk.sh
 cp $L/rd/rd-shell.hfs $A/rd-shell.hfs
 rm -f "${L:?}/rd/rd.apfs"
 ls -l $A/rd-shell.hfs
 '@
-    $null = Run-Wsl 'ramdisk' $body
+    $rd = 'install\work\rd.apfs'
+    if ($LinuxMode -ceq 'helper') {
+        if (-not $DryRun) { New-Item -ItemType Directory -Force (In-Work 'install\work') | Out-Null }
+        $null = Ipsw @('img4', 'im4p', 'extract', (In-Work 'cloudos\094-39914-031.dmg'), '-o', (In-Work $rd))
+    }
+    $null = Run-Linux 'ramdisk' $body -Disks @(@{ ro = ($rd -replace '\\', '/'); at = '/root/ios26/rd/rd.apfs' }) `
+        -In @('downloads/ios_sysroot.tar.gz', 'cloudos/Firmware/094-39914-031.dmg.trustcache') -Out @('rd-shell.hfs', 'cloud/rd.trustcache.im4p')
+    if ($LinuxMode -ceq 'helper' -and -not $DryRun) { Remove-Item (In-Work $rd) -ErrorAction SilentlyContinue }
 }
 
 function Do-Rootfs {
@@ -974,13 +1240,20 @@ function Do-Rootfs {
     $body = @'
 disk_tools
 [ -x $L/sysroot/bin/bash ] || SYSROOT_TAR=$A/downloads/ios_sysroot.tar.gz bash $S/sysroot-check.sh
-rm -f root26.qcow2 root26.qcow2.hashes
-[ -s os/{SYSOS} ] || bash $S/sysos.sh
+fresh root26.qcow2 root26.qcow2.hashes
+# (the helper VM has it as a disk, decrypted by ipsw.exe)
+[ -s os/{SYSOS} ] || [ -b os/{SYSOS} ] || bash $S/sysos.sh
 DROP_SYSOS=1 bash $S/mk-root26.sh
 bash $S/m2-finish.sh $A/root26.qcow2
 '@
-    $null = Run-Wsl 'rootfs' $body.Replace('{SYSOS}', $SysOsImage)
-    # the SystemOS is on the disk now (mk-root26.sh removed its decrypted image)
+    $sysos = In-Work "os\$SysOsImage"
+    if ($LinuxMode -ceq 'helper' -and ($DryRun -or -not (Test-Path $sysos))) { Decrypt-Aea (In-Work "iphone\$SysOsImage.aea") (In-Work 'os') }
+    $null = Run-Linux 'rootfs' $body.Replace('{SYSOS}', $SysOsImage) `
+        -Disks @(@{ ro = "os/$OsImage" }, @{ ro = "os/$SysOsImage" }, @{ ro = "iphone/$AppOsImage" }, @{ new = 'root26.qcow2'; size = '32G' }) `
+        -In @('downloads/ios_sysroot.tar.gz') -Out @('root26.qcow2.hashes')
+    # the SystemOS is on the disk now (mk-root26.sh removed its decrypted image; in the helper VM
+    # only the link to it)
+    if ($LinuxMode -ceq 'helper') { Show-Cmd "del os\$SysOsImage"; if (-not $DryRun) { Remove-Item $sysos -ErrorAction SilentlyContinue } }
     Drop-Aea $SysOsImage
 }
 
@@ -993,10 +1266,16 @@ function Do-Partition {
     Need-Space $Space.partition
     $body = @'
 disk_tools
-rm -f root26g.qcow2
+fresh root26g.qcow2
 bash $S/mk-root26g.sh $A/root26.qcow2 $A/root26g.qcow2
 '@
-    $null = Run-Wsl 'partition' $body
+    # the helper VM's new disk: as big as mk-root26g.sh makes it (the root, 16 GiB of Data, 2 MiB)
+    $size = '(root26.qcow2 + 16 GiB + 2 MiB)'
+    if ($LinuxMode -ceq 'helper' -and -not $DryRun) {
+        $info = (Run (In-Work 'qemu\qemu-img.exe') @('info', '--output=json', (In-Work 'root26.qcow2')) -Quiet) -join "`n" | ConvertFrom-Json
+        $size = "$([long]$info.'virtual-size' + 16GB + 2MB)"
+    }
+    $null = Run-Linux 'partition' $body -Disks @(@{ ro = 'root26.qcow2' }, @{ new = 'root26g.qcow2'; size = $size })
     if (-not $KeepBuildFiles -and -not $DryRun -and -not (Is-Owned 'root26.qcow2')) {
         Say 'root26.qcow2 stays: this installer did not make it' DarkGray
     } elseif (-not $KeepBuildFiles) {
@@ -1025,7 +1304,7 @@ python3 -I $S/root26-dbg-off.py $R
 python3 -I $S/root26-trim.py $R on
 EOF
 '@
-    $null = Run-Wsl 'tweaks' $body
+    $null = Run-Linux 'tweaks' $body
 }
 
 function Do-FirstBoot {
@@ -1066,7 +1345,7 @@ python3 -I $S/root26-mgcache.py $R reset
 python3 -I $S/root26-prefs.py $R
 EOF
 '@
-    $null = Run-Wsl 'persona' $body
+    $null = Run-Linux 'persona' $body
 }
 
 function Do-Activation {
@@ -1083,7 +1362,7 @@ cp $R/usr/libexec/mobileactivationd $A/install/work/mobileactivationd.orig
 ls -l $R/usr/libexec/mobileactivationd
 EOF
 '@
-    $null = Run-Wsl 'activation-get' $body
+    $null = Run-Linux 'activation-get' $body -Out @('install/work/mobileactivationd.orig')
     $null = Py 'hact_patch.py' @($orig, $new)
     $out = Py 'reattest.py' @($orig, $new)
     $h = if ($DryRun) { @('OLD_CDHASH', 'NEW_CDHASH') } else {
@@ -1100,7 +1379,7 @@ cmp $A/install/work/mobileactivationd $R/usr/libexec/mobileactivationd
 ls -l $R/usr/libexec/mobileactivationd
 EOF
 '@
-    $null = Run-Wsl 'activation-put' $body
+    $null = Run-Linux 'activation-put' $body -In @('install/work/mobileactivationd')
 }
 
 function Do-Apps {
@@ -1111,7 +1390,7 @@ function Do-Apps {
     $body = @'
 disk_tools
 overlay root26-activation.qcow2 root26-apps.qcow2
-rm -rf dsc dscpatch dscpatch-pb dscpatch-edge
+fresh dsc dscpatch dscpatch-pb dscpatch-edge
 mkdir -p dsc
 in_root root26-apps.qcow2 <<'EOF'
 bash $S/apply-staged.sh
@@ -1121,7 +1400,9 @@ EOF
 ls -l dsc
 '@
     $dsc = ($DscFiles | ForEach-Object { '$C/' + $_ }) -join ' '
-    $null = Run-Wsl 'apps-get' $body.Replace('{DSC}', $dsc)
+    # (apply-staged.sh and apply-apps.sh read the staged apps off the OS image)
+    $osDisk = @{ ro = "os/$OsImage" }
+    $null = Run-Linux 'apps-get' $body.Replace('{DSC}', $dsc) -Disks @($osDisk) -Out @('dsc')
     $pb = Py 'dsc-patch.py' (@((In-Work 'dsc')) + $DscPosterBoard + @(In-Work 'dscpatch-pb'))
     $edge = Py 'edge-patch.py' @((In-Work 'dsc'), (In-Work 'dscpatch-edge'))
     $hashes = if ($DryRun) { @('NEW_42', 'NEW_03') } else {
@@ -1145,7 +1426,7 @@ bash $S/apply-apps.sh
 python3 -I $S/root26-nowatchdog.py $R
 EOF
 '@
-    $null = Run-Wsl 'apps-put' $body
+    $null = Run-Linux 'apps-put' $body -Disks @($osDisk) -In @('dsc', 'dscpatch')
 }
 
 function Do-Gpu {
@@ -1173,7 +1454,15 @@ function Do-Gpu {
         Show-Cmd "del install\work\gpu (if there)"
         if (-not $DryRun) { Remove-Item (In-Work 'install\work\gpu') -Recurse -Force -ErrorAction SilentlyContinue }
         $body = 'bash $S/cloudos-gpu-driver.sh cloudos/{IMG}.aea install/work/gpu cloudos/Firmware/{IMG}.aea.trustcache'
-        $null = Run-Wsl 'gpu-driver' $body.Replace('{IMG}', $CloudOsGpuImage)
+        if ($LinuxMode -ceq 'helper') {
+            # decrypted by ipsw.exe; the helper VM reads the bundle off it (apfs-fuse)
+            Decrypt-Aea (In-Work "cloudos\$CloudOsGpuImage.aea") (In-Work 'install\work\gpu-img')
+            $body = $body.Replace('{IMG}.aea ', '{IMG} ')
+        }
+        $null = Run-Linux 'gpu-driver' $body.Replace('{IMG}', $CloudOsGpuImage) `
+            -Disks @(@{ ro = "install/work/gpu-img/$CloudOsGpuImage"; at = "cloudos/$CloudOsGpuImage" }) `
+            -In @("cloudos/Firmware/$CloudOsGpuImage.aea.trustcache") -Out @('install/work/gpu')
+        if ($LinuxMode -ceq 'helper' -and -not $DryRun) { Remove-Item (In-Work 'install\work\gpu-img') -Recurse -Force -ErrorAction SilentlyContinue }
         Show-Cmd "copy $plugin $copy"
         if (-not $DryRun) { Copy-Item $plugin (Join-Path $copy $GpuPluginRelease.Name) -Force }
     } else {
@@ -1205,7 +1494,7 @@ find "$B" -type f -exec chmod 644 {} +
 ls -l "$B" "$B"/*
 EOF
 '@
-    $null = Run-Wsl 'gpu' $body.Replace('{BUNDLE}', $GpuBundle)
+    $null = Run-Linux 'gpu' $body.Replace('{BUNDLE}', $GpuBundle) -In @('install/work/gpu')
     # the driver is out of it (a gpu step redone later gets the image again)
     if ($route -ceq 'cloudos') { Drop-Aea $CloudOsGpuImage 'cloudos' }
 }
@@ -1217,7 +1506,7 @@ function Do-Wallpaper {
     $top = Top-Layer
     Need-Space $Space.wallpaper
     Retire-Top
-    $null = Run-Wsl 'wallpaper' "disk_tools`noverlay $top.qcow2 root.qcow2"
+    $null = Run-Linux 'wallpaper' "disk_tools`noverlay $top.qcow2 root.qcow2"
     Show-Cmd "copy $top.tc root.tc"
     if (-not $DryRun) { Copy-Item (In-Work "$top.tc") (In-Work 'root.tc') -Force }
     $g = Start-Guest 'install-wallpaper' @('-Disk', 'root.qcow2', '-Tc', 'root.tc')
@@ -1242,13 +1531,13 @@ function Do-Collections {
     $body = @'
 disk_tools
 overlay root.qcow2 root-collections.qcow2
-rm -rf dsc-wp dscpatch-wp
+fresh dsc-wp dscpatch-wp
 mkdir -p dsc-wp
 in_root root-collections.qcow2 <<'EOF'
 cp $R/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld/{N} $A/dsc-wp/
 EOF
 '@
-    $null = Run-Wsl 'collections-get' $body.Replace('{N}', $DscFiles[0])
+    $null = Run-Linux 'collections-get' $body.Replace('{N}', $DscFiles[0]) -Out @('dsc-wp')
     $out = Py 'dsc-patch.py' (@((In-Work 'dsc-wp')) + $DscCollections + @(In-Work 'dscpatch-wp'))
     $h = if ($DryRun) { 'NEW_42' } else {
         $l = @($out | Where-Object { "$_" -cmatch '^dyld_shared_cache_arm64e\.\d+ [0-9a-f]{40} [0-9a-f]{40}$' })
@@ -1265,7 +1554,7 @@ in_root root-collections.qcow2 <<'EOF'
 bash $S/wp-apply.sh $A/dsc-wp $A/dscpatch-wp
 EOF
 '@
-    $null = Run-Wsl 'collections-put' $body
+    $null = Run-Linux 'collections-put' $body -In @('dsc-wp', 'dscpatch-wp')
     $g = Start-Guest 'install-collections' @('-Wallpaper', 'collections', '-Disk', 'root-collections.qcow2', '-Tc', 'root-collections.tc')
     try {
         Wait-Ui $g 40
@@ -1277,7 +1566,7 @@ EOF
 function Do-Cleanup {
     if ($KeepBuildFiles) { Say '-KeepBuildFiles: the decrypted images and the build''s intermediates stay' DarkGray; return }
     # what only the build reads (a step redone later gets it again)
-    $gone = @('os', 'dsc', 'dsc-wp', 'dscpatch', 'dscpatch-pb', 'dscpatch-edge', 'dscpatch-wp', 'install\work', 'root26.qcow2',
+    $gone = @('os', 'dsc', 'dsc-wp', 'dscpatch', 'dscpatch-pb', 'dscpatch-edge', 'dscpatch-wp', 'install\work', 'install\helper', 'root26.qcow2',
               "iphone\$OsImage.aea", "iphone\$SysOsImage.aea", "install\got\$OsImage.aea.ok", "install\got\$SysOsImage.aea.ok",
               "cloudos\$CloudOsGpuImage.aea", "install\got\$CloudOsGpuImage.aea.ok")
     $bytes = 0
@@ -1296,7 +1585,8 @@ function Do-Cleanup {
     }
     if (-not $any -and -not $DryRun) { Say 'nothing to remove' DarkGray; return }
     if (-not $DryRun) { Say ("freed {0:N1} GB" -f ($bytes / 1e9)) }
-    $null = Run-Wsl 'cleanup' 'rm -rf "${L:?}/rd/rd.apfs" /tmp/sysroot-signed'
+    # (the helper VM's scratch went with it)
+    if ($LinuxMode -cne 'helper') { $null = Run-Wsl 'cleanup' 'rm -rf "${L:?}/rd/rd.apfs" /tmp/sysroot-signed' }
 }
 
 # The files the launcher needs, the step that makes each and the README.md step it follows
@@ -1348,9 +1638,9 @@ function Do-Shortcut {
 $Steps = @(
     @{ Id = 'setup';       Readme = 'Start menu and setup'; Kind = 'always'; Title = 'Setup: work folder, GPU driver, config, scripts' }
     @{ Id = 'prereq';      Readme = 'You need';             Kind = 'always'; Title = 'Windows prerequisites' }
-    @{ Id = 'wsl';         Readme = 'You need';             Kind = 'once';   Title = 'WSL 2 and the build tools in it (ipsw, apfs-fuse, hfsplus, python3)' }
     @{ Id = 'python';      Readme = '-';                    Kind = 'once';   Title = 'Python for the Windows-side tools' }
     @{ Id = 'qemu';        Readme = '1';                    Kind = 'once';   Title = 'QEMU and the GPU library' }
+    @{ Id = 'linux';       Readme = 'You need';             Kind = 'once';   Title = 'The Linux steps'' tools: WSL 2 (ipsw, apfs-fuse, hfsplus, python3) or the helper VM and ipsw.exe' }
     @{ Id = 'sysroot';     Readme = 'You need';             Kind = 'once';   Title = "darwin-vm's iOS sysroot" }
     @{ Id = 'cloudos';     Readme = '2';                    Kind = 'once';   Title = 'cloudOS 26.4b files (Apple)' }
     @{ Id = 'iphone';      Readme = '2';                    Kind = 'once';   Title = 'iPhone17,3 iOS 26.6.2 files (Apple, about 10 GB)' }
@@ -1413,6 +1703,8 @@ function Step-Sig([string]$id) {
             if ($r) { return "gpu $(Gpu-Driver)" } else { return 'gpuless' }
         }
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
+        # the other -Linux has its own tools
+        'linux' { return $LinuxMode }
     }
     'done'
 }
@@ -1420,7 +1712,7 @@ function Invoke-Step([string]$id) {
     switch -CaseSensitive ($id) {
         'setup' { Do-Setup }
         'prereq' { Do-Prereq }
-        'wsl' { Do-Wsl }
+        'linux' { Do-Linux }
         'python' { Do-Python }
         'qemu' { Do-Qemu }
         'sysroot' { Do-Sysroot }
@@ -1474,11 +1766,19 @@ if (-not $LinuxDir) {
 }
 if ($LinuxDir -cnotmatch '^/[A-Za-z0-9._/-]+$') { throw "-LinuxDir must be an absolute Linux path of plain characters: $LinuxDir" }
 if (-not $Distro) { if ($Cfg -and $Cfg.Distro) { $Distro = [string]$Cfg.Distro } else { $Distro = 'ios-emu' } }
+# where the Linux steps run: -Linux, else the config's (LinuxMode), else auto: WSL if it is
+# installed (faster), else the helper VM
+if (-not $Linux) { $Linux = if ($Cfg -and "$($Cfg.LinuxMode)" -cin 'auto', 'wsl', 'helper') { [string]$Cfg.LinuxMode } else { 'auto' } }
+$LinuxMode = $Linux
+if ($LinuxMode -ceq 'auto') { $LinuxMode = if ((Get-Wsl).Ok) { 'wsl' } else { 'helper' } }
 $Scripts = In-Work 'scripts'
 $Py = In-Work 'tools\python\python.exe'
 
 $ids = @($Steps | ForEach-Object { $_.Id })
 $From = $From.ToLowerInvariant(); $Only = $Only.ToLowerInvariant()
+# (the linux step was called wsl)
+if ($From -ceq 'wsl') { $From = 'linux' }
+if ($Only -ceq 'wsl') { $Only = 'linux' }
 foreach ($x in @($From, $Only)) { if ($x -and $ids -cnotcontains $x) { throw "no step '$x'; the steps: $($ids -join ', ')" } }
 if ($From -and $Only) { throw 'give -From or -Only, not both' }
 
@@ -1499,12 +1799,22 @@ if ($List) {
 if ($Check) {
     Step "Check (reads only): work folder $Work"
     Do-Prereq -Report
-    Step "WSL tools in $Distro"
-    $w = Get-Wsl
-    if ($w.Ok -and $w.Distros.ContainsKey($Distro)) {
-        $env:WSL_UTF8 = '1'
-        $null = Run 'wsl.exe' @('-d', $Distro, '-u', 'root', '--', 'bash', (To-Wsl (Join-Path $here 'installer\wsl-setup.sh')), 'check') -NoFail
-    } else { Say "no WSL distro $Distro" Yellow }
+    if ($LinuxMode -ceq 'helper') {
+        Step "The Linux steps: the helper VM (-Linux $Linux)"
+        foreach ($f in 'tools\helper\Image.gz', 'tools\helper\initrd.gz', 'tools\ipsw\ipsw.exe') {
+            $ok = Test-Path (In-Work $f)
+            Say ("{0} {1}" -f $(if ($ok) { '[ok]  ' } else { '[need]' }), $f) $(if ($ok) { 'Green' } else { 'Yellow' })
+        }
+        $from = Join-Path $repo 'installer\helper\out\initrd.gz'
+        Say "the linux step copies the helper VM from $(Split-Path $from)$(if (-not (Test-Path $from)) { ': not there (build it, README.md "Without WSL")' })" DarkGray
+    } else {
+        Step "WSL tools in $Distro (-Linux $Linux)"
+        $w = Get-Wsl
+        if ($w.Ok -and $w.Distros.ContainsKey($Distro)) {
+            $env:WSL_UTF8 = '1'
+            $null = Run 'wsl.exe' @('-d', $Distro, '-u', 'root', '--', 'bash', (To-Wsl (Join-Path $here 'installer\wsl-setup.sh')), 'check') -NoFail
+        } else { Say "no WSL distro $Distro" Yellow }
+    }
     Step 'QEMU'
     $build = In-Work 'qemu\BUILD.txt'
     if (Test-Path $build) { foreach ($l in Get-Content $build) { Say $l } } else { Say "no $build" Yellow }
@@ -1526,7 +1836,11 @@ if ($Check) {
 # -Collections is remembered (a later run that redoes the disk builds the Collections one again)
 if ($Collections -and $NoCollections) { throw 'give -Collections or -NoCollections, not both' }
 Write-Host "ASoftware iOS 26 installer$(if ($DryRun) { ' (dry run: nothing is run)' })" -ForegroundColor Cyan
-Write-Host "  Work $Work (WSL: $(To-Wsl $Work)), WSL distro $Distro, Linux scratch $LinuxDir, sources $Src"
+if ($LinuxMode -ceq 'helper') {
+    Write-Host "  Work $Work, the Linux steps in the helper VM (-Linux $Linux), sources $Src"
+} else {
+    Write-Host "  Work $Work (WSL: $(To-Wsl $Work)), WSL distro $Distro, Linux scratch $LinuxDir (-Linux $Linux), sources $Src"
+}
 $fromIdx = if ($From) { [array]::IndexOf($ids, $From) } else { -1 }
 $wallIdx = [array]::IndexOf($ids, 'wallpaper')
 # disks it did not make: a real run stops before any step (-DryRun says so and goes on)

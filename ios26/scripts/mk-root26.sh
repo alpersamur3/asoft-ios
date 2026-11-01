@@ -16,6 +16,9 @@
 #   mk-root26.sh
 # env: OS SYSOS APPOS (decrypted images), OUT (qcow2), SIZE, NBD (>= /dev/nbd12),
 #      EXCLUDE, DROP_SYSOS
+# OUT may be a block device instead (the installer's helper VM, where QEMU opened
+# the new qcow2; a link to it keeps $OUT.hashes a file): it is used as it is,
+# without qemu-img and qemu-nbd.
 set -euo pipefail
 A=${ASOFT26:?set ASOFT26 to the build folder as WSL sees it, e.g. /mnt/d/ios26}
 L=${ASOFT26_LINUX:-/root/ios26}
@@ -29,9 +32,13 @@ NBD=${NBD:-/dev/nbd12}
 SYSROOT=$L/sysroot
 EXCLUDE=${EXCLUDE:-/private/var/staged_system_apps /System/Library/LinguisticData /System/Library/PreinstalledAssetsV2 /System/Library/NanoTimeKit /usr/standalone}
 
-case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
-[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
-[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+if [ -b "$OUT" ]; then
+	NBD=$OUT
+else
+	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
+	[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
+	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+fi
 
 work=/tmp/mkroot26		# mount points only
 mkdir -p $work
@@ -40,7 +47,7 @@ cleanup() {
 	for m in "${mounts[@]}"; do
 		mountpoint -q "$m" && { umount "$m" 2> /dev/null || fusermount -u "$m" 2> /dev/null || true; }
 	done
-	qemu-nbd -d $NBD > /dev/null 2>&1 || true
+	[ "$NBD" = "$OUT" ] || qemu-nbd -d $NBD > /dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -57,13 +64,17 @@ apfs_mount "$SYSOS" sysos
 apfs_mount "$APPOS" appos
 src() { [ -d $work/$1/root ] && echo $work/$1/root || echo $work/$1; }
 
-mkdir -p "$(dirname "$OUT")"
-qemu-img create -q -f qcow2 "$OUT" $SIZE
-modprobe nbd max_part=0 2> /dev/null || true
+if [ "$NBD" != "$OUT" ]; then
+	mkdir -p "$(dirname "$OUT")"
+	qemu-img create -q -f qcow2 "$OUT" $SIZE
+	modprobe nbd max_part=0 2> /dev/null || true
+fi
 # the WSL kernel has no hfsplus; same module and check as the iOS 16 session's tools
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null || insmod "${HFSPLUS_KO:?WSL has no hfsplus module: build it and set HFSPLUS_KO}"
-qemu-nbd -f qcow2 --cache=writeback -c $NBD "$OUT"
-sleep 1
+if [ "$NBD" != "$OUT" ]; then
+	qemu-nbd -f qcow2 --cache=writeback -c $NBD "$OUT"
+	sleep 1
+fi
 mkfs.hfsplus -s -J -v iOSRoot $NBD > /dev/null
 mkdir -p $work/root
 mount -t hfsplus -o force $NBD $work/root

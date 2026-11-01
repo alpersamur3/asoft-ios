@@ -21,7 +21,7 @@ same GPU stack on Linux; this is the Windows host.
 
 > [!WARNING]
 > A research preview, not a product. `Install-iOS26.cmd` runs the build below for you, but it
-> takes WSL, about 60 GB and several hours, and until we
+> takes about 60 GB and several hours (no WSL needed), and until we
 > publish a QEMU package it builds QEMU too. Apple's security model is mostly switched off. Not
 > affiliated with Apple. No Apple software is in this repository or in our forks: you build
 > everything from your own downloads from Apple, the guest's GPU driver too (the installer takes it
@@ -146,8 +146,9 @@ The guest's GPU driver needs no Mac: the installer takes Apple's bundle out of t
 downloads anyway and adds the Metal compiler plugin cloudOS lacks, built by our CI
 ([below](#the-guests-gpu-driver)). A driver bundle of your own, or none (GPU-less), is the menu's
 **[G]**; change it and run the installer again: it redoes only the GPU layer and the wallpaper.
-What it cannot do for you is **WSL itself**: installing it needs an administrator and a restart, so
-the installer prints the command and stops. Run it, restart, and run the installer again.
+It needs **no WSL**, no administrator and no restart: the steps that need Linux (reading Apple's
+APFS images, writing the HFS+ disk) run in WSL if it is installed, and otherwise in a small Linux VM
+on the QEMU it downloads anyway, as iOS 16's installer does ([below](#without-wsl-the-helper-vm)).
 
 QEMU comes prebuilt: the installer downloads `asoft-qemu-2026.11.01b.zip` (125 MB) from
 qemu-sptm's [`asoft-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
@@ -160,8 +161,8 @@ D:\path\to\dist` takes a build you have (`win-build.sh`'s `dist`).
 ### You need
 
 - Windows 10 2004 or later, or Windows 11, x64; 8 or more cores, 16 GB RAM (the guest gets 4 GB)
-- About 60 GB free on the work folder's drive (the build peaks at about 55 GB and keeps about 30)
-  and about 5 GB on WSL's drive for the `hfsplus` module
+- About 60 GB free on the work folder's drive (the build peaks at about 55 GB and keeps about 30);
+  with WSL, about 5 GB more on WSL's drive for its tools and the `hfsplus` module
 - A Vulkan GPU whose driver has `VK_EXT_external_memory_host` (tested: NVIDIA RTX 4080 Laptop)
 
 The installer gets the rest. By hand, you also need:
@@ -171,7 +172,8 @@ The installer gets the rest. By hand, you also need:
 - WSL 2 (Ubuntu 24.04), as root: [ipsw](https://github.com/blacktop/ipsw), `qemu-utils`, `hfsprogs`, `gdisk`,
   [apfs-fuse](https://github.com/sgan81/apfs-fuse), `python3`, `rsync`, and an `hfsplus` kernel module
   for WSL's kernel, which has none (`HFSPLUS_KO=path/to/hfsplus.ko`). `installer/wsl-setup.sh install`
-  sets all of this up, `wsl-setup.sh check` lists what is missing
+  sets all of this up, `wsl-setup.sh check` lists what is missing. Or, without WSL, the helper VM
+  and ipsw's Windows build ([Without WSL](#without-wsl-the-helper-vm))
 - `sysroot/ios_sysroot.tar.gz` from [jprx/darwin-vm](https://github.com/jprx/darwin-vm): bash and
   coreutils for the shell ramdisk and the root
 
@@ -346,7 +348,7 @@ driver is baked into the disk when the disk is built, so this records the choice
 run time: to change it later, choose again with the menu's **[G]** and run `Install-iOS26.cmd` again
 (it redoes the GPU layer, step 5.2, and the wallpaper).
 
-`Install-iOS26.cmd` runs the whole *Build* above: that setup, the Windows checks, WSL and its tools,
+`Install-iOS26.cmd` runs the whole *Build* above: that setup, the Windows checks, the Linux tools (WSL's or the helper VM),
 QEMU, only the needed members of Apple's two IPSWs (about 10.5 GB, resumable), the firmware, device
 trees, ramdisk and disk, three boots without you (the first boot of 4.5, the wallpaper bake of 5.3.6
 and, with `-Collections`, the Collections disk), the checklist of what the launcher needs, and a
@@ -356,13 +358,14 @@ itself. Options:
 | Option | What it does |
 |---|---|
 | `-List` | The steps, the README step each runs, and which are done |
-| `-Check` | What this PC has: Windows, the WSL tools, QEMU, the outputs. Changes nothing |
+| `-Check` | What this PC has: Windows, the Linux tools (WSL or the helper VM), QEMU, the outputs. Changes nothing |
 | `-DryRun` | Prints every command the steps would run. Runs nothing |
 | `-From STEP`, `-Only STEP` | Redoes STEP and everything after it, or just STEP (a disk step: the disk steps after it are redone on the next run) |
 | `-Collections`, `-NoCollections` | Also builds `root-collections.qcow2` (5.3.6); remembered. Also on when the menu's wallpaper is *collections* |
 | `-QemuFrom auto\|release\|source\|FOLDER` | Where QEMU comes from. `auto`: the release package (`source` instead when it cannot be downloaded and MSYS2 is installed); with no package set, the work folder's QEMU, else `source` if MSYS2 is installed |
 | `-CloudOsIpsw FILE`, `-IPhoneIpsw FILE` | Takes Apple's files from IPSWs you already have |
 | `-GpuPlugin FILE` | Takes the GPU driver's compiler plugin from a file you have instead of our release |
+| `-Linux auto\|wsl\|helper` | Where the Linux steps run: `auto` (the default) WSL if it is installed, else the helper VM ([Without WSL](#without-wsl-the-helper-vm)); remembered |
 | `-KeepBuildFiles` | Keeps the decrypted images and the intermediate disk (about 32 GB) |
 | `-BakeMinutes N` | How long the wallpaper boot leaves iOS running once its UI is up (6) |
 | `-NoShortcut` | No Start-menu shortcut |
@@ -405,6 +408,59 @@ app from an `.ipa` does run on iOS 26 another way: place its `.app` into `/Appli
 Mach-O's CDHash in the trust cache and rebuild LaunchServices, exactly as the system apps are
 installed (step 5.3 / `apply-apps.sh`). Tested with a small Hello app: it appears on the home screen
 and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
+
+### Without WSL (the helper VM)
+
+`-Linux` says where the Linux steps run (remembered in the config): `auto`, the default, takes WSL
+if it is installed and the helper VM if not; `wsl` and `helper` force one. With the helper VM:
+
+- **On Windows**, with [ipsw](https://github.com/blacktop/ipsw)'s Windows build (3.1.739, which the
+  `linux` step downloads and checks by SHA-256): the AEA images are decrypted (2, 5.2), the im4p
+  files unwrapped and the kernelcaches decompressed (3.1, 3.2, 3.5); `qemu-img.exe` makes the step 5
+  overlays.
+- **In the helper VM**, what mounts an APFS or HFS+ volume or writes a partition table: the ramdisk
+  (3.5), the root disk (4.1), the partitioned disk (4.3), the tweaks and the persona (4.4, 4.5) and
+  the copies onto and off the disk in step 5. It is iOS 16's installer's helper: Linux 6.12 and an
+  Ubuntu 24.04 arm64 userland (apfs-fuse, hfsprogs, gdisk, rsync, Python), booted by the QEMU of
+  step 1 under TCG with up to 8 vCPUs and 4 GB. The bash scripts above run in it unchanged; QEMU
+  opens the work folder's disks (overlays with their backing files too) and the scripts get them as
+  block devices instead of through `qemu-nbd`. The scripts and the step's inputs go in as a tar on
+  a read-only disk, the outputs come back as a tar ([`installer/helper/job-run.sh`](../installer/helper/job-run.sh)),
+  and the VM's console is in the step's log.
+
+Measured on 2026-11-02 on an i7-13700HX (24 threads, NVMe), with an iOS 16 and an iOS 26 QEMU
+running at the same time, Apple's files from local IPSWs:
+
+| Step | Without WSL | |
+| --- | --- | --- |
+| decrypt (the SystemOS, 2 GB) | 4 s | ipsw.exe |
+| firmware | 2 s | ipsw.exe |
+| ramdisk | 1.3 min | |
+| rootfs | 34.7 min | 26 min of it the OS tree's copy out of APFS (apfs-fuse under TCG, about 8 MB/s) |
+| partition | 2.6 min | the 32 GiB copy |
+| tweaks | 1.3 min | |
+| activation | 1.5 min | two VM runs, the patch on Windows |
+| apps | 6.1 min | |
+| gpu | 1.3 min | |
+
+The Linux steps took 49 minutes in all; each VM run spends about 40 s starting and checking the
+disk's journal. With WSL these steps run natively; we have not timed them on this PC yet. With the
+downloads and the two boots a build without WSL should stay within about two hours on a PC like
+this one (an estimate: not run end to end).
+
+The VM is `installer/helper/out/Image.gz` and `initrd.gz`, which the `linux` step copies into
+`<Work>\tools\helper` and tests. iOS 16's release package has them; one from before 2026-11-02
+lacks tools these steps need (`job-run.sh`, `sgdisk`, `awk`), and the `linux` step says so. In a
+git checkout build them once, as root on an x86-64 Linux or in WSL (on any PC: the files are the
+same everywhere), with `mmdebstrap`, `cmake`, `gcc-aarch64-linux-gnu` and `g++-aarch64-linux-gnu`:
+
+```
+installer/helper/build-kernel.sh LINUX_SRC installer/helper/out
+installer/helper/build-rootfs.sh APFS_FUSE_SRC installer/helper/out
+```
+
+`LINUX_SRC` is a Linux source tree (6.12 tested), `APFS_FUSE_SRC` a clone of
+[apfs-fuse](https://github.com/sgan81/apfs-fuse) (66b86bd tested). The initrd is 29 MB.
 
 ### The guest's GPU driver
 
@@ -481,7 +537,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 
 > [!WARNING]
 > Bir araştırma önizlemesi, ürün değil. `Install-iOS26.cmd` yukarıdaki derleme adımlarını sizin
-> yerinize yürütüyor, ama WSL, yaklaşık 60 GB ve birkaç saat istiyor ve biz bir QEMU paketi
+> yerinize yürütüyor, ama yaklaşık 60 GB ve birkaç saat istiyor (WSL gerekmez) ve biz bir QEMU paketi
 > yayımlayana dek QEMU'yu da derliyor. Apple'ın güvenlik modeli
 > büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur:
 > her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de (kurucu onu
@@ -526,11 +582,17 @@ ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün var
 ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,2 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %80'e kadar
 çıkıyor; diğer GPU (Intel) ne yapılırsa yapılsın %2-12'de düz kalıyor.
 
-**Derleme:** `ios26\Install-iOS26.cmd` yukarıdaki *Build* adımlarını sırayla yürütür: WSL ve araçları,
+**Derleme:** `ios26\Install-iOS26.cmd` yukarıdaki *Build* adımlarını sırayla yürütür: Linux araçları,
 QEMU, Apple'ın iki IPSW'sinden yalnız gereken dosyalar (yaklaşık 10,5 GB), disk, üç otomatik açılış
 (ilk açılış, duvar kağıdı, istenirse Collections) ve Başlat menüsü kısayolu. Her adım iş klasöründeki
 `install\` altında iz bırakır; durdurup yeniden çalıştırınca kaldığı yerden devam eder (`-List`,
-`-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`; ayrıntı yukarıda).
+`-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`, `-Linux`; ayrıntı yukarıda).
+WSL, yönetici yetkisi ve yeniden başlatma gerekmez: Linux isteyen adımlar (Apple'ın APFS imajlarını
+okumak, HFS+ diski yazmak) WSL kuruluysa WSL'de, değilse iOS 16 kurucusunun yardımcı VM'inde (zaten
+indirilen QEMU'da küçük bir Linux) çalışır; şifre çözme ve im4p işleri Windows'ta ipsw.exe ile
+yapılır (`-Linux auto|wsl|helper`, *Without WSL* bölümü). i7-13700HX'te yardımcı VM'le Linux
+adımları toplam 49 dk sürdü, 35 dk'sı kök disk (APFS'ten kopya, TCG altında); WSL'li süreler bu
+bilgisayarda henüz ölçülmedi.
 QEMU hazır gelir: kurucu qemu-sptm'nin
 [`asoft-9fa4e67` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
 `asoft-qemu-2026.11.01b.zip`'i (125 MB; qemu-sptm `asoft` 9fa4e67, reims-vgpu `windows` 44a9dac6,

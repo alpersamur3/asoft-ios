@@ -17,8 +17,8 @@ ls -la $R/System/Cryptexes/ $R/private/preboot/Cryptexes/
 python3 -I '"$S"'/root26-tweaks.py $R
 df -h $R | tail -1'
 NBD=${NBD:-/dev/nbd12}
-qemu-nbd -f qcow2 -c $NBD $DISK
-sleep 1
+# (a block device, in the installer's helper VM: as it is)
+[ -b $DISK ] && NBD=$DISK || { qemu-nbd -f qcow2 -c $NBD $DISK; sleep 1; }
 fsck.hfsplus -f -y $NBD | grep -v "Illegal name" | tail -4 || true
 fsck.hfsplus -f -n $NBD | tail -2 || true
-qemu-nbd -d $NBD > /dev/null
+[ $NBD = $DISK ] || qemu-nbd -d $NBD > /dev/null

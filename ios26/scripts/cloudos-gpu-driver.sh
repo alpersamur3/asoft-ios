@@ -1,12 +1,14 @@
 #!/bin/bash
-# cloudos-gpu-driver.sh AEA OUTDIR [TRUSTCACHE]
+# cloudos-gpu-driver.sh AEA|IMAGE OUTDIR [TRUSTCACHE]
 #
 # Apple's guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) out of a cloudOS (Private
-# Cloud Compute) OS image, without a Mac and without a restore. Run as root in WSL (ios-emu);
-# Install-iOS26.ps1's gpu step runs it (GpuMode cloudos).
+# Cloud Compute) OS image, without a Mac and without a restore. Run as root in WSL (ios-emu) or
+# in the installer's helper VM; Install-iOS26.ps1's gpu step runs it (GpuMode cloudos).
 #
 #   AEA         the IPSW's "OS" member, e.g. cloudos/094-39278-029.dmg.aea of cloudOS 26.4b
 #               (23E5207q, 754974720 bytes; ipsw-get.py fetches it by HTTP ranges)
+#   IMAGE       or that image decrypted already (a file or a block device: the helper VM gets
+#               it so, decrypted by ipsw.exe on Windows); then no ipsw is needed here
 #   OUTDIR      gets AppleParavirtGPUMetalIOGPUFamily.bundle: Apple's three files (binary,
 #               Info.plist, _CodeSignature/CodeResources). cloudOS has no compiler plugin
 #               (libAppleParavirtCompilerPluginIOGPUFamily.dylib): that one is not Apple's.
@@ -21,29 +23,37 @@
 # Needs: ipsw (blacktop, 3.1.739 tested), apfs-fuse. Space next to AEA: the decrypted image
 # (1.4 GB for 23E5207q), deleted at the end. Time here: decrypt 9 s, the rest seconds.
 set -euo pipefail
-AEA=$(realpath "${1:?usage: cloudos-gpu-driver.sh AEA OUTDIR [TRUSTCACHE]}")
-OUT=${2:?usage: cloudos-gpu-driver.sh AEA OUTDIR [TRUSTCACHE]}
+USAGE='usage: cloudos-gpu-driver.sh AEA|IMAGE OUTDIR [TRUSTCACHE]'
+AEA=$(realpath "${1:?$USAGE}")
+OUT=${2:?$USAGE}
 TC=${3:-}
+S=$(cd "$(dirname "$0")" && pwd)
 NAME=AppleParavirtGPUMetalIOGPUFamily
 B=System/Library/Extensions/$NAME.bundle
 [ ! -e "$OUT/$NAME.bundle" ] || { echo "$OUT/$NAME.bundle exists" >&2; exit 1; }
-command -v ipsw apfs-fuse > /dev/null
+command -v apfs-fuse > /dev/null
 
-WORK=$(mktemp -d "$(dirname "$AEA")/gpu-driver.XXXXXX")
+WORK=
 MNT=$(mktemp -d /tmp/gpu-driver-mnt.XXXXXX)
 cleanup() {
 	mountpoint -q "$MNT" && { fusermount -u "$MNT" 2> /dev/null || umount "$MNT"; }
 	rmdir "$MNT" 2> /dev/null || true
-	rm -rf "${WORK:?}"
+	[ -z "$WORK" ] || rm -rf "${WORK:?}"
 }
 trap cleanup EXIT
 
 # no grep -q in these pipes: it quits at the first match, the writer gets SIGPIPE, and pipefail
 # turns that into a failure
-ipsw fw aea --info "$AEA" 2>&1 | grep '^\[encryption_key\]' > /dev/null \
-	|| echo "warning: no encryption_key in the AEA header: ipsw will ask Apple's key server" >&2
-ipsw fw aea "$AEA" -o "$WORK" | tail -1
-IMG=$(find "$WORK" -maxdepth 1 -type f | head -1)
+if [ "$(head -c 4 "$AEA")" = AEA1 ]; then
+	command -v ipsw > /dev/null
+	WORK=$(mktemp -d "$(dirname "$AEA")/gpu-driver.XXXXXX")
+	ipsw fw aea --info "$AEA" 2>&1 | grep '^\[encryption_key\]' > /dev/null \
+		|| echo "warning: no encryption_key in the AEA header: ipsw will ask Apple's key server" >&2
+	ipsw fw aea "$AEA" -o "$WORK" | tail -1
+	IMG=$(find "$WORK" -maxdepth 1 -type f | head -1)
+else
+	IMG=$AEA
+fi
 head -c 64 "$IMG" | grep NXSB > /dev/null || { echo "the decrypted image is not APFS" >&2; exit 1; }
 
 apfs-fuse -o ro "$IMG" "$MNT"
@@ -55,7 +65,11 @@ grep -A1 -E 'ProductVersion|ProductBuildVersion' "$ROOT/System/Library/CoreServi
 mkdir -p "$OUT"
 cp -R "$ROOT/$B" "$OUT/"
 
-CD=$(ipsw macho info -s --no-color "$OUT/$NAME.bundle/$NAME" | awk '/CDHash:/ {print substr($2, 1, 40)}')
+if command -v ipsw > /dev/null; then
+	CD=$(ipsw macho info -s --no-color "$OUT/$NAME.bundle/$NAME" | awk '/CDHash:/ {print substr($2, 1, 40)}')
+else
+	CD=$(python3 -I "$S/cdhash.py" "$OUT/$NAME.bundle/$NAME" | awk '{print $1}')
+fi
 echo "CDHash $CD"
 [ ${#CD} -eq 40 ] || { echo "no CDHash for $NAME" >&2; exit 1; }
 if [ -n "$TC" ]; then

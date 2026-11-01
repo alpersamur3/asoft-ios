@@ -21,6 +21,11 @@ check test -x /usr/sbin/mkfs.hfsplus
 check test -x /usr/sbin/fsck.hfsplus
 check rsync --version
 check losetup --version
+check sgdisk --version
+check cmp --version
+check tar --version
+check awk 'BEGIN { exit 0 }'
+check test -x /asoft/job-run.sh
 check grep -q hfsplus /proc/filesystems
 check grep -q fuse /proc/filesystems
 check test -c /dev/fuse

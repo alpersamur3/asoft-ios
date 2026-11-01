@@ -15,8 +15,9 @@ work=$out/rootfs-build
 mkdir -p "$work"
 
 # What the jobs run: shells and core tools, HFS+ and ext4 (scratch) tools, rsync, Python (the iOS root
-# tweaks and plist edits), FUSE 3 for apfs-fuse, busybox for the odd extra tool.
-runtime=bash,dash,coreutils,util-linux,mount,findutils,grep,sed,gzip,hfsprogs,e2fsprogs,rsync,python3,fuse3,libfuse3-3,zlib1g,libbz2-1.0,libstdc++6,busybox-static
+# tweaks and plist edits), FUSE 3 for apfs-fuse, busybox for the odd extra tool; for the iOS 26
+# installer's jobs (job-run.sh) also sgdisk (its partitioned disk), cmp and tar.
+runtime=bash,dash,coreutils,util-linux,mount,findutils,grep,sed,gzip,tar,mawk,diffutils,gdisk,hfsprogs,e2fsprogs,rsync,python3,fuse3,libfuse3-3,zlib1g,libbz2-1.0,libstdc++6,busybox-static
 # Headers and libraries apfs-fuse builds against (its sysroot)
 devel=libc6-dev,libstdc++-13-dev,libfuse3-dev,zlib1g-dev,libbz2-dev,libattr1-dev
 
@@ -65,6 +66,8 @@ install -m 755 "$repo/tools/mkiosroot.sh" "$repo/tools/sweet-root-tweaks.py" "$r
 # mkiosroot.sh runs its privileged steps through sudo; the helper is root already
 printf '#!/bin/sh\nexec "$@"\n' > "$work/root/usr/local/bin/sudo"
 chmod 755 "$work/root/usr/local/bin/sudo"
+# awk is an alternative (update-alternatives), which extracting the packages does not set up
+ln -sf mawk "$work/root/usr/bin/awk"
 mkdir -p "$work/root"/{proc,sys,dev,tmp,run,mnt}
 
 (cd "$work/root" && find . -print0 | cpio --null -o -H newc --quiet) | gzip -6 > "$out/initrd.gz"

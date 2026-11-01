@@ -26,7 +26,10 @@ mkdir -p $SRC $DST
 mountpoint -q $SRC || apfs-fuse -o allow_other "$RD" $SRC
 cleanup() {
 	mountpoint -q $DST && umount $DST
-	qemu-nbd -d $NBD > /dev/null 2>&1 || true
+	case $NBD in
+	/dev/loop*) losetup -d $NBD 2> /dev/null || true;;
+	*) qemu-nbd -d $NBD > /dev/null 2>&1 || true;;
+	esac
 	mountpoint -q $SRC && fusermount -u $SRC
 }
 trap cleanup EXIT
@@ -43,8 +46,13 @@ mkfs.hfsplus -s -v ramdisk "$IMG" > /dev/null
 modprobe nbd max_part=0 2> /dev/null || true
 # the WSL kernel has no hfsplus; same module and check as the iOS 16 session's tools
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null || insmod "${HFSPLUS_KO:?WSL has no hfsplus module: build it and set HFSPLUS_KO}"
-qemu-nbd -f raw -c $NBD "$IMG"
-sleep 1
+if command -v qemu-nbd > /dev/null; then
+	qemu-nbd -f raw -c $NBD "$IMG"
+	sleep 1
+else
+	# (the installer's helper VM has no qemu-nbd)
+	NBD=$(losetup -f --show "$IMG")
+fi
 mount -t hfsplus $NBD $DST
 
 # Apple's tree (hard links, symlinks, owners, modes)

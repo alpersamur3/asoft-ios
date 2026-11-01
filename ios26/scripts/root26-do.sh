@@ -5,22 +5,28 @@
 # $R/private/var, as the guest sees it.
 # The guest must be shut down. Linux's hfsplus ignores the journal, so a volume
 # iOS left with journal transactions gets them replayed by fsck.hfsplus first.
+# QCOW2 may be a block device instead (the installer's helper VM, where QEMU
+# opened the qcow2): it is used as it is, without qemu-nbd.
 # env: NBD (default /dev/nbd12)
 set -eu
 IMG=$1
 NBD=${NBD:-/dev/nbd12}
 R=/tmp/r26		# mount point only
-case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
-[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
-modprobe nbd max_part=0 2> /dev/null || true
+if [ -b "$IMG" ]; then
+	NBD=$IMG
+else
+	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
+	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+	modprobe nbd max_part=0 2> /dev/null || true
+fi
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null || insmod "${HFSPLUS_KO:?WSL has no hfsplus module: build it and set HFSPLUS_KO}"
-qemu-nbd -f qcow2 --cache=writeback -c $NBD "$IMG"
+[ "$NBD" = "$IMG" ] || qemu-nbd -f qcow2 --cache=writeback -c $NBD "$IMG"
 LOOPS=
 cleanup() {
 	mountpoint -q $R/private/var && umount $R/private/var
 	mountpoint -q $R && umount $R
 	for l in $LOOPS; do losetup -d $l; done
-	qemu-nbd -d $NBD > /dev/null
+	[ "$NBD" = "$IMG" ] || qemu-nbd -d $NBD > /dev/null
 }
 trap cleanup EXIT
 sleep 1
