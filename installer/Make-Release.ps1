@@ -34,7 +34,7 @@ $qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUIL
 @"
 # Where the binaries in this package come from
 
-- ``qemu\bin``: QEMU 11.1 (GPL v2) of https://github.com/alpersamur3/qemu-sptm, branch ios26
+- ``qemu\bin``: QEMU 11.1 (GPL v2) of https://github.com/alpersamur3/qemu-sptm, branch asoft
   ($qemuBuild), with reims-vgpu (https://github.com/alpersamur3/reims-vgpu, branch windows) and
   metal2vulkan (https://github.com/alpersamur3/metal2vulkan, branch windows) in it, built by
   ios26/scripts/win-build.sh; the DLLs next to it are MSYS2's UCRT64 packages (GTK, GLib, ANGLE,

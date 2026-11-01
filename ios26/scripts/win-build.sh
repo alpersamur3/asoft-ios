@@ -32,7 +32,7 @@ if [ ! -f build.ninja ]; then
 		--enable-gtk --enable-opengl --disable-sdl --disable-vnc \
 		--enable-slirp --enable-nettle --enable-fdt=internal \
 		--enable-reims-vgpu \
-		--with-pkgversion=ASoftware-ios26 2>&1 | tail -25
+		--with-pkgversion=ASoftware 2>&1 | tail -25
 fi
 # qemu-system-aarch64w.exe: the same without a console window, for the GTK window
 ninja -j$J qemu-system-aarch64.exe qemu-system-aarch64w.exe 2>&1 | grep -E 'error|FAILED|warning: implicit|Linking target' | tail -20
@@ -73,6 +73,6 @@ cp -r /ucrt64/lib/gdk-pixbuf-2.0 $DIST/lib/
 # the window icon and side bar logo (ui/gtk: ASoftware's look)
 cp "$HERE/../../assets/logo-256.png" $DIST/asoftware.png
 cp $SRC/COPYING $SRC/LICENSE $DIST/
-echo "qemu-sptm $(git -C $SRC rev-parse --short HEAD)+local, -M vresearch" > $DIST/BUILD.txt
+echo "qemu-sptm $(git -C $SRC rev-parse --short HEAD)+local, -M vresearch (iOS 26) and -M virt (iOS 16)" > $DIST/BUILD.txt
 $DIST/qemu-system-aarch64.exe --version | head -1
 $DIST/qemu-system-aarch64.exe -M help | grep -E 'vresearch|darwin'

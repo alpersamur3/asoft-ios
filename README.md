@@ -150,11 +150,11 @@ QEMU on Windows ([below](#qemu)), the helper VM on Linux (`installer/helper/buil
 
 ### QEMU
 
-iOS 16 and iOS 26 run on one QEMU build: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/ios26),
-branch `ios26` (QEMU 11.1 with jprx's research-VM work and our iOS 26 machine), built by
-[`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots iOS 16 as before,
-`-M vresearch` boots iOS 26. Both installers take its release package
-([`ios26-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)), and both
+iOS 16 and iOS 26 run on one QEMU build: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft),
+branch `asoft` (`ios26` until 2026-11-01; QEMU 11.1 with jprx's research-VM work and our iOS 26
+machine), built by [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots
+iOS 16 as before, `-M vresearch` boots iOS 26. Both installers take its release package
+([`asoft-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)), and both
 launchers run it from `work\qemu`. The one-line install above still installs release 0.1.0, which
 carries the older QEMU 11.1.2 build; the next ASoftware release carries this one.
 
@@ -300,11 +300,11 @@ iOS hızlı açılışla saniyeler içinde açılır.
 
 ### QEMU
 
-iOS 16 ve iOS 26 aynı QEMU derlemesinde çalışır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/ios26)
-deposunun `ios26` dalı (jprx'in araştırma VM'i çalışması ve bizim iOS 26 makinemizle QEMU 11.1),
-[`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir. `-M virt` iOS 16'yı eskisi gibi,
-`-M vresearch` iOS 26'yı açar. İki kurulum da onun sürüm paketini alır
-([`ios26-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)), iki başlatıcı da
+iOS 16 ve iOS 26 aynı QEMU derlemesinde çalışır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft)
+deposunun `asoft` dalı (2026-11-01'e kadar `ios26`; jprx'in araştırma VM'i çalışması ve bizim iOS 26
+makinemizle QEMU 11.1), [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir.
+`-M virt` iOS 16'yı eskisi gibi, `-M vresearch` iOS 26'yı açar. İki kurulum da onun sürüm paketini alır
+([`asoft-9fa4e67`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)), iki başlatıcı da
 onu `work\qemu` içinden çalıştırır. Yukarıdaki tek satırlık kurulum hâlâ eski QEMU 11.1.2 derlemesini
 taşıyan 0.1.0 sürümünü kurar; bir sonraki ASoftware sürümü bunu taşıyacak. iOS 16 penceresinin QEMU 11.1.2 üzerindeki sekiz yaması (`qemu/patches/`, 0002-0009)
 artık bu dalda değiştirilmeden birer commit'tir (liste yukarıda, İngilizce bölümün *QEMU* başlığında).

@@ -225,7 +225,7 @@ $qargs = @(
     # idle-reports=off: iOS 26 gives the keyboard a 24 ms HID idle rate, so QEMU repeated the
     # unchanged report ~60x/s and iOS's HID driver spent ~168 s of CPU on it in the first 22 min
     # (notes/IOS26-BOOT-SERVICES.md). off stops the repeats. This is our own usb-kbd property
-    # (qemu-sptm ios26 4eee4e5 and later); an older QEMU rejects it ("not found") and will not boot.
+    # (qemu-sptm asoft 4eee4e5 and later); an older QEMU rejects it ("not found") and will not boot.
     '-device', 'usb-kbd,bus=xhci.0,port=1,id=ukbd,idle-reports=off',
     '-device', 'usb-touchscreen,bus=xhci.0,port=2,id=utouch',
     '-device', 'usb-consumer,bus=xhci.0,port=3,id=ucons'

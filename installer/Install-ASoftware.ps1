@@ -41,9 +41,9 @@ $ipswUrl = 'https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/115
 $ipswSha256 = 'ECE1194F7E233E9109C5790A8D23A4564A10A254E15EC5B09978A343265568FB'
 $ipswSize = 6171035648
 $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
-# Our QEMU as a release package, the one ios26/Install-iOS26.ps1 downloads: qemu-sptm's ios26
+# Our QEMU as a release package, the one ios26/Install-iOS26.ps1 downloads: qemu-sptm's asoft
 # branch (-M virt for iOS 16, -M vresearch for iOS 26) built by ios26/scripts/win-build.sh
-$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-9fa4e67/asoft-ios26-qemu-2026.11.01b.zip'; Sha256 = '39DA37FD900344A65E8CB3E8D68FC454ABBA7E94077CCD44777BD28B30B3298D' }
+$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-9fa4e67/asoft-qemu-2026.11.01b.zip'; Sha256 = '53DD9F2B95A3DA36B3F371E64591F84D7DC6E5FF54F28B6321FD48FB9E4963D9' }
 
 # Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
 # and after iOS's first start, the room the helper unpacks the IPSW into, the rest, and a saved
@@ -112,7 +112,7 @@ if (-not (Test-Path "$qemuDir\qemu-system-aarch64.exe")) {
         if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "$QemuDist has no qemu-system-aarch64.exe" }
         robocopy $QemuDist $qemuDir /E /XD backup-* v11.1.2-asoft /NFL /NDL /NJH /NJS /NP | Out-Null
     } else {
-        $zip = "$env:TEMP\asoft-ios26-qemu-$($QemuRelease.Version).zip"
+        $zip = "$env:TEMP\asoft-qemu-$($QemuRelease.Version).zip"
         Write-Host "Downloading our QEMU ($($QemuRelease.Url))"
         Invoke-Tool curl.exe -fL --retry 3 -o $zip $QemuRelease.Url
         if ($LASTEXITCODE) { throw "could not download $($QemuRelease.Url)" }

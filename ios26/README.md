@@ -117,7 +117,7 @@ Windows ── QEMU: jprx/qemu-sptm + our -M vresearch machine (TCG)
 
 | Part | Where | What we added |
 | --- | --- | --- |
-| QEMU | [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/ios26), branch `ios26` | The `vresearch` machine (boot, device tree, SMP, PVG display and GPU, SEP/keystore/ACM stand-ins, HFS+ data protection), a USB touchscreen and consumer keys, the Windows build, the ASoftware GTK window (iOS 16's too: the same build boots it with `-M virt`) |
+| QEMU | [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft), branch `asoft` | The `vresearch` machine (boot, device tree, SMP, PVG display and GPU, SEP/keystore/ACM stand-ins, HFS+ data protection), a USB touchscreen and consumer keys, the Windows build, the ASoftware GTK window (iOS 16's too: the same build boots it with `-M virt`) |
 | GPU, host side | [alpersamur3/reims-vgpu](https://github.com/alpersamur3/reims-vgpu/tree/windows), branch `windows` | A Windows OS layer: guest RAM as section views (`MapViewOfFile3` placeholders), IOSurface backing, read-only imports through a writable twin, the x86-64 build serving 16 KiB guest pages |
 | Metal → Vulkan | [alpersamur3/metal2vulkan](https://github.com/alpersamur3/metal2vulkan/tree/windows), branch `windows` | The `x86_64-pc-windows-gnu` build |
 | This folder | `ios26/` | The launcher and the scripts that build the disk, device tree, trust cache and ramdisk |
@@ -149,9 +149,9 @@ downloads anyway and adds the Metal compiler plugin cloudOS lacks, built by our 
 What it cannot do for you is **WSL itself**: installing it needs an administrator and a restart, so
 the installer prints the command and stops. Run it, restart, and run the installer again.
 
-QEMU comes prebuilt: the installer downloads `asoft-ios26-qemu-2026.11.01b.zip` (125 MB) from
-qemu-sptm's [`ios26-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)
-(qemu-sptm `ios26` 9fa4e67 with reims-vgpu `windows` 44a9dac6 and metal2vulkan `windows` e5b58af7,
+QEMU comes prebuilt: the installer downloads `asoft-qemu-2026.11.01b.zip` (125 MB) from
+qemu-sptm's [`asoft-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
+(qemu-sptm `asoft` 9fa4e67 with reims-vgpu `windows` 44a9dac6 and metal2vulkan `windows` e5b58af7,
 `qemu-img.exe` included; iOS 16's installer takes the same package), checks its SHA-256 and unpacks
 it into `<Work>\qemu`. `-QemuFrom source`
 builds it in MSYS2 instead (hours; MSYS2 is installed with winget if it is missing) and `-QemuFrom
@@ -190,10 +190,13 @@ is `-Work D:\ios26` for `Start-iOS26.ps1`. In MSYS the sources folder is a path 
 ### 1. QEMU and the GPU library (MSYS2 UCRT64, started from PowerShell)
 
 ```
-git clone -b ios26 https://github.com/alpersamur3/qemu-sptm %ASOFT26_SRC%\qemu-sptm
+git clone -b asoft https://github.com/alpersamur3/qemu-sptm %ASOFT26_SRC%\qemu-sptm
 git clone -b windows https://github.com/alpersamur3/reims-vgpu %ASOFT26_SRC%\reims-vgpu
 git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\metal2vulkan-win
 ```
+
+qemu-sptm's branch was `ios26` until 2026-11-01: in an older clone, `git fetch -p`, `git branch -m
+ios26 asoft` and `git branch -u origin/asoft` (in `%ASOFT26_SRC%\qemu-sptm`) move it over.
 
 1. `win-nettle.sh`: a static nettle 3.10.1 (put GNU's `nettle-3.10.1.tar.gz` in `deps\dl` first).
 2. `ucrt.ps1 ios26\scripts\reims-build.sh`: reims-vgpu → `reims-dist`.
@@ -372,19 +375,19 @@ step rebuilds its layer from scratch; your own overlays on a rebuilt disk (`root
 `-apps` overlays of `.ipa` installs) can no longer boot and are kept as `.old`. The encrypted and
 decrypted Apple images and the intermediate disk are removed once used (`-KeepBuildFiles` keeps them).
 
-The release package `-QemuFrom auto` downloads is `asoft-ios26-qemu-2026.11.01b.zip` of qemu-sptm's
-[`ios26-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67) (125 MB,
+The release package `-QemuFrom auto` downloads is `asoft-qemu-2026.11.01b.zip` of qemu-sptm's
+[`asoft-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67) (125 MB,
 531 MB unpacked; `$QemuRelease` in `Install-iOS26.ps1` has its URL and SHA-256): `win-build.sh`'s
 `dist` without its `backup-*` folders,
 that is `qemu-system-aarch64.exe` and the windowless `qemu-system-aarch64w.exe` 11.1.0 (qemu-sptm
-`ios26` **9fa4e67**, `-M vresearch` for iOS 26 and `-M virt` for iOS 16, built with reims-vgpu
+`asoft` **9fa4e67**, `-M vresearch` for iOS 26 and `-M virt` for iOS 16, built with reims-vgpu
 `windows` **44a9dac6** and metal2vulkan `windows` **e5b58af7**), `qemu-img.exe` from the same build
 (the launcher's overlays, quick boot's saved states), the ANGLE, GTK and GLib runtime they load (DLLs, `lib\`, `share\`, from MSYS2 UCRT64)
 and `BUILD.txt`. For a new build, `installer\Make-QemuPackage.ps1 -Dist <win-build.sh's dist>
 -Version 2026.11.01b -Url https://...` makes the zip and prints the `$QemuRelease` line with its
-SHA-256; put that line into `Install-iOS26.ps1`.
+SHA-256; put that line into `Install-iOS26.ps1` and `installer\Install-ASoftware.ps1`.
 
-The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
+The published launcher needs a recent build: qemu-sptm `asoft` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
 **65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
 **52f3606**, reims-vgpu **44a9dac6** and metal2vulkan `windows` **e5b58af7** or later, built together
@@ -529,8 +532,8 @@ QEMU, Apple'ın iki IPSW'sinden yalnız gereken dosyalar (yaklaşık 10,5 GB), d
 `install\` altında iz bırakır; durdurup yeniden çalıştırınca kaldığı yerden devam eder (`-List`,
 `-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`; ayrıntı yukarıda).
 QEMU hazır gelir: kurucu qemu-sptm'nin
-[`ios26-9fa4e67` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-9fa4e67)
-`asoft-ios26-qemu-2026.11.01b.zip`'i (125 MB; qemu-sptm `ios26` 9fa4e67, reims-vgpu `windows` 44a9dac6,
+[`asoft-9fa4e67` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
+`asoft-qemu-2026.11.01b.zip`'i (125 MB; qemu-sptm `asoft` 9fa4e67, reims-vgpu `windows` 44a9dac6,
 metal2vulkan `windows` e5b58af7, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
 açar (aynı derleme iOS 16'yı `-M virt` ile açar, iOS 16 kurucusu da bu paketi alır); `-QemuFrom
 source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda

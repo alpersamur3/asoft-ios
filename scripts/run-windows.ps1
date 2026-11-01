@@ -9,7 +9,7 @@ param(
     # 4, not 8: each broadcast TLB flush stops every vCPU, and with 8 the boot was slower
     # (bench 2026-10-21: lock screen 100-118 s with 4 vs 128-164 s with 8)
     [int]$Cpus = 4,
-    # Our QEMU build, the one iOS 26 runs on too (qemu-sptm's ios26 branch, README.md "QEMU"): the
+    # Our QEMU build, the one iOS 26 runs on too (qemu-sptm's asoft branch, README.md "QEMU"): the
     # GTK console refreshes at most every 30 ms (the stock one redrew at the monitor's 144 Hz with
     # the BQL held), and with window-close=off closing the window powers iOS down (0003). An older
     # install's QEMU 11.1.2 (work\qemu\v11.1.2-asoft) when there is no newer one; the installed QEMU

@@ -9,12 +9,12 @@ without which iOS takes the device for one with a home button (qemu-sptm
 
     dt-root26smp.py RAW_ADT OUT [--cpus N]     (default N=2)
 
-vresearch_dt_fixup comes from the qemu-sptm checkout (branch ios26): set QEMU_SPTM to it.
+vresearch_dt_fixup comes from the qemu-sptm checkout (branch asoft): set QEMU_SPTM to it.
 """
 import os, sys
 
 if not os.environ.get('QEMU_SPTM'):
-    sys.exit('set QEMU_SPTM to the qemu-sptm checkout (branch ios26)')
+    sys.exit('set QEMU_SPTM to the qemu-sptm checkout (branch asoft)')
 sys.path.insert(0, os.path.join(os.environ['QEMU_SPTM'], 'scripts', 'darwin'))
 import vresearch_dt_fixup as dt
 

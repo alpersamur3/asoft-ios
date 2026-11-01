@@ -64,14 +64,14 @@ $repo = Split-Path $here
 
 # --- What it downloads, pinned (one place) -------------------------------------------------------
 # Our QEMU for Windows as a release package: win-build.sh's dist (qemu-system-aarch64.exe and the
-# windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.01 is
-# qemu-sptm ios26 ad92276 (-M vresearch) with reims-vgpu windows ae389a2c and metal2vulkan windows
-# fbb1ae35. For a new build, installer\Make-QemuPackage.ps1 prints this line.
-$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-9fa4e67/asoft-ios26-qemu-2026.11.01b.zip'; Sha256 = '39DA37FD900344A65E8CB3E8D68FC454ABBA7E94077CCD44777BD28B30B3298D' }
+# windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.01b is
+# qemu-sptm asoft 9fa4e67 (-M vresearch, and -M virt for iOS 16) with reims-vgpu windows 44a9dac6
+# and metal2vulkan windows e5b58af7. For a new build, installer\Make-QemuPackage.ps1 prints this line.
+$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-9fa4e67/asoft-qemu-2026.11.01b.zip'; Sha256 = '53DD9F2B95A3DA36B3F371E64591F84D7DC6E5FF54F28B6321FD48FB9E4963D9' }
 # -QemuFrom source: the checkouts README.md step 1 clones, and the oldest commit of each the
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
-    @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'ios26'; Min = 'ad92276' }
+    @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'asoft'; Min = 'ad92276' }
     @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = '44a9dac6' }
     @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = 'e5b58af7' }
 )
@@ -88,7 +88,7 @@ $Pin = @{
     # darwin-vm's prebuilt iOS sysroot (bash, coreutils): the shell ramdisk and the root
     Sysroot = @('https://raw.githubusercontent.com/jprx/darwin-vm/edfc19433da8d04d5927a7b1932acce4034f307c/sysroot/ios_sysroot.tar.gz',
                 'EE27653106055A6046428465D1CF68F5DFDC1BE5E9B6FFDF402BDD0B6034A8DC')
-    # vresearch_dt_fixup.py of qemu-sptm ios26 52f3606, which dt-root26smp.py builds the device tree with
+    # vresearch_dt_fixup.py of qemu-sptm asoft 52f3606, which dt-root26smp.py builds the device tree with
     DtFixup = @('https://raw.githubusercontent.com/alpersamur3/qemu-sptm/52f360682d261c03b3db94ced1ce1c8303a96478/scripts/darwin/vresearch_dt_fixup.py',
                 '6DE7F5834430322DCBC0D7C09D99AE9B9D7E0A1E1F9C307CC3FF302FCCE5E608')
     # GNU nettle for win-nettle.sh (-QemuFrom source)
@@ -765,7 +765,7 @@ function Do-Qemu {
     if ($mode -ceq 'release') {
         if (-not $QemuRelease.Url) { Fail 'no release package is set in Install-iOS26.ps1 ($QemuRelease): use -QemuFrom source or FOLDER' }
         Say "release package $($QemuRelease.Version): $($QemuRelease.Url)" DarkGray
-        $zip = In-Work "downloads\asoft-ios26-qemu-$($QemuRelease.Version).zip"
+        $zip = In-Work "downloads\asoft-qemu-$($QemuRelease.Version).zip"
         try {
             Get-File $QemuRelease.Url $zip $QemuRelease.Sha256
         } catch {
@@ -937,7 +937,7 @@ bash $S/unwrap-fw.sh
 }
 
 function Do-DeviceTree {
-    # vresearch_dt_fixup.py, pinned (qemu-sptm ios26 52f3606: it fills the product's syscfg keys)
+    # vresearch_dt_fixup.py, pinned (qemu-sptm asoft 52f3606: it fills the product's syscfg keys)
     $qs = In-Work 'tools\qemu-sptm'
     Get-File $Pin.DtFixup[0] (Join-Path $qs 'scripts\darwin\vresearch_dt_fixup.py') $Pin.DtFixup[1]
     Show-Cmd "QEMU_SPTM=$qs"
