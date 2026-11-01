@@ -1,0 +1,79 @@
+diff --git a/VPhoneGuestComponents/GraphicLoader/main.mm b/VPhoneGuestComponents/GraphicLoader/main.mm
+--- a/VPhoneGuestComponents/GraphicLoader/main.mm
++++ b/VPhoneGuestComponents/GraphicLoader/main.mm
+@@ -40,7 +40,7 @@ extern "C" {
+     MTLGPUCompilerRef MTLGPUCompilerCreate(int version);
+     void MTLGPUCompilerDestroy(MTLGPUCompilerRef compiler);
+     int MTLDowngradeAIRModule(LLVMModuleRef module, const char *targetTriple, int flags);
+-    MTLMetalLibRef MTLMetalLibCreateExecutableWithTriple(LLVMModuleRef sharedModule, const char *entryPointData);
++    MTLMetalLibRef MTLMetalLibCreateExecutableWithTriple(const char *targetTriple);
+     MTLMetalFunctionRef MTLMetalFunctionCreate(LLVMModuleRef sharedModule, const char *entryName);
+     void MTLMetalLibInsertFunction(MTLMetalLibRef lib, MTLMetalFunctionRef func);
+     LLVMMemoryBufferRef MTLWriteMetalLibToMemoryBuffer(MTLMetalLibRef lib);
+@@ -122,9 +122,10 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+     // Downgrade the AIR module for this target
+     int result = MTLDowngradeAIRModule(module, _targetTriple, 0);
+     if (!result) {
+-        // Downgrade returned 0 = success with nothing to do
++        // Downgrade returned 0: no code to give, so report it (true) without a message, as the
++        // shipped plugin does; returning success here left outCode unset
+         *outError = nullptr;
+-        return false; // success (no error)
++        return true;
+     }
+ 
+     if (!_gpuCompiler) {
+@@ -156,13 +157,22 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+         }
+     }
+ 
+-    // Get the target triple from the module
++    // Create a metallib executable for the module's target triple. Its one argument is that
++    // triple (the shipped plugin passes LLVMGetTarget's result); given the shared module instead,
++    // the library header gets a triple read from the module object and hosts that check it
++    // refuse the library ("Invalid library file").
+     const char *triple = LLVMGetTarget(module);
++    MTLMetalLibRef metalLib = MTLMetalLibCreateExecutableWithTriple(triple);
+ 
+-    // Create a metallib executable
+     LLVMModuleRef sharedModule = LLVMExtraMakeSharedModule(module);
+ 
+-    // Build the entry point name string (may need null-termination)
++    if (!metalLib) {
++        LLVMExtraDisposeSharedModule(sharedModule);
++        *outError = "failed to create metallib";
++        return true;
++    }
++
++    // The entry point name, NUL-terminated ("" without one)
+     char *entryNameStr = nullptr;
+     if (entryName && entryNameLen > 0) {
+         entryNameStr = (char *)malloc(entryNameLen + 1);
+@@ -170,22 +180,14 @@ bool AppleParavirtCompiler::buildRequestWithOptions(
+         entryNameStr[entryNameLen] = '\0';
+     }
+ 
+-    // Create metallib with triple
+-    MTLMetalLibRef metalLib = MTLMetalLibCreateExecutableWithTriple(sharedModule,
+-                                                                     entryNameStr ? entryNameStr : "");
+-
+-    if (entryNameStr) {
+-        free(entryNameStr);
+-    }
+-
+-    if (!metalLib) {
++    // Create and insert function
++    MTLMetalFunctionRef func = MTLMetalFunctionCreate(sharedModule, entryNameStr ? entryNameStr : "");
++    free(entryNameStr);
++    if (!func) {
+         LLVMExtraDisposeSharedModule(sharedModule);
+-        *outError = "failed to create metallib";
++        *outError = "failed to create function";
+         return true;
+     }
+-
+-    // Create and insert function
+-    MTLMetalFunctionRef func = MTLMetalFunctionCreate(sharedModule, entryName);
+     MTLMetalLibInsertFunction(metalLib, func);
+ 
+     // Write to memory buffer

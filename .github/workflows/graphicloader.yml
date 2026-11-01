@@ -7,9 +7,14 @@ name: graphicloader
 # reimplementation), built here with vphone-cli's own make target: arm64e, iOS 26.1 and later,
 # ad-hoc signed. The installer puts its CDHash in the trust cache.
 #
-# The artifact holds the dylib, vphone-cli's LICENSE and GraphicLoader README, and BUILD.txt. The
-# installer downloads the dylib from a release of this repository ($GpuPlugin in
-# Install-iOS26.ps1 pins its URL and SHA-256), made by hand from an artifact:
+# Before the build, ios26/graphicloader/main.mm.patch fixes main.mm's call of
+# MTLMetalLibCreateExecutableWithTriple: it takes the module's target triple, as the shipped
+# plugin passes it, not the shared module. Unpatched, the guest's libraries carry a garbage triple
+# and reims refuses them ("Invalid library file"), then aborts at a pipeline with no vertex function.
+#
+# The artifact holds the dylib, vphone-cli's LICENSE and GraphicLoader README, the patch, and
+# BUILD.txt. The installer downloads the dylib from a release of this repository
+# ($GpuPluginRelease in Install-iOS26.ps1 pins its URL and SHA-256), made by hand from an artifact:
 #   gh release create graphicloader-<commit> --latest=false <the artifact's files>
 on:
   workflow_dispatch:
@@ -21,6 +26,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/graphicloader.yml"
+      - "ios26/graphicloader/**"
 
 env:
   VPHONE_CLI: ${{ inputs.vphone_cli || '57bbc93c5a3498919f2cea0ed0be60d83e28055b' }}
@@ -42,6 +48,14 @@ jobs:
             VPhoneGuestComponents
             LICENSE
 
+      - uses: actions/checkout@v4
+        with:
+          path: asoft
+          sparse-checkout: ios26/graphicloader
+
+      - name: Patch
+        run: git -C vphone-cli apply -v ../asoft/ios26/graphicloader/main.mm.patch
+
       - name: Build
         run: |
           set -euo pipefail
@@ -61,9 +75,11 @@ jobs:
           cp "$D" out/
           cp vphone-cli/LICENSE out/GraphicLoader-LICENSE.txt
           cp vphone-cli/VPhoneGuestComponents/GraphicLoader/README.md out/GraphicLoader-README.md
+          cp asoft/ios26/graphicloader/main.mm.patch out/GraphicLoader-main.mm.patch
           {
             echo "libAppleParavirtCompilerPluginIOGPUFamily.dylib"
             echo "source: https://github.com/Lakr233/vphone-cli/tree/$VPHONE_CLI/VPhoneGuestComponents/GraphicLoader"
+            echo "patch: ios26/graphicloader/main.mm.patch $(shasum -a 256 out/GraphicLoader-main.mm.patch | cut -c1-64) (GraphicLoader-main.mm.patch)"
             echo "build: make -C VPhoneGuestComponents gpu"
             echo "workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID ($GITHUB_SHA)"
             echo "runner: $ImageOS $ImageVersion"
