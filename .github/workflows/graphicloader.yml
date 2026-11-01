@@ -1,0 +1,81 @@
+name: graphicloader
+
+# The iOS 26 guest's Metal compiler plugin, libAppleParavirtCompilerPluginIOGPUFamily.dylib, for
+# ios26/Install-iOS26.ps1's GPU layer. cloudOS has Apple's GPU driver bundle but not this plugin,
+# and without it backboardd crashes and the guest restarts into recovery. It is not Apple's:
+# vphone-cli's GraphicLoader (Lakr233/vphone-cli, MIT; main.mm is 0xjohnnydev's clean-room
+# reimplementation), built here with vphone-cli's own make target: arm64e, iOS 26.1 and later,
+# ad-hoc signed. The installer puts its CDHash in the trust cache.
+#
+# The artifact holds the dylib, vphone-cli's LICENSE and GraphicLoader README, and BUILD.txt. The
+# installer downloads the dylib from a release of this repository ($GpuPlugin in
+# Install-iOS26.ps1 pins its URL and SHA-256), made by hand from an artifact:
+#   gh release create graphicloader-<commit> --latest=false <the artifact's files>
+on:
+  workflow_dispatch:
+    inputs:
+      vphone_cli:
+        description: vphone-cli commit to build
+        default: 57bbc93c5a3498919f2cea0ed0be60d83e28055b
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/graphicloader.yml"
+
+env:
+  VPHONE_CLI: ${{ inputs.vphone_cli || '57bbc93c5a3498919f2cea0ed0be60d83e28055b' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Lakr233/vphone-cli
+          ref: ${{ env.VPHONE_CLI }}
+          path: vphone-cli
+          sparse-checkout: |
+            VPhoneGuestComponents
+            LICENSE
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          make -C vphone-cli/VPhoneGuestComponents gpu
+
+      - name: Check and package
+        run: |
+          set -euo pipefail
+          D=vphone-cli/.build/siblings/stage/gpu/libAppleParavirtCompilerPluginIOGPUFamily.dylib
+          lipo -archs "$D" | grep -qx arm64e
+          otool -l "$D" | grep -A4 LC_BUILD_VERSION
+          otool -D "$D"
+          codesign -dvvv "$D" 2>&1 | grep -E '^(Identifier|Format|CodeDirectory|CDHash|Signature)'
+          mkdir out
+          cp "$D" out/
+          cp vphone-cli/LICENSE out/GraphicLoader-LICENSE.txt
+          cp vphone-cli/VPhoneGuestComponents/GraphicLoader/README.md out/GraphicLoader-README.md
+          {
+            echo "libAppleParavirtCompilerPluginIOGPUFamily.dylib"
+            echo "source: https://github.com/Lakr233/vphone-cli/tree/$VPHONE_CLI/VPhoneGuestComponents/GraphicLoader"
+            echo "build: make -C VPhoneGuestComponents gpu"
+            echo "workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID ($GITHUB_SHA)"
+            echo "runner: $ImageOS $ImageVersion"
+            xcodebuild -version | tr '\n' ' '; echo
+            echo "iphoneos SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+            codesign -dvvv "$D" 2>&1 | grep '^CDHash='
+            shasum -a 256 "$D" | sed 's|  .*/| |'
+            echo "bytes $(stat -f %z "$D")"
+          } > out/BUILD.txt
+          cat out/BUILD.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: graphicloader
+          path: out/
