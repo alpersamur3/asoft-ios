@@ -45,8 +45,11 @@ same GPU stack on Linux; this is the Windows host.
 <img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen with iOS 17's Collections wallpaper"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
 
 A saved state, and quick boot's, is about 3.7 GB on the disk iOS runs on: leave that much free. A
-throwaway run loses them at exit. After a quick boot iOS's clock goes on from where it was saved, not
-from the time now: the time away is missing until iOS boots again.
+throwaway run loses them at exit. After a quick boot or a loaded state iOS's clock moves on by the
+time away (qemu-sptm **ad92276** or later: XNU reads the hardware clock only at boot, so QEMU moves the
+guest's counter on when it loads a state; a disk quick-booted on an older build keeps the time it
+already lost until one `-NoQuickBoot` boot). While it runs, the guest's clock gains about a minute an
+hour (the counter's 41 ns tick at 24 MHz).
 
 Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
 shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
@@ -361,7 +364,8 @@ rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `w
 **65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
 **52f3606**, reims-vgpu **e919fd74** and metal2vulkan `windows` **50086fc0** or later, built together
 (an older QEMU keeps the buttons off, and an older metal2vulkan ends the emulator some seconds after
-Home and a page swipe). Rebuild QEMU (step 1) if yours is older.
+Home and a page swipe); the clock catching up after a load needs qemu-sptm **ad92276**. Rebuild QEMU
+(step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
@@ -449,7 +453,10 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 **Kayıtlı durumlar ve hızlı açılış:** yan çubuğun *Save state* ve *Saved states…* düğmeleri çalışıyor.
 Değişikliklerini tutan bir diskte pencereyi kapatmak iOS'u olduğu gibi kaydeder, sonraki açılış oradan
 devam eder, ekran yaklaşık 8 sn'de gelir (`-NoQuickBoot` ya da menüde `[B]` her seferinde baştan açar).
-Her kayıt, iOS'un çalıştığı diskte yaklaşık 3,7 GB tutar; geçici koşuda çıkışta kaybolur.
+Her kayıt, iOS'un çalıştığı diskte yaklaşık 3,7 GB tutar; geçici koşuda çıkışta kaybolur. Yüklemeden
+sonra iOS'un saati aradaki süre kadar ileri gider (qemu-sptm ad92276 ve sonrası; eski yapıyla hızlı
+açılmış bir disk kaybettiği süreyi bir `-NoQuickBoot` açılışına kadar geride tutar). Çalışırken misafir
+saati saatte yaklaşık 1 dk ileri gider.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
