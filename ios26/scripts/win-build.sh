@@ -36,10 +36,19 @@ if [ ! -f build.ninja ]; then
 fi
 # qemu-system-aarch64w.exe: the same without a console window, for the GTK window
 ninja -j$J qemu-system-aarch64.exe qemu-system-aarch64w.exe 2>&1 | grep -E 'error|FAILED|warning: implicit|Linking target' | tail -20
+# qemu-img: the launcher's overlays and quick boot's saved states (snapshot -l/-d) use it. Not
+# needed to run iOS, so a tree that cannot build it still gives the emulator.
+ninja -j$J qemu-img.exe 2>&1 | grep -E 'error|FAILED' | tail -5 || true
 rm -rf $DIST && mkdir -p $DIST
 cp qemu-system-aarch64.exe qemu-system-aarch64w.exe $DIST/
 # ANGLE: libepoxy loads it at run time for gl=on, so no import table names it
 todo="$DIST/qemu-system-aarch64.exe"
+if [ -f qemu-img.exe ]; then
+	cp qemu-img.exe $DIST/
+	todo="$todo $DIST/qemu-img.exe"
+else
+	echo "warning: no qemu-img.exe (Start-iOS26.ps1 then needs one in C:\Program Files\qemu for quick boot)"
+fi
 for dll in $(pacman -Ql mingw-w64-ucrt-x86_64-angleproject | awk '/\/bin\/.*\.dll$/ {print $2}'); do
 	cp "$dll" $DIST/
 	todo="$todo $DIST/$(basename "$dll")"

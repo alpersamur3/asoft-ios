@@ -1,11 +1,12 @@
 """Download one member of a remote zip (IPSW) with parallel HTTP range requests,
-resumable, and check its CRC-32. Only stored (uncompressed) members, which the
-disk images are.
+resumable, and check its CRC-32. Stored (uncompressed) members, which the disk
+images are, and deflated ones up to 256 MB (in one request).
 
     ipsw-get.py URL MEMBER OUTFILE [CONNECTIONS]
 
 Chunks land at their own offsets in OUTFILE; OUTFILE.done lists finished chunks,
-so a rerun only fetches what is missing.
+so a rerun only fetches what is missing. URL may also be the path of an IPSW
+already on this PC: the member is then read from it the same way.
 """
 import concurrent.futures, http.client, os, struct, sys, threading, time, urllib.request, zlib
 
@@ -14,14 +15,24 @@ conns = int(sys.argv[4]) if len(sys.argv) > 4 else 8
 CHUNK = 32 << 20
 
 
+LOCAL = os.path.isfile(url)
+
+
 def get(start, end):
+    if LOCAL:
+        with open(url, 'rb') as f:
+            f.seek(start)
+            return f.read(end - start + 1)
     r = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}'})
     with urllib.request.urlopen(r, timeout=120) as resp:
         return resp.read()
 
 
 def central_directory():
-    size = int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD'), timeout=60).headers['Content-Length'])
+    if LOCAL:
+        size = os.path.getsize(url)
+    else:
+        size = int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD'), timeout=60).headers['Content-Length'])
     tail = get(size - 65536 - 22, size - 1)
     i = tail.rfind(b'PK\x06\x06')
     if i >= 0:
@@ -126,6 +137,7 @@ with open(out, 'rb') as f:
             break
         c = zlib.crc32(b, c)
 print(f'crc {c:08x} expected {crc:08x}: {"OK" if c == crc else "MISMATCH"}')
-if c == crc:
+# done: the chunk list goes (a mismatch: every chunk again on the next run)
+if os.path.exists(done_path):
     os.remove(done_path)
 sys.exit(0 if c == crc else 1)

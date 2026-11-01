@@ -9,7 +9,7 @@
 #   root.tc                        the trust cache for the root disk
 #   rd-shell.hfs                   the shell ramdisk
 #   root.qcow2                     the iOS 26 disk (iOS 26's own wallpaper)
-#   root-collections.qcow2/.tc     optional: the Collections wallpaper disk (README.md, step 3.6)
+#   root-collections.qcow2/.tc     optional: the Collections wallpaper disk (README.md, step 5.3.6)
 #   qemu\                          qemu-sptm built for Windows, with reims-vgpu's DLLs
 # Outputs (serial, logs) go to <Work>\runs\<Name>. QMP 127.0.0.1:4453 and HMP 4452 stay open
 # for tools; the guest's serial console is on 127.0.0.1:4451.
@@ -26,7 +26,7 @@ param(
     # The base disk and its trust cache. -Wallpaper ios26 (default): root.qcow2, iOS 26's own
     # wallpaper (MercuryPoster, drawn by the guest's Metal on the host GPU; needs metal2vulkan's
     # `windows` branch at 56705098 or later). -Wallpaper collections: root-collections.qcow2, the
-    # iOS 17 Collections wallpaper of build step 3.6, lighter on the guest's CPU. -Disk/-Tc name
+    # iOS 17 Collections wallpaper of build step 5.3.6, lighter on the guest's CPU. -Disk/-Tc name
     # another pair.
     [ValidateSet('ios26', 'collections')][string]$Wallpaper = 'ios26',
     [string]$Disk = '',

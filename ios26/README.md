@@ -20,8 +20,9 @@ Windows. [vphone-linux](https://github.com/YahiaAngelo/vphone-linux) runs the sa
 same GPU stack on Linux; this is the Windows host.
 
 > [!WARNING]
-> A research preview, not a product: there is no installer, and building the inputs takes the
-> steps below, WSL and several hours. Apple's security model is mostly switched off. Not
+> A research preview, not a product. `Install-iOS26.cmd` runs the build below for you, but it
+> takes WSL, about 60 GB and several hours, it cannot get you the guest's GPU driver, and until we
+> publish a QEMU package it builds QEMU too. Apple's security model is mostly switched off. Not
 > affiliated with Apple. No Apple software is in this repository or in our forks: you build
 > everything from your own downloads from Apple, and the guest's GPU driver you extract yourself.
 
@@ -38,7 +39,7 @@ same GPU stack on Linux; this is the Windows host.
 | **Quick boot** | On a disk that keeps its changes: closing the window saves iOS as it is, and the next start goes on from there, its screen in about 8 s. `-NoQuickBoot`, or `[B]` in the menu, boots iOS every time |
 | **Saved states** | The side bar's *Save state* and *Saved states…* |
 | **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 (checked with `ifconfig`; nothing beyond that tested) |
-| **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 3.6) |
+| **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 5.3.6) |
 | **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 2 minutes after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
 
 <img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen with iOS 17's Collections wallpaper"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
@@ -117,27 +118,61 @@ Windows ── QEMU: jprx/qemu-sptm + our -M vresearch machine (TCG)
 ## Build
 
 > [!IMPORTANT]
-> Written down from the runs that built our disk. Not yet repeated end to end on a second PC, and
-> the steps marked *by hand* have no script yet. Read each script before you run it.
+> Written down from the runs that built our disk; `Install-iOS26.cmd` runs the steps in this
+> order. Neither has been repeated end to end on a second PC yet: the installer's own tests were dry
+> runs and its cheap steps, not a full build. Read each script before you run it.
+
+```
+ios26\Install-iOS26.cmd
+ios26\Install-iOS26.cmd -Work D:\ios26
+```
+
+The installer takes a fresh Windows PC to a disk iOS 26 boots from. It prints the step it runs and
+each step leaves a marker in `<work folder>\install`, so you can stop it and run it again: it goes
+on where it stopped, the downloads too. A failed step says which README step it was and where its
+log is; fix the cause and run it again. It never rebuilds disks it did not make: a folder that has
+disks but no `install` folder is refused (`-List`, `-Check` and `-DryRun` still work there), and a
+disk you put into its own folder stops the step that would rebuild it until `-From` or `-Only` names
+that step. What it cannot do for you:
+
+- **The guest's GPU driver** is Apple's ([below](#the-guests-gpu-driver)). Without it iOS runs
+  GPU-less. Give it later with the menu's **[G]** and run the installer again: it redoes only the
+  GPU layer and the wallpaper.
+- **QEMU.** Our QEMU has no release package yet, so the installer builds it in MSYS2 (`-QemuFrom
+  source`, hours; MSYS2 is installed with winget if it is missing) or takes a build you have
+  (`-QemuFrom D:\path\to\dist`, `win-build.sh`'s `dist`).
+- **WSL itself.** Installing it needs an administrator and a restart: the installer prints the
+  command and stops. Run it, restart, and run the installer again.
 
 ### You need
 
-- Windows 10/11 x64, 8 or more cores, 16 GB RAM (the guest gets 4 GB), about 60 GB free
+- Windows 10 2004 or later, or Windows 11, x64; 8 or more cores, 16 GB RAM (the guest gets 4 GB)
+- About 60 GB free on the work folder's drive (the build peaks at about 55 GB and keeps about 30)
+  and about 5 GB on WSL's drive for the `hfsplus` module
 - A Vulkan GPU whose driver has `VK_EXT_external_memory_host` (tested: NVIDIA RTX 4080 Laptop)
+
+The installer gets the rest. By hand, you also need:
+
 - MSYS2 with the UCRT64 toolchain: QEMU's build dependencies (as for [`qemu/build-windows.sh`](../qemu/build-windows.sh)),
   plus GTK 3, ANGLE (`mingw-w64-ucrt-x86_64-angleproject`) and Rust (`mingw-w64-ucrt-x86_64-rust`)
-- WSL 2 (Ubuntu), as root: [ipsw](https://github.com/blacktop/ipsw), `qemu-utils`, `hfsprogs`, `gdisk`,
+- WSL 2 (Ubuntu 24.04), as root: [ipsw](https://github.com/blacktop/ipsw), `qemu-utils`, `hfsprogs`, `gdisk`,
   [apfs-fuse](https://github.com/sgan81/apfs-fuse), `python3`, `rsync`, and an `hfsplus` kernel module
-  for WSL's kernel, which has none (`HFSPLUS_KO=path/to/hfsplus.ko`)
+  for WSL's kernel, which has none (`HFSPLUS_KO=path/to/hfsplus.ko`). `installer/wsl-setup.sh install`
+  sets all of this up, `wsl-setup.sh check` lists what is missing
 - `sysroot/ios_sysroot.tar.gz` from [jprx/darwin-vm](https://github.com/jprx/darwin-vm): bash and
   coreutils for the shell ramdisk and the root
 
-Two folders, set as environment variables:
-- `ASOFT26_SRC`: sources and builds, an MSYS path such as `/c/asoft26-src`.
-- `ASOFT26`: Apple's files, the disks and the runs. WSL sees it as, say, `/mnt/d/ios26`, and it is
-  `-Work D:\ios26` for `Start-iOS26.ps1`.
+Folders (the installer saves them in the menu's config, below):
 
-`ASOFT26_LINUX` (default `/root/ios26`) is scratch space inside WSL.
+| Folder | Variable | Holds | Default | Installer option |
+|---|---|---|---|---|
+| Work folder | `ASOFT26` | Apple's files, the disks and the runs | `ios26` on the fixed drive with the most room | `-Work D:\ios26` |
+| Sources | `ASOFT26_SRC` | sources and the QEMU build | `asoft26-src` on the work folder's drive | `-Src` |
+| WSL scratch | `ASOFT26_LINUX` | scratch space inside WSL | `/root/ios26` | `-LinuxDir` |
+
+The work folder is a drive-letter path without spaces; WSL sees it as, say, `/mnt/d/ios26`, and it
+is `-Work D:\ios26` for `Start-iOS26.ps1`. In MSYS the sources folder is a path such as
+`/c/asoft26-src`. The WSL distro is `ios-emu` (`-Distro`); the installer makes it if it is missing.
 
 ### 1. QEMU and the GPU library (MSYS2 UCRT64, started from PowerShell)
 
@@ -155,9 +190,9 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
 
 - **cloudOS 26.4b (23E5207q)**, the IPSW of Apple's Private Cloud Compute research VM (vphone600):
   extract it into `$ASOFT26/cloudos`. Used, none of them encrypted:
-  - `kernelcache.research.vphone600`
+  - `kernelcache.research.vphone600` (and `kernelcache.release.vphone600`: `kdec.sh` decompresses both)
   - `Firmware/sptm.vresearch1.release.im4p`, `Firmware/txm.iphoneos.research.im4p`
-  - `all_flash/DeviceTree.vphone600ap.im4p`
+  - `Firmware/all_flash/DeviceTree.vphone600ap.im4p`
   - the ramdisk `094-39914-031.dmg` and its trust cache
 - **iPhone17,3 iOS 26.6.2 (23G90)**: `ipsw-get.py URL MEMBER OUT` fetches single members of the IPSW
   into `$ASOFT26/iphone`:
@@ -170,7 +205,7 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
 
 ### 3. Firmware, device tree and ramdisk (WSL)
 
-1. *By hand*, in `$ASOFT26`: `ipsw img4 im4p extract cloudos/all_flash/DeviceTree.vphone600ap.im4p -o cloud/vphone600ap.adt`
+1. *By hand*, in `$ASOFT26`: `ipsw img4 im4p extract cloudos/Firmware/all_flash/DeviceTree.vphone600ap.im4p -o cloud/vphone600ap.adt`
 2. `kdec.sh`, then `unwrap-fw.sh` → `fw/bootkc`, `fw/sptm`, `fw/txm`, `fw/dtree.orig`
 3. `QEMU_SPTM=<qemu-sptm checkout> python3 dt-root26smp.py fw/dtree.orig dtree-smp4 --cpus 4`
    (`dtree-smp8 --cpus 8` too, if you like: we have not booted 8 yet). With qemu-sptm 5eba0a3 or
@@ -185,8 +220,9 @@ git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\m
 
 ### 4. The root disk (WSL, as root)
 
-1. `DROP_SYSOS=1 mk-root26.sh` → `root26.qcow2` and `root26.qcow2.hashes`. If its sysroot step
-   stops on `cp -a`'s ACLs, `m2-finish.sh` completes it and applies `root26-tweaks.py`.
+1. `DROP_SYSOS=1 mk-root26.sh` → `root26.qcow2` and `root26.qcow2.hashes`, then `m2-finish.sh`: it
+   completes the sysroot step if that stopped on `cp -a`'s ACLs, and applies `root26-tweaks.py` (the
+   console's root shell among them, which steps 4.5 and 5 use).
 2. `mktc.py -2 root.tc iphone/*.trustcache root26.qcow2.hashes`: the trust cache.
 3. `mk-root26g.sh root26.qcow2 root26g.qcow2`: the partitioned disk (system and a 16 GB Data volume).
 4. Through `root26-do.sh root26g.qcow2 'python3 SCRIPT $R ...'`, in this order:
@@ -272,7 +308,7 @@ other options, is dropped and iOS boots). `-NoQuickBoot` boots every time, and a
 the state. Two launchers on one disk refuse to start. `-Net` adds a
 virtio-net NIC on QEMU's user-mode network (see *What works*).
 
-### Start menu and setup (Start-iOS26.cmd, Install-iOS26.ps1)
+### Start menu and installer (Start-iOS26.cmd, Install-iOS26.cmd)
 
 As the iOS 16 launcher does, `Start-iOS26.cmd` offers the start options every time and remembers
 your setup. The menu's choices (work folder, wallpaper, disk mode, network, vCPUs) are saved in
@@ -280,16 +316,45 @@ your setup. The menu's choices (work folder, wallpaper, disk mode, network, vCPU
 -NoMenu` starts at once with the saved setup, and `Start-iOS26.ps1 ...` is still the launcher with
 every option.
 
-The first run (or `Install-iOS26.ps1`) asks where the work folder is and whether you have the
-guest GPU driver, with a folder picker, and saves the path. Without a driver iOS runs *GPU-less*:
+The first run (of the menu or of the installer) asks where the work folder is and whether you have
+the guest GPU driver, with a folder picker, and saves the path. Without a driver iOS runs *GPU-less*:
 it draws on the CPU and the host only shows the frames — it reaches the home screen, but everything
-is slower; add the driver later and rebuild the disk (step 5.2) to turn the GPU on. The driver is
-baked into the disk when the disk is built, so this records where it is, it is not read at run time.
+is slower. The driver is baked into the disk when the disk is built, so this records where it is, it
+is not read at run time: to turn the GPU on later, choose the driver with the menu's **[G]** and run
+`Install-iOS26.cmd` again (it redoes the GPU layer, step 5.2, and the wallpaper).
 
-`Install-iOS26.ps1` runs that setup, then lists which build outputs the work folder already has and
-which the *Build* steps above still produce, and makes a Start-menu shortcut. It does not download
-Apple's files or build the disk: iOS 26 is a research preview, so that is the *Build* pipeline, by
-hand where a step says so.
+`Install-iOS26.cmd` runs the whole *Build* above: that setup, the Windows checks, WSL and its tools,
+QEMU, only the needed members of Apple's two IPSWs (about 10.5 GB, resumable), the firmware, device
+trees, ramdisk and disk, three boots without you (the first boot of 4.5, the wallpaper bake of 5.3.6
+and, with `-Collections`, the Collections disk), the checklist of what the launcher needs, and a
+Start-menu shortcut. Close a running iOS 26 before the boot steps and let their window close by
+itself. Options:
+
+| Option | What it does |
+|---|---|
+| `-List` | The steps, the README step each runs, and which are done |
+| `-Check` | What this PC has: Windows, the WSL tools, QEMU, the outputs. Changes nothing |
+| `-DryRun` | Prints every command the steps would run. Runs nothing |
+| `-From STEP`, `-Only STEP` | Redoes STEP and everything after it, or just STEP (a disk step: the disk steps after it are redone on the next run) |
+| `-Collections`, `-NoCollections` | Also builds `root-collections.qcow2` (5.3.6); remembered. Also on when the menu's wallpaper is *collections* |
+| `-QemuFrom auto\|release\|source\|FOLDER` | Where QEMU comes from. `auto`: the release package once one is set, else the work folder's QEMU, else `source` if MSYS2 is installed |
+| `-CloudOsIpsw FILE`, `-IPhoneIpsw FILE` | Takes Apple's files from IPSWs you already have |
+| `-KeepBuildFiles` | Keeps the decrypted images and the intermediate disk (about 32 GB) |
+| `-BakeMinutes N` | How long the wallpaper boot leaves iOS running once its UI is up (6) |
+| `-NoShortcut` | No Start-menu shortcut |
+
+The installer puts each layer of step 5 in its own overlay with its own trust cache, so a driver
+added later redoes only the layers above the apps: `root26g.qcow2`/`root26.tc` (4.3-4.5),
+`root26-activation` (5.1), `root26-apps` (5.3-5.4), `root26-gpu` (5.2, with the driver),
+`root.qcow2`/`root.tc` (the wallpaper, 5.3.6) and `root-collections` (with `-Collections`). A redone
+step rebuilds its layer from scratch; your own overlays on a rebuilt disk (`root26-user.qcow2`, the
+`-apps` overlays of `.ipa` installs) can no longer boot and are kept as `.old`. The encrypted and
+decrypted Apple images and the intermediate disk are removed once used (`-KeepBuildFiles` keeps them).
+
+`installer\Make-QemuPackage.ps1 -Dist <win-build.sh's dist> -Version 2026.11.01 -Url https://...`
+zips a QEMU build for a release (without its `backup-*` folders) and prints the `$QemuRelease` line
+with the zip's SHA-256; put that line into `Install-iOS26.ps1` and `-QemuFrom auto` downloads the
+zip instead of building QEMU.
 
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
@@ -321,8 +386,9 @@ and never will be: vphone-cli stopped shipping it for the same reason. Extract y
 
 ## Tools
 
-- `Start-iOS26.cmd` / `Start-iOS26-Menu.ps1`: the start menu (above). `Install-iOS26.ps1`: setup
-  and the build-output checklist.
+- `Start-iOS26.cmd` / `Start-iOS26-Menu.ps1`: the start menu, `Install-iOS26.cmd` / `Install-iOS26.ps1`:
+  the installer (both above); `installer/wsl-setup.sh` sets up WSL's tools and `installer/Make-QemuPackage.ps1`
+  packages a QEMU build for a release.
 - `scripts/ipa-server.py`: serves a Windows folder of `.ipa` files to the guest's `asoftinstalld`
   (the launcher starts it; the guest fetches `http://10.0.2.2:8765`).
 - `qmp.py`: taps and swipes over QMP, for scripts and tests.
@@ -356,10 +422,12 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 [vphone-linux](https://github.com/YahiaAngelo/vphone-linux) çalıştırıyor; bu, Windows tarafı.
 
 > [!WARNING]
-> Bir araştırma önizlemesi, ürün değil: kurulum programı yok. Girdileri üretmek yukarıdaki
-> adımları, WSL'i ve birkaç saati gerektiriyor. Apple'ın güvenlik modeli büyük ölçüde kapalı. Apple
-> ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur: her şeyi Apple'dan kendi
-> indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de kendiniz çıkarırsınız.
+> Bir araştırma önizlemesi, ürün değil. `Install-iOS26.cmd` yukarıdaki derleme adımlarını sizin
+> yerinize yürütüyor, ama WSL, yaklaşık 60 GB ve birkaç saat istiyor; misafirin GPU sürücüsünü
+> getiremiyor ve biz bir QEMU paketi yayımlayana dek QEMU'yu da derliyor. Apple'ın güvenlik modeli
+> büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur:
+> her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de kendiniz
+> çıkarırsınız.
 
 **Çalışanlar:**
 - **GPU:** iOS'un kendi Metal'i arayüzü çiziyor, Vulkan üzerinden ekran kartı çalıştırıyor.
@@ -376,7 +444,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
   App switcher var.
 - **Duvar kağıdı:** iOS 26'nın kendi duvar kağıdı (MercuryPoster: iOS'un Metal'inin ekran kartında
   çizdiği 3B sahne), üstünde Liquid Glass saat; `-Wallpaper collections` iOS 17 Collections duvar kağıdı
-  (derleme adımı 3.6, misafir CPU'suna daha hafif).
+  (derleme adımı 5.3.6, misafir CPU'suna daha hafif).
 
 **Kayıtlı durumlar ve hızlı açılış:** yan çubuğun *Save state* ve *Saved states…* düğmeleri çalışıyor.
 Değişikliklerini tutan bir diskte pencereyi kapatmak iOS'u olduğu gibi kaydeder, sonraki açılış oradan
@@ -395,7 +463,14 @@ ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün var
 ölçüm var: QEMU işlemi RTX 4080'de 1,5-2,2 GB bellek tutuyor, 3D motoru iOS her çizdiğinde %80'e kadar
 çıkıyor; diğer GPU (Intel) ne yapılırsa yapılsın %2-12'de düz kalıyor.
 
-**Derleme:** adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar dilden bağımsız). Misafirin GPU
-sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım yazılımı içeriğidir, bu repoda
-yoktur ve olmayacak. Kendiniz çıkarın: Apple silicon Mac'te vphone-cli'nin `fw prepare` komutuyla, ya da
-Mac olmadan vphone-linux'un anlattığı yolla.
+**Derleme:** `ios26\Install-iOS26.cmd` yukarıdaki *Build* adımlarını sırayla yürütür: WSL ve araçları,
+QEMU, Apple'ın iki IPSW'sinden yalnız gereken dosyalar (yaklaşık 10,5 GB), disk, üç otomatik açılış
+(ilk açılış, duvar kağıdı, istenirse Collections) ve Başlat menüsü kısayolu. Her adım iş klasöründeki
+`install\` altında iz bırakır; durdurup yeniden çalıştırınca kaldığı yerden devam eder (`-List`,
+`-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`; ayrıntı yukarıda). Kendi
+yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
+uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
+dilden bağımsız). Misafirin GPU sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım
+yazılımı içeriğidir, bu repoda yoktur ve olmayacak; kurucu onu getiremez, sürücüsüz iOS GPU'suz çalışır.
+Kendiniz çıkarın: Apple silicon Mac'te vphone-cli'nin `fw prepare` komutuyla, ya da Mac olmadan
+vphone-linux'un anlattığı yolla; sonra menüde `[G]` ile seçip kurucuyu yeniden çalıştırın.

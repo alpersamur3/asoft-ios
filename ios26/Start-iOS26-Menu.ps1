@@ -42,6 +42,8 @@ function Load-Config {
             foreach ($k in @($default.Keys)) {
                 if ($null -ne $saved.$k) { $cfg[$k] = $saved.$k }
             }
+            # keys the installer keeps here (Distro, Src, Linux) stay as they are
+            foreach ($p in $saved.PSObject.Properties) { if (-not $cfg.Contains($p.Name)) { $cfg[$p.Name] = $p.Value } }
         } catch {
             Write-Host "config unreadable ($($_.Exception.Message)); starting fresh" -ForegroundColor Yellow
         }
@@ -111,7 +113,7 @@ function Ensure-Setup($cfg) {
         Write-Host "PC's GPU. You extract it yourself (README.md). It is baked into the disk when the disk"
         Write-Host 'is built; this only records where it is.'
         if (Ask-YesNo 'Do you have the guest GPU driver bundle?' $true) {
-            $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' (Split-Path $cfg.GpuDriver)
+            $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' $(if ($cfg.GpuDriver) { Split-Path $cfg.GpuDriver })
             if ($picked) {
                 $cfg.GpuDriver = $picked
                 $cfg.GpuMode = 'gpu'
@@ -166,7 +168,7 @@ function Show-Menu($cfg) {
             'B' { $cfg.QuickBoot = -not $cfg.QuickBoot }
             'C' { $cfg.Smp = if ($cfg.Smp -eq 4) { 8 } else { 4 } }
             'G' {
-                $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' (Split-Path $cfg.GpuDriver)
+                $picked = Pick-Folder 'Select AppleParavirtGPUMetalIOGPUFamily.bundle' $(if ($cfg.GpuDriver) { Split-Path $cfg.GpuDriver })
                 if ($picked) { $cfg.GpuDriver = $picked; $cfg.GpuMode = 'gpu' }
                 else { if (Ask-YesNo 'No driver: run GPU-less (slower)?' $false) { $cfg.GpuDriver = ''; $cfg.GpuMode = 'gpuless' } }
             }

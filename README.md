@@ -28,7 +28,7 @@ English · [Türkçe](#turkce)
 
 | | iOS 16 | iOS 26 (new) |
 | --- | --- | --- |
-| **State** | Ready: a one-line installer | Research preview: you build it |
+| **State** | Ready: a one-line installer | Research preview: `Install-iOS26.cmd` builds it on your PC (WSL, hours, 60 GB) |
 | **Graphics** | The CPU | **The PC's GPU**: iOS's own Metal, through Vulkan |
 | **iOS** | 16.7.16 of the iPhone X | 26.6.2 of the iPhone 16, on the kernel of Apple's research VM |
 | **Apps** | Safari with real web pages, `.ipa` installs | The system apps, Settings |
@@ -172,7 +172,7 @@ QEMU on Windows (`qemu/build-windows.sh` or `qemu-win.yml`), the helper VM on Li
 
 | | iOS 16 | iOS 26 (yeni) |
 | --- | --- | --- |
-| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: kendiniz derlersiniz |
+| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: `Install-iOS26.cmd` bilgisayarınızda derler (WSL, saatler, 60 GB) |
 | **Grafik** | İşlemci | **Bilgisayarın ekran kartı**: iOS'un kendi Metal'i, Vulkan üzerinden |
 | **iOS** | iPhone X'in 16.7.16'sı | iPhone 16'nın 26.6.2'si, Apple'ın araştırma VM'inin çekirdeğinde |
 | **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Sistem uygulamaları, Ayarlar |
