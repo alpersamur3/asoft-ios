@@ -1,0 +1,67 @@
+name: glestest
+
+# GLESTest.ipa, the iOS 26 guest's OpenGL ES test (ios26/glestest): an app that runs vphone-cli
+# issue #793's check (EAGLContext for OpenGL ES 1, 2 and 3, print "EAGL n: OK" or "nil") and then
+# draws a turning triangle with OpenGL ES 2 into a CAEAGLLayer, plus eaglcheck, the same check as
+# a command-line tool for the serial root shell (/Applications/GLESTest.app/eaglcheck). arm64,
+# ad-hoc signed; ios26/Install-Ipa.ps1 puts every CDHash in the trust cache. Our own code (MIT).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/glestest.yml"
+      - "ios26/glestest/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            ios26/glestest
+            apps/asoftware.txt
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          ls -d "$SDK/System/Library/Frameworks/OpenGLES.framework"
+          CC="xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK -miphoneos-version-min=16.0 -fobjc-arc -O2 -Wall"
+          SIG="-Wl,-sectcreate,__TEXT,__asoftware,apps/asoftware.txt"
+          A=out/Payload/GLESTest.app
+          mkdir -p "$A"
+          $CC ios26/glestest/main.m -framework UIKit -framework QuartzCore -framework OpenGLES -framework Metal \
+              -framework Foundation $SIG -o "$A/GLESTest"
+          $CC ios26/glestest/eaglcheck.m -framework OpenGLES -framework Metal -framework Foundation $SIG -o "$A/eaglcheck"
+          plutil -convert binary1 -o "$A/Info.plist" ios26/glestest/Info.plist
+          printf 'APPL????' > "$A/PkgInfo"
+          codesign -f -s - "$A/eaglcheck"
+          codesign -f -s - "$A"
+          (cd out && zip -qry GLESTest.ipa Payload)
+          for f in "$A/GLESTest" "$A/eaglcheck"; do
+            codesign -dvvv "$f" 2>&1 | grep -E '^(Identifier|CDHash)='
+            otool -L "$f" | grep -E 'OpenGLES|Metal'
+          done
+          {
+            echo "GLESTest.ipa"
+            echo "workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID ($GITHUB_SHA)"
+            echo "runner: $ImageOS $ImageVersion"
+            xcodebuild -version | tr '\n' ' '; echo
+            echo "iphoneos SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+            shasum -a 256 out/GLESTest.ipa | sed 's|  .*/| |'
+          } > out/BUILD.txt
+          cat out/BUILD.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glestest
+          path: |
+            out/GLESTest.ipa
+            out/BUILD.txt
