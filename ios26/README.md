@@ -385,11 +385,12 @@ SHA-256; put that line into `Install-iOS26.ps1`.
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
 **65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
-**52f3606**, reims-vgpu **ae389a2c** and metal2vulkan `windows` **fbb1ae35** or later, built together
-(an older QEMU keeps the buttons off, an older metal2vulkan ends the emulator some seconds after Home
-and a page swipe, and an older reims-vgpu breaks the dock and the icons when *Restore* loads a state
-into a running emulator); the clock catching up after a load needs qemu-sptm **ad92276**. Rebuild
-QEMU (step 1) if yours is older.
+**52f3606**, reims-vgpu **44a9dac6** and metal2vulkan `windows` **e5b58af7** or later, built together
+(an older QEMU keeps the buttons off, an older metal2vulkan can end the emulator some seconds after
+Home and a page swipe, an older reims-vgpu can break the dock and the icons when *Restore* loads a
+state into a running emulator, and a pair older than these two can place a restored app's texture
+over another app's live one); the clock catching up after a load needs qemu-sptm **ad92276**.
+Rebuild QEMU (step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
