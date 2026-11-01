@@ -65,8 +65,8 @@ $QemuRelease = @{ Version = ''; Url = ''; Sha256 = '' }
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
     @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'ios26'; Min = 'ad92276' }
-    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = 'e919fd74' }
-    @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = '50086fc0' }
+    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = 'ae389a2c' }
+    @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = 'fbb1ae35' }
 )
 # MSYS2 UCRT64 packages: qemu/build-windows.sh's, plus Rust (reims-vgpu) and GMP (nettle's hogweed)
 $MsysPackages = @('bison', 'diffutils', 'flex', 'git', 'grep', 'make', 'sed', 'tar', 'gzip', 'curl') +
@@ -720,7 +720,7 @@ function Do-Qemu {
     if (-not (Test-Path $exe) -and -not (Test-Path (Join-Path $dest 'qemu-system-aarch64.exe'))) { Fail "no qemu-system-aarch64w.exe in $dest" }
     $build = Join-Path $dest 'BUILD.txt'
     if (Test-Path $build) { foreach ($l in Get-Content $build) { Say $l } }
-    Say 'the launcher needs qemu-sptm ad92276, reims-vgpu e919fd74 and metal2vulkan 50086fc0 or later, built together' DarkGray
+    Say 'the launcher needs qemu-sptm ad92276, reims-vgpu ae389a2c and metal2vulkan fbb1ae35 or later, built together' DarkGray
     if (-not (Test-Path (Join-Path $dest 'qemu-img.exe'))) {
         Say "no qemu-img.exe in $dest`: quick boot (saved states) needs one there or in C:\Program Files\qemu" Yellow
     }

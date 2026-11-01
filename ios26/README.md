@@ -49,7 +49,10 @@ throwaway run loses them at exit. After a quick boot or a loaded state iOS's clo
 time away (qemu-sptm **ad92276** or later: XNU reads the hardware clock only at boot, so QEMU moves the
 guest's counter on when it loads a state; a disk quick-booted on an older build keeps the time it
 already lost until one `-NoQuickBoot` boot). While it runs, the guest's clock gains about a minute an
-hour (the counter's 41 ns tick at 24 MHz).
+hour (the counter's 41 ns tick at 24 MHz). *Restore* into an emulator that booted on its own needs
+reims-vgpu **ae389a2c** and metal2vulkan **fbb1ae35**: an older build kept the GPU addresses of heaps
+the running emulator had deleted, and the restored state came up with its dock flickering and black
+squares for icons.
 
 Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
 shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
@@ -362,10 +365,11 @@ zip instead of building QEMU.
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
 **65e09172** or later (the screen-off cover needs it). Saved states and quick boot need qemu-sptm
-**52f3606**, reims-vgpu **e919fd74** and metal2vulkan `windows` **50086fc0** or later, built together
-(an older QEMU keeps the buttons off, and an older metal2vulkan ends the emulator some seconds after
-Home and a page swipe); the clock catching up after a load needs qemu-sptm **ad92276**. Rebuild QEMU
-(step 1) if yours is older.
+**52f3606**, reims-vgpu **ae389a2c** and metal2vulkan `windows` **fbb1ae35** or later, built together
+(an older QEMU keeps the buttons off, an older metal2vulkan ends the emulator some seconds after Home
+and a page swipe, and an older reims-vgpu breaks the dock and the icons when *Restore* loads a state
+into a running emulator); the clock catching up after a load needs qemu-sptm **ad92276**. Rebuild
+QEMU (step 1) if yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
@@ -456,7 +460,9 @@ devam eder, ekran yaklaşık 8 sn'de gelir (`-NoQuickBoot` ya da menüde `[B]` h
 Her kayıt, iOS'un çalıştığı diskte yaklaşık 3,7 GB tutar; geçici koşuda çıkışta kaybolur. Yüklemeden
 sonra iOS'un saati aradaki süre kadar ileri gider (qemu-sptm ad92276 ve sonrası; eski yapıyla hızlı
 açılmış bir disk kaybettiği süreyi bir `-NoQuickBoot` açılışına kadar geride tutar). Çalışırken misafir
-saati saatte yaklaşık 1 dk ileri gider.
+saati saatte yaklaşık 1 dk ileri gider. Kendi açılmış bir emülatöre *Restore* ile durum yüklemek
+reims-vgpu ae389a2c ve metal2vulkan fbb1ae35 ister: eski derleme çalışan emülatörün sildiği heap'lerin
+GPU adreslerini tutuyordu, yüklenen durumun dock'u yanıp sönüyor, ikonları siyah kare çıkıyordu.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
