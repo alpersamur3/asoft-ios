@@ -58,6 +58,20 @@ package's 44a9dac6): an older one kept Metal's own GPU ranges where the running 
 them and refused the state's buffers there, and the loaded screen froze while the guest's GPU
 restarted.
 
+**OpenGL ES** (a build from source only; the installer does not set it up yet): as far as we could
+find, the first OpenGL ES drawing on Apple's paravirtual GPU in an iOS guest
+([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793), still open on 2026-11-02). iOS's
+kernel names no OpenGL ES renderer for that GPU, so every `EAGLContext` is nil; `scripts\kc-gles.py`
+adds AppleMetalGLRenderer (OpenGL ES on Metal, in the guest's own shared cache) to the GPU's
+personality in the kernelcache. The renderer's shaders then need GraphicLoader with this repository's
+patch from 9cadb5c (it completes their AIR metadata, on which the guest's Metal compiler crashed),
+reims-vgpu **fd7bd0b5** (it faulted on the renderer's primitive-restart index) and metal2vulkan
+**79e1dd02** (it refused their language tag). With all four, the test app in `glestest\` gets OpenGL ES
+1, 2 and 3 contexts, and its OpenGL ES 2.0 triangles (vertex attributes, a uniform, varyings) draw on
+the PC's GPU and read back the expected pixels. Textures, depth and `discard` are not tested yet. No
+QEMU package or GraphicLoader release with these fixes is published yet; with the older ones OpenGL ES
+draws are dropped or fault the guest's GPU, so the installer leaves the kernel as it is.
+
 Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
 shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
 services. App switcher cards show a blank page, not the app's last screen. For about 3 minutes after
@@ -579,6 +593,21 @@ Başka bir çalışmanın kaydettiği durum reims-vgpu ac33003f ister (yayındak
 44a9dac6'dan yeni): eski derleme Metal'in kendi GPU aralıklarını emülatörün onları ilk yaptığı yerde
 tutuyor, durumun buffer'larını orada reddediyordu; yüklenen ekran donuyor, misafirin GPU'su yeniden
 başlıyordu.
+
+**OpenGL ES** (yalnız kaynaktan derlemede; kurucu henüz kurmuyor): bulabildiğimiz kadarıyla Apple'ın
+paravirtual GPU'sunda, bir iOS misafirinde ilk OpenGL ES çizimi
+([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793), 2026-11-02'de hâlâ açık). iOS
+çekirdeği bu GPU için bir OpenGL ES renderer'ı adlandırmıyor, bu yüzden her `EAGLContext` nil;
+`scripts\kc-gles.py` kernelcache'te GPU'nun personality'sine AppleMetalGLRenderer'ı (Metal üstünde
+OpenGL ES, misafirin kendi shared cache'inde) ekler. Renderer'ın shader'ları ayrıca bu deponun
+9cadb5c'deki yamasıyla GraphicLoader'ı (misafirin Metal derleyicisinin çöktüğü AIR metadata'sını
+tamamlar), reims-vgpu **fd7bd0b5**'i (renderer'ın primitive-restart index'inde fault veriyordu) ve
+metal2vulkan **79e1dd02**'yi (dil etiketlerini reddediyordu) ister. Dördüyle `glestest\`'teki test
+uygulaması OpenGL ES 1, 2 ve 3 bağlamı alıyor; OpenGL ES 2.0 üçgenleri (vertex attribute, uniform,
+varying) bilgisayarın GPU'sunda çiziliyor ve beklenen pikseller okunuyor. Texture, derinlik ve
+`discard` henüz denenmedi. Bu düzeltmeleri içeren QEMU paketi ve GraphicLoader sürümü henüz
+yayınlanmadı; eskileriyle OpenGL ES çizimleri çizilmeden düşüyor ya da misafirin GPU'sunda fault
+veriyor, bu yüzden kurucu çekirdeğe dokunmuyor.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
