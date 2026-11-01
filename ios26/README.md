@@ -144,11 +144,15 @@ that step. What it cannot do for you:
 - **The guest's GPU driver** is Apple's ([below](#the-guests-gpu-driver)). Without it iOS runs
   GPU-less. Give it later with the menu's **[G]** and run the installer again: it redoes only the
   GPU layer and the wallpaper.
-- **QEMU.** Our QEMU has no release package yet, so the installer builds it in MSYS2 (`-QemuFrom
-  source`, hours; MSYS2 is installed with winget if it is missing) or takes a build you have
-  (`-QemuFrom D:\path\to\dist`, `win-build.sh`'s `dist`).
 - **WSL itself.** Installing it needs an administrator and a restart: the installer prints the
   command and stops. Run it, restart, and run the installer again.
+
+QEMU comes prebuilt: the installer downloads `asoft-ios26-qemu-2026.11.01.zip` (125 MB) from
+qemu-sptm's [`ios26-ad92276` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-ad92276)
+(qemu-sptm `ios26` ad92276 with reims-vgpu `windows` ae389a2c and metal2vulkan `windows` fbb1ae35,
+`qemu-img.exe` included), checks its SHA-256 and unpacks it into `<Work>\qemu`. `-QemuFrom source`
+builds it in MSYS2 instead (hours; MSYS2 is installed with winget if it is missing) and `-QemuFrom
+D:\path\to\dist` takes a build you have (`win-build.sh`'s `dist`).
 
 ### You need
 
@@ -343,7 +347,7 @@ itself. Options:
 | `-DryRun` | Prints every command the steps would run. Runs nothing |
 | `-From STEP`, `-Only STEP` | Redoes STEP and everything after it, or just STEP (a disk step: the disk steps after it are redone on the next run) |
 | `-Collections`, `-NoCollections` | Also builds `root-collections.qcow2` (5.3.6); remembered. Also on when the menu's wallpaper is *collections* |
-| `-QemuFrom auto\|release\|source\|FOLDER` | Where QEMU comes from. `auto`: the release package once one is set, else the work folder's QEMU, else `source` if MSYS2 is installed |
+| `-QemuFrom auto\|release\|source\|FOLDER` | Where QEMU comes from. `auto`: the release package (`source` instead when it cannot be downloaded and MSYS2 is installed); with no package set, the work folder's QEMU, else `source` if MSYS2 is installed |
 | `-CloudOsIpsw FILE`, `-IPhoneIpsw FILE` | Takes Apple's files from IPSWs you already have |
 | `-KeepBuildFiles` | Keeps the decrypted images and the intermediate disk (about 32 GB) |
 | `-BakeMinutes N` | How long the wallpaper boot leaves iOS running once its UI is up (6) |
@@ -357,10 +361,17 @@ step rebuilds its layer from scratch; your own overlays on a rebuilt disk (`root
 `-apps` overlays of `.ipa` installs) can no longer boot and are kept as `.old`. The encrypted and
 decrypted Apple images and the intermediate disk are removed once used (`-KeepBuildFiles` keeps them).
 
-`installer\Make-QemuPackage.ps1 -Dist <win-build.sh's dist> -Version 2026.11.01 -Url https://...`
-zips a QEMU build for a release (without its `backup-*` folders) and prints the `$QemuRelease` line
-with the zip's SHA-256; put that line into `Install-iOS26.ps1` and `-QemuFrom auto` downloads the
-zip instead of building QEMU.
+The release package `-QemuFrom auto` downloads is `asoft-ios26-qemu-2026.11.01.zip` of qemu-sptm's
+[`ios26-ad92276` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-ad92276) (125 MB,
+531 MB unpacked; `$QemuRelease` in `Install-iOS26.ps1` has its URL and SHA-256): `win-build.sh`'s
+`dist` without its `backup-*` folders,
+that is `qemu-system-aarch64.exe` and the windowless `qemu-system-aarch64w.exe` 11.1.0 (qemu-sptm
+`ios26` **ad92276**, `-M vresearch`, built with reims-vgpu `windows` **ae389a2c** and metal2vulkan
+`windows` **fbb1ae35**), `qemu-img.exe` from the same build (the launcher's overlays, quick boot's
+saved states), the ANGLE, GTK and GLib runtime they load (DLLs, `lib\`, `share\`, from MSYS2 UCRT64)
+and `BUILD.txt`. For a new build, `installer\Make-QemuPackage.ps1 -Dist <win-build.sh's dist>
+-Version 2026.11.01 -Url https://...` makes the zip and prints the `$QemuRelease` line with its
+SHA-256; put that line into `Install-iOS26.ps1`.
 
 The published launcher needs a recent build: qemu-sptm `ios26` **4eee4e5** or later (older QEMU
 rejects the `usb-kbd` `idle-reports` option and will not boot) and reims-vgpu `windows`
@@ -480,7 +491,12 @@ ve kurulan `.ipa`'ları kullanıcı overlay'inde tutar (başlat menüsünün var
 QEMU, Apple'ın iki IPSW'sinden yalnız gereken dosyalar (yaklaşık 10,5 GB), disk, üç otomatik açılış
 (ilk açılış, duvar kağıdı, istenirse Collections) ve Başlat menüsü kısayolu. Her adım iş klasöründeki
 `install\` altında iz bırakır; durdurup yeniden çalıştırınca kaldığı yerden devam eder (`-List`,
-`-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`; ayrıntı yukarıda). Kendi
+`-Check`, `-DryRun`, `-From ADIM`, `-Only ADIM`, `-Collections`, `-QemuFrom`; ayrıntı yukarıda).
+QEMU hazır gelir: kurucu qemu-sptm'nin
+[`ios26-ad92276` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/ios26-ad92276)
+`asoft-ios26-qemu-2026.11.01.zip`'i (125 MB; qemu-sptm `ios26` ad92276, reims-vgpu `windows` ae389a2c,
+metal2vulkan `windows` fbb1ae35, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
+açar; `-QemuFrom source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi
 yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
 uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
 dilden bağımsız). Misafirin GPU sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım

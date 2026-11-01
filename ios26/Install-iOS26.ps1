@@ -7,9 +7,9 @@
 #   - the guest GPU driver (AppleParavirtGPUMetalIOGPUFamily.bundle) is Apple's: you extract it
 #     (README.md, "The guest's GPU driver"). Without it iOS runs GPU-less (slower); give it later
 #     (the menu's [G]) and run this again: it redoes the GPU layer and the wallpaper.
-#   - our QEMU has no release package yet: -QemuFrom source builds it in MSYS2 (hours), or
-#     -QemuFrom <folder> copies a build you have (win-build.sh's dist).
 #   - WSL itself: installing it needs an administrator and a restart; it says so and stops.
+# Our QEMU comes as a release package it downloads and checks ($QemuRelease below); -QemuFrom
+# source builds it in MSYS2 instead (hours), -QemuFrom <folder> copies a build you have.
 #
 #   Install-iOS26.cmd [-Work D:\ios26] [-List] [-Check] [-DryRun] [-From STEP | -Only STEP] ...
 #     -List          the steps, the README.md step each one runs, and which are done
@@ -19,8 +19,9 @@
 #                    step: the disk steps after it are redone on the next run)
 #     -Collections   also build the lighter Collections wallpaper disk (README.md 5.3.6), as when
 #                    the menu's wallpaper is collections; remembered (-NoCollections forgets it)
-#     -QemuFrom auto|release|source|<folder>   auto: the release package if one is set below,
-#                    else the QEMU the work folder has, else source if MSYS2 is installed
+#     -QemuFrom auto|release|source|<folder>   auto: the release package set below (when it
+#                    cannot be downloaded and MSYS2 is installed: source); with none set, the
+#                    QEMU the work folder has, else source if MSYS2 is installed
 #     -CloudOsIpsw / -IPhoneIpsw FILE   take Apple's files from an IPSW you have
 #     -BakeMinutes N how long the wallpaper boot leaves iOS running once it is up (6)
 #     -KeepBuildFiles  keep the decrypted images and the intermediate disk (about 32 GB)
@@ -57,10 +58,11 @@ $here = $PSScriptRoot
 $repo = Split-Path $here
 
 # --- What it downloads, pinned (one place) -------------------------------------------------------
-# Our QEMU for Windows as a release package (zip of win-build.sh's dist). None is published yet:
-# when one is, put its version, URL and SHA-256 here (installer\Make-QemuPackage.ps1 prints them)
-# and -QemuFrom auto takes it.
-$QemuRelease = @{ Version = ''; Url = ''; Sha256 = '' }
+# Our QEMU for Windows as a release package: win-build.sh's dist (qemu-system-aarch64.exe and the
+# windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.01 is
+# qemu-sptm ios26 ad92276 (-M vresearch) with reims-vgpu windows ae389a2c and metal2vulkan windows
+# fbb1ae35. For a new build, installer\Make-QemuPackage.ps1 prints this line.
+$QemuRelease = @{ Version = '2026.11.01'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/ios26-ad92276/asoft-ios26-qemu-2026.11.01.zip'; Sha256 = 'BCAAFD82748A0BBBF625C8E7C0F59AAC61172634E65FAEE792DE562ACBFAC1C9' }
 # -QemuFrom source: the checkouts README.md step 1 clones, and the oldest commit of each the
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
@@ -686,24 +688,36 @@ function Do-Python {
 function Do-Qemu {
     $dest = In-Work 'qemu'
     $exe = Join-Path $dest 'qemu-system-aarch64w.exe'
+    $msys = Test-Path 'C:\msys64\usr\bin\bash.exe'
     $mode = $QemuFrom
     if ($mode -ceq 'auto') {
         if ($QemuRelease.Url) { $mode = 'release' }
         elseif (Test-Path $exe) { $mode = 'keep' }
-        elseif (Test-Path 'C:\msys64\usr\bin\bash.exe') { $mode = 'source' }
-        elseif ($DryRun) { $mode = 'source'; Say '(auto: no release package yet, no QEMU here: shown as -QemuFrom source)' DarkGray }
+        elseif ($msys) { $mode = 'source' }
+        elseif ($DryRun) { $mode = 'source'; Say '(auto: no release package set, no QEMU here: shown as -QemuFrom source)' DarkGray }
         else {
-            Fail ('there is no release package of our iOS 26 QEMU yet. Run again with -QemuFrom source (builds it in ' +
+            Fail ('no release package is set in Install-iOS26.ps1 ($QemuRelease). Run again with -QemuFrom source (builds it in ' +
                   'MSYS2, installed with winget if missing; a few hours) or -QemuFrom FOLDER (a build you have: win-build.sh''s dist)')
         }
     }
     Need-Space $Space.qemu
-    if ($mode -ceq 'keep') {
-        Say "keeping the QEMU in $dest (-QemuFrom source or FOLDER replaces it)"
-    } elseif ($mode -ceq 'release') {
+    if ($mode -ceq 'release') {
         if (-not $QemuRelease.Url) { Fail 'no release package is set in Install-iOS26.ps1 ($QemuRelease): use -QemuFrom source or FOLDER' }
+        Say "release package $($QemuRelease.Version): $($QemuRelease.Url)" DarkGray
         $zip = In-Work "downloads\asoft-ios26-qemu-$($QemuRelease.Version).zip"
-        Get-File $QemuRelease.Url $zip $QemuRelease.Sha256
+        try {
+            Get-File $QemuRelease.Url $zip $QemuRelease.Sha256
+        } catch {
+            # auto on a PC that has MSYS2 builds QEMU instead; one without stops (run again to resume)
+            if ($QemuFrom -cne 'auto' -or -not $msys) { throw }
+            Say $_.Exception.Message Yellow
+            Say 'auto: the release package could not be had; building QEMU from source instead (MSYS2 is installed)' Yellow
+            $mode = 'source'
+        }
+    }
+    if ($mode -ceq 'keep') {
+        Say "keeping the QEMU in $dest (-QemuFrom release, source or FOLDER replaces it)"
+    } elseif ($mode -ceq 'release') {
         Show-Cmd "Expand-Archive $zip $dest"
         if (-not $DryRun) {
             if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
