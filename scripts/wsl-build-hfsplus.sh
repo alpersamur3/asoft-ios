@@ -11,26 +11,26 @@ SRC=/root/work/wsl-kernel/$TAG
 DEST=/lib/modules/$KVER/extra
 KO=$SRC/fs/hfsplus/hfsplus.ko
 
-if ! grep -q hfsplus /proc/filesystems; then
-  # Newer WSL mounts /lib/modules from its own image at every start, so a copy in $DEST is
-  # gone after a WSL restart: load the module from the source tree it was built in.
-  if [ ! -f "$KO" ]; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y -qq flex bison bc libelf-dev libssl-dev dwarves cpio kmod >/dev/null
-    mkdir -p /root/work/wsl-kernel
-    if [ ! -d "$SRC" ]; then
-      cd /root/work/wsl-kernel
-      curl -fsSL "https://github.com/microsoft/WSL2-Linux-Kernel/archive/refs/tags/$TAG.tar.gz" | tar xz
-      mv "WSL2-Linux-Kernel-$TAG" "$SRC"
-    fi
-    cd "$SRC"
-    zcat /proc/config.gz > .config
-    ./scripts/config --module HFSPLUS_FS
-    make olddefconfig >/dev/null
-    # Full module build produces Module.symvers with the same symbol CRCs as the running kernel
-    make -j"$(nproc)" modules > /root/work/wsl-kernel/build.log 2>&1
-    test -f "$KO"
+# Each distro builds its own: WSL's kernel is shared by all distros, so the module can be loaded
+# already from another distro's tree, and after a WSL restart this one could not load it again.
+# Newer WSL mounts /lib/modules from its own image at every start, so a copy in $DEST is
+# gone after a WSL restart: load the module from the source tree it was built in.
+if [ ! -f "$KO" ]; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y -qq flex bison bc libelf-dev libssl-dev dwarves cpio kmod >/dev/null
+  mkdir -p /root/work/wsl-kernel
+  if [ ! -d "$SRC" ]; then
+    cd /root/work/wsl-kernel
+    curl -fsSL "https://github.com/microsoft/WSL2-Linux-Kernel/archive/refs/tags/$TAG.tar.gz" | tar xz
+    mv "WSL2-Linux-Kernel-$TAG" "$SRC"
   fi
-  insmod "$KO"
+  cd "$SRC"
+  zcat /proc/config.gz > .config
+  ./scripts/config --module HFSPLUS_FS
+  make olddefconfig >/dev/null
+  # Full module build produces Module.symvers with the same symbol CRCs as the running kernel
+  make -j"$(nproc)" modules > /root/work/wsl-kernel/build.log 2>&1
+  test -f "$KO"
 fi
+grep -q hfsplus /proc/filesystems || insmod "$KO"
 grep hfsplus /proc/filesystems

@@ -157,8 +157,26 @@ Windows ── QEMU: jprx/qemu-sptm + our -M vresearch machine (TCG)
 
 > [!IMPORTANT]
 > Written down from the runs that built our disk; `Install-iOS26.cmd` runs the steps in this
-> order. Neither has been repeated end to end on a second PC yet: the installer's own tests were dry
-> runs and its cheap steps, not a full build. Read each script before you run it.
+> order. The installer has built a disk iOS 26 boots from end to end once, on our PC, from an empty
+> folder and a new WSL distro (2026-11-02); not yet on a second PC, and not yet without WSL. Read
+> each script before you run it.
+
+The easy way is the repository's one installer, `Install-ASoftware.cmd` at the top of the checkout
+([Install](../README.md#install)): choose iOS 26 (or both), then *Fast install (WSL)* or *Install
+without WSL*. It checks the PC once, shows the download, the disk space at the peak and after and
+the time before it starts, runs `Install-iOS26.ps1` with the QEMU it shares with iOS 16, shows the
+step and the time left in the window title, and goes on after a stop or a restart. On our PC
+(i7-13700HX, 24 threads, NVMe, 40 Mbit/s):
+
+| | Fast install (WSL) | Install without WSL |
+| --- | --- | --- |
+| Needs | WSL 2: if it is missing the installer offers to install it (administrator, one restart) | nothing more: the helper VM is in the release package (from the next release on) |
+| Linux steps run in | a WSL distro (Ubuntu 24.04, made and set up by the `linux` step) | the helper VM: our QEMU under TCG, up to 8 vCPUs and 4 GB |
+| Download | 11.4 GB; a new distro and the kernel source for its hfsplus module another 0.9 GB | 11.4 GB |
+| Disk: peak / after | 49 GB / 24 GB, and about 7 GB for the distro where WSL keeps them | 49 GB / 24 GB |
+| Time | measured: 48 min of steps (the 10.2 GB from Apple at 52 Mbit/s, the distro set up); a new distro about 15 min more | about 1 h 40 min (its steps timed one by one, not end to end) |
+
+`ios26\Install-iOS26.cmd` is the same build on its own:
 
 ```
 ios26\Install-iOS26.cmd
@@ -465,22 +483,23 @@ if it is installed and the helper VM if not; `wsl` and `helper` force one. With 
 Measured on 2026-11-02 on an i7-13700HX (24 threads, NVMe), with an iOS 16 and an iOS 26 QEMU
 running at the same time, Apple's files from local IPSWs:
 
-| Step | Without WSL | |
-| --- | --- | --- |
-| decrypt (the SystemOS, 2 GB) | 4 s | ipsw.exe |
-| firmware | 2 s | ipsw.exe |
-| ramdisk | 1.3 min | |
-| rootfs | 34.7 min | 26 min of it the OS tree's copy out of APFS (apfs-fuse under TCG, about 8 MB/s) |
-| partition | 2.6 min | the 32 GiB copy |
-| tweaks | 1.3 min | |
-| activation | 1.5 min | two VM runs, the patch on Windows |
-| apps | 6.1 min | |
-| gpu | 1.3 min | |
+| Step | Without WSL | With WSL | |
+| --- | --- | --- | --- |
+| decrypt | 4 s (the SystemOS, 2 GB) | 1.2 min (both images, 10.2 GB) | ipsw.exe / ipsw |
+| firmware | 2 s | 9 s | ipsw.exe |
+| ramdisk | 1.3 min | 24 s | |
+| rootfs | 34.7 min | 6.1 min | without WSL 26 min of it the OS tree's copy out of APFS (apfs-fuse under TCG, about 8 MB/s) |
+| partition | 2.6 min | 3.2 min | the 32 GiB copy |
+| tweaks | 1.3 min | 8 s | |
+| activation | 1.5 min | 13 s | two VM runs, the patch on Windows |
+| apps | 6.1 min | 1.2 min | |
+| gpu | 1.3 min | 20 s | |
 
-The Linux steps took 49 minutes in all; each VM run spends about 40 s starting and checking the
-disk's journal. With WSL these steps run natively; we have not timed them on this PC yet. With the
-downloads and the two boots a build without WSL should stay within about two hours on a PC like
-this one (an estimate: not run end to end).
+The Linux steps took 49 minutes in all without WSL and 13 with it (the WSL column: the end-to-end
+run through `Install-ASoftware.cmd` on the same PC the same day); each
+VM run spends about 40 s starting and checking the disk's journal. With the downloads and the two
+boots a build without WSL takes about 1 h 40 min on a PC like this one at 40 Mbit/s (an estimate:
+not run end to end).
 
 The VM is `installer/helper/out/Image.gz` and `initrd.gz`, which the `linux` step copies into
 `<Work>\tools\helper` and tests. iOS 16's release package has them; one from before 2026-11-02
@@ -658,15 +677,25 @@ WSL, yönetici yetkisi ve yeniden başlatma gerekmez: Linux isteyen adımlar (Ap
 okumak, HFS+ diski yazmak) WSL kuruluysa WSL'de, değilse iOS 16 kurucusunun yardımcı VM'inde (zaten
 indirilen QEMU'da küçük bir Linux) çalışır; şifre çözme ve im4p işleri Windows'ta ipsw.exe ile
 yapılır (`-Linux auto|wsl|helper`, *Without WSL* bölümü). i7-13700HX'te yardımcı VM'le Linux
-adımları toplam 49 dk sürdü, 35 dk'sı kök disk (APFS'ten kopya, TCG altında); WSL'li süreler bu
-bilgisayarda henüz ölçülmedi.
+adımları toplam 49 dk sürdü, 35 dk'sı kök disk (APFS'ten kopya, TCG altında); WSL'de aynı adımlar
+13 dk.
+
+**Kolay yol:** depo kökündeki tek kurucu `Install-ASoftware.cmd` ([Kurulum](../README.md#kurulum)):
+iOS 26'yı (ya da ikisini) seçin, sonra *Hızlı kurulum (WSL)* ya da *WSL'siz kurulum*. Kurucu
+bilgisayarı bir kez denetler; başlamadan önce indirmeyi, en çok ve sonra kalan disk alanını ve
+süreyi gösterir. Ardından `Install-iOS26.ps1`'i iOS 16 ile ortak QEMU'yla yürütür, pencere
+başlığında adımı ve kalan süreyi gösterir, durunca ya da yeniden başlayınca kaldığı yerden sürer.
+Bizim bilgisayarda (40 Mbit/s): WSL'li yol ölçülen **48 dk** adım süresi (11,4 GB indirme, disk en çok 49 GB,
+sonra 24 GB; yeni bir WSL dağıtımı 0,9 GB ve ~15 dk daha, dağıtım için ayrıca ~7 GB); WSL'siz yol
+tahminen **1 sa 40 dk**, yönetici ve yeniden başlatma gerekmez. Kurucu 2026-11-02'de bu bilgisayarda
+boş bir klasör ve yeni bir WSL dağıtımından uçtan uca iOS 26'nın açıldığı bir disk kurdu.
 QEMU hazır gelir: kurucu qemu-sptm'nin
 [`asoft-9fa4e67` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
 `asoft-qemu-2026.11.01b.zip`'i (125 MB; qemu-sptm `asoft` 9fa4e67, reims-vgpu `windows` 44a9dac6,
 metal2vulkan `windows` e5b58af7, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
 açar (aynı derleme iOS 16'yı `-M virt` ile açar, iOS 16 kurucusu da bu paketi alır); `-QemuFrom
 source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
-uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
+ve WSL'siz uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
 dilden bağımsız). Misafirin GPU sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım
 yazılımı içeriğidir, bu repoda yoktur ve olmayacak. Mac gerekmez: kurucu onu zaten indirdiği cloudOS
 26.4b IPSW'sinin OS imajından (`094-39278-029.dmg.aea`) çıkarır. Apple'ın anahtar sunucusu cloudOS

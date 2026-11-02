@@ -28,12 +28,12 @@ English · [Türkçe](#turkce)
 
 | | iOS 16 | iOS 26 (new) |
 | --- | --- | --- |
-| **State** | Ready: a one-line installer | Research preview: `Install-iOS26.cmd` builds it on your PC (WSL, hours, 60 GB) |
+| **State** | Ready: a one-line installer | Research preview: the same installer builds it on your PC (hours, 57 GB at the peak) |
 | **Graphics** | The CPU | **The PC's GPU**: iOS's own Metal, through Vulkan |
 | **iOS** | 16.7.16 of the iPhone X | 26.6.2 of the iPhone 16, on the kernel of Apple's research VM |
 | **Apps** | Safari with real web pages, `.ipa` installs | The system apps, Settings |
 | **Quick boot** | Yes: iOS goes on in seconds | Yes: iOS goes on in seconds |
-| **Start** | [Install](#install) | [`ios26/`](ios26/README.md) |
+| **Start** | [Install](#install) | [Install](#install), then [`ios26/`](ios26/README.md) |
 
 Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gpu).
 
@@ -70,31 +70,75 @@ Not yet: audio, GPU acceleration, the App Store and Apple ID services.
 
 - Windows 10 (1903 or later) or 11, 64-bit; no admin rights, WSL or Mac needed
 - A 4-core CPU or better and 16 GB of RAM (iOS gets 7 GB)
-- About **26 GB** free while installing and **13 GB** once installed (see [Disk space](#disk-space))
+- About **27 GB** free while installing and **14 GB** once installed (see [Disk space](#disk-space))
+- iOS 26 also wants a GPU with a Vulkan driver, 8 or more logical processors and about 57 GB free
+  while installing; the installer checks these first
 
 ## Install
 
-In PowerShell (no admin rights needed):
+One installer for both versions: `Install-ASoftware.cmd`. Run it from a checkout of `main`, or
+from `ASoftware-iOS-*-win64.zip` ([Releases](https://github.com/alpersamur3/asoft-ios/releases)), or
+in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-ios/releases/latest/download/Get-ASoftware.ps1 | iex"
 ```
 
-Or download `ASoftware-iOS-*-win64.zip` from [Releases](https://github.com/alpersamur3/asoft-ios/releases),
-extract it and run `Install-ASoftware.cmd`. It takes about an hour, once (see below), and puts
-everything into one folder (`%LOCALAPPDATA%\ASoftware iOS` unless you give `-Dir`); run again,
-it resumes where it stopped:
+Release 0.1.0, the latest, still installs iOS 16 alone; the choice below comes with the next release.
+
+It asks two things:
+
+1. **Which iOS:** iOS 16, iOS 26, or both (one QEMU for both, downloaded once).
+2. **For iOS 26, where its build runs Linux tools:** *Fast install (WSL)*, or *Install without
+   WSL* (a small Linux VM in our QEMU; no administrator, no restart).
+   - WSL is the default when it works.
+   - If WSL is missing, it offers to install it, which needs an administrator and a restart; run
+     the installer again afterwards and it goes on. Or it goes on without WSL.
+   - With virtualization off in the BIOS/UEFI, WSL 2 cannot start, so it installs without WSL and
+     says why.
+   - iOS 16 never needs WSL.
+
+Before anything starts it shows what each path takes on your PC:
+- the download, exact, from the installers' own file lists;
+- the disk space at the peak and after;
+- the time, from our measured steps scaled to your PC's cores and to a 10 MB probe of Apple's servers.
+
+On our PC (i7-13700HX, 24 threads, NVMe SSD, 40 Mbit/s):
+
+| | Download | Disk: peak / after | Time |
+| --- | --- | --- | --- |
+| iOS 16 | 6.3 GB | 27 GB / 13.6 GB | about 1 h 5 min (measured: 43 min plus the download) |
+| iOS 26, fast install (WSL) | 11.4 GB | 49 GB / 24 GB | about 1 h (measured: 48 min of steps, the 10.2 GB from Apple at 52 Mbit/s) |
+| iOS 26, without WSL | 11.4 GB | 49 GB / 24 GB | about 1 h 40 min (its steps timed one by one) |
+| Both (WSL) | 17.6 GB | 62 GB / 37 GB | about 2 h 5 min |
+
+A new WSL distro for iOS 26 adds 0.9 GB to the download, about 15 minutes (the hfsplus module is
+built for your WSL kernel) and about 7 GB on the drive WSL keeps its distros on.
+
+While it runs, the window title shows the step, the time so far and the time left. At the end it
+prints what it took and where everything is (also `install-summary.txt`). Everything goes into one
+folder: `-Dir`, or `X:\ASoftware` on the drive with the most room (no spaces, for iOS 26).
+Stopped, or restarted for WSL? Run it again: it goes on where it stopped.
+
+| Option | Does |
+| --- | --- |
+| `-Version ios16\|ios26\|both`, `-Linux wsl\|helper` | Answers the two questions |
+| `-Dir D:\ASoftware` | The install folder |
+| `-Yes` | Asks nothing |
+| `-Estimate` | Shows what it takes and stops |
+| `-DryRun`, `-List`, `-Check` | What it would run, the steps, what is done; changes nothing |
+
+iOS 16's part is `installer\Install-ASoftware.ps1`, which also runs alone (iOS 26's is
+[`ios26\Install-iOS26.ps1`](ios26/README.md)):
 
 1. the app, our QEMU build and Python
 2. iOS 16.7.16 for the iPhone X, 6.2 GB from Apple (or `-Ipsw` with one you have), and the
    phone's device tree from it
-3. the iOS disk, built from it by a small Linux VM in QEMU (about 22 min)
-4. iOS's first start, which sets up its app database once (20-30 min)
+3. the iOS disk, built from it by a small Linux VM in QEMU (21 min)
+4. iOS's first start, which sets up its app database once (22 min)
 5. a desktop shortcut
 
-Measured on a 16-core laptop CPU (i7-13700HX): the disk 22 min, the first start 21 min, the rest a minute or
-two, plus the 6.2 GB download (about 9 min at 100 Mbit/s). A 4-core CPU takes longer. After that
-iOS starts in seconds with quick boot.
+A 4-core CPU takes longer. After that iOS starts in seconds with quick boot.
 
 ## Use
 
@@ -121,11 +165,11 @@ iOS starts in seconds with quick boot.
 | | While installing | Installed |
 | --- | --- | --- |
 | iOS image from Apple (IPSW) | 6.2 GB | removed (kept with `-KeepIpsw`) |
-| iOS disk | 11.7 GB | 12.2 GB after the first start |
-| Room to build it | 7 GB | removed |
+| iOS disk | 12.4 GB | 12.9 GB after the first start |
+| Room to build it | 7.6 GB | removed |
 | App, QEMU, Python, kernel | 0.7 GB | 0.7 GB |
 | A saved state (quick boot, *Save state*) | | about 3 GB each |
-| **Total** | **about 26 GB** | **about 13 GB**, plus what iOS stores as you use it |
+| **Total** | **about 27 GB** | **about 13.6 GB**, plus what iOS stores as you use it |
 
 ## How it works
 
@@ -201,12 +245,12 @@ refresh was measured against (2026-10-21).
 
 | | iOS 16 | iOS 26 (yeni) |
 | --- | --- | --- |
-| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: `Install-iOS26.cmd` bilgisayarınızda derler (WSL, saatler, 60 GB) |
+| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: aynı kurucu bilgisayarınızda derler (saatler, en çok 57 GB) |
 | **Grafik** | İşlemci | **Bilgisayarın ekran kartı**: iOS'un kendi Metal'i, Vulkan üzerinden |
 | **iOS** | iPhone X'in 16.7.16'sı | iPhone 16'nın 26.6.2'si, Apple'ın araştırma VM'inin çekirdeğinde |
 | **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Sistem uygulamaları, Ayarlar |
 | **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Var: iOS saniyeler içinde kaldığı yerden devam eder |
-| **Başlangıç** | [Kurulum](#kurulum) | [`ios26/`](ios26/README.md#turkce) |
+| **Başlangıç** | [Kurulum](#kurulum) | [Kurulum](#kurulum), sonra [`ios26/`](ios26/README.md#turkce) |
 
 Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu). Aşağısı iOS 16 hakkında.
 
@@ -241,31 +285,75 @@ Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
 
 - Windows 10 (1903 ve sonrası) ya da 11, 64 bit; yönetici izni, WSL ya da Mac gerekmez
 - 4 çekirdekli ya da daha iyi bir işlemci ve 16 GB RAM (iOS 7 GB kullanır)
-- Kurulum sırasında yaklaşık **26 GB**, kurulumdan sonra **13 GB** boş alan ([Disk alanı](#disk-alanı))
+- Kurulum sırasında yaklaşık **27 GB**, kurulumdan sonra **14 GB** boş alan ([Disk alanı](#disk-alanı))
+- iOS 26 ayrıca Vulkan sürücülü bir ekran kartı, 8 ya da daha fazla mantıksal işlemci ve kurulum
+  sırasında yaklaşık 57 GB boş alan ister; kurucu bunlara önce bakar
 
 ### Kurulum
 
-PowerShell'de (yönetici izni gerekmez):
+İki sürüm için tek kurucu: `Install-ASoftware.cmd`. `main`'in bir kopyasından, ya da
+[Releases](https://github.com/alpersamur3/asoft-ios/releases) sayfasındaki `ASoftware-iOS-*-win64.zip`'ten
+çalıştırın; ya da PowerShell'de:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-ios/releases/latest/download/Get-ASoftware.ps1 | iex"
 ```
 
-Ya da [Releases](https://github.com/alpersamur3/asoft-ios/releases) sayfasından
-`ASoftware-iOS-*-win64.zip` dosyasını indirip açın ve `Install-ASoftware.cmd`'yi çalıştırın. Kurulum
-bir kez, yaklaşık bir saat sürer (aşağıda). Her şeyi tek klasöre koyar (`-Dir` verilmezse
-`%LOCALAPPDATA%\ASoftware iOS`); yeniden çalıştırılınca kaldığı yerden devam eder:
+En son sürüm olan 0.1.0 hâlâ yalnız iOS 16'yı kurar; aşağıdaki seçim bir sonraki sürümle gelir.
+
+İki şey sorar:
+
+1. **Hangi iOS:** iOS 16, iOS 26 ya da ikisi (ikisine tek QEMU, bir kez indirilir).
+2. **iOS 26 için, derleme Linux araçlarını nerede çalıştırsın:** *Hızlı kurulum (WSL)* ya da
+   *WSL'siz kurulum* (QEMU'muzda küçük bir Linux VM; yönetici izni ve yeniden başlatma gerekmez).
+   - WSL çalışıyorsa varsayılan WSL'dir.
+   - WSL yoksa kurmayı önerir; bu yönetici izni ve yeniden başlatma ister, sonra kurucuyu yeniden
+     çalıştırınca kaldığı yerden sürer. Ya da WSL'siz devam eder.
+   - Sanallaştırma BIOS/UEFI'de kapalıysa WSL 2 çalışamaz; kurucu nedenini söyleyip WSL'siz kurar.
+   - iOS 16 hiç WSL istemez.
+
+Bir şey başlamadan önce her yolun bilgisayarınızda ne gerektirdiğini gösterir:
+- indirme, kesin, kurucuların kendi dosya listelerinden;
+- en çok ve sonra kalan disk alanı;
+- süre, bizim ölçtüğümüz adımlardan, bilgisayarınızın çekirdek sayısına ve Apple'ın sunucularından
+  10 MB'lık bir ölçüme göre.
+
+Bizim bilgisayarda (i7-13700HX, 24 iş parçacığı, NVMe SSD, 40 Mbit/s):
+
+| | İndirme | Disk: en çok / sonra | Süre |
+| --- | --- | --- | --- |
+| iOS 16 | 6,3 GB | 27 GB / 13,6 GB | yaklaşık 1 sa 5 dk (ölçülen: 43 dk artı indirme) |
+| iOS 26, hızlı kurulum (WSL) | 11,4 GB | 49 GB / 24 GB | yaklaşık 1 sa (ölçülen: 48 dk adım süresi; Apple'dan 10,2 GB, 52 Mbit/s) |
+| iOS 26, WSL'siz | 11,4 GB | 49 GB / 24 GB | yaklaşık 1 sa 40 dk (adımları tek tek ölçüldü) |
+| İkisi (WSL) | 17,6 GB | 62 GB / 37 GB | yaklaşık 2 sa 5 dk |
+
+iOS 26 için yeni bir WSL dağıtımı indirmeye 0,9 GB, süreye yaklaşık 15 dakika (hfsplus modülü WSL
+çekirdeğinize göre derlenir) ve WSL'in dağıtımları tuttuğu sürücüde yaklaşık 7 GB ekler.
+
+Çalışırken pencere başlığı adımı, geçen ve kalan süreyi gösterir. Sonunda ne kadar sürdüğünü ve her
+şeyin nerede olduğunu yazar (`install-summary.txt`'ye de). Her şey tek klasöre gider: `-Dir`, ya da en
+çok boş yeri olan sürücüde `X:\ASoftware` (iOS 26 için boşluksuz). Durdu mu, ya da WSL için yeniden
+başlatıldı mı? Yeniden çalıştırın: kaldığı yerden sürer.
+
+| Seçenek | Ne yapar |
+| --- | --- |
+| `-Version ios16\|ios26\|both`, `-Linux wsl\|helper` | İki soruyu yanıtlar |
+| `-Dir D:\ASoftware` | Kurulum klasörü |
+| `-Yes` | Hiçbir şey sormaz |
+| `-Estimate` | Ne gerektirdiğini gösterip durur |
+| `-DryRun`, `-List`, `-Check` | Ne çalıştıracağı, adımlar, ne yapıldığı; hiçbir şeyi değiştirmez |
+
+iOS 16'nın kısmı `installer\Install-ASoftware.ps1`; tek başına da çalışır (iOS 26'nınki
+[`ios26\Install-iOS26.ps1`](ios26/README.md#turkce)):
 
 1. uygulama, QEMU derlememiz ve Python
 2. iPhone X için iOS 16.7.16, Apple'dan 6,2 GB (ya da elinizdekiyle `-Ipsw`) ve içinden
    telefonun cihaz ağacı
-3. iOS diski, QEMU'daki küçük bir Linux VM'i tarafından kurulur (yaklaşık 22 dk)
-4. iOS'un ilk açılışı; uygulama veritabanını bir kez kurar (20-30 dk)
+3. iOS diski, QEMU'daki küçük bir Linux VM'i tarafından kurulur (21 dk)
+4. iOS'un ilk açılışı; uygulama veritabanını bir kez kurar (22 dk)
 5. masaüstü kısayolu
 
-16 çekirdekli bir dizüstü işlemcisinde (i7-13700HX) ölçülen: disk 22 dk, ilk açılış 21 dk, gerisi bir iki dakika,
-artı 6,2 GB indirme (100 Mbit/s'de yaklaşık 9 dk). 4 çekirdekli işlemcide daha uzun sürer. Sonrasında
-iOS hızlı açılışla saniyeler içinde açılır.
+4 çekirdekli işlemcide daha uzun sürer. Sonrasında iOS hızlı açılışla saniyeler içinde açılır.
 
 ### Kullanım
 
@@ -292,11 +380,11 @@ iOS hızlı açılışla saniyeler içinde açılır.
 | | Kurulum sırasında | Kurulumdan sonra |
 | --- | --- | --- |
 | Apple'dan iOS kalıbı (IPSW) | 6,2 GB | silinir (`-KeepIpsw` ile kalır) |
-| iOS diski | 11,7 GB | ilk açılıştan sonra 12,2 GB |
-| Kurmak için gereken alan | 7 GB | silinir |
+| iOS diski | 12,4 GB | ilk açılıştan sonra 12,9 GB |
+| Kurmak için gereken alan | 7,6 GB | silinir |
 | Uygulama, QEMU, Python, çekirdek | 0,7 GB | 0,7 GB |
 | Kayıtlı durum (hızlı açılış, *Save state*) | | her biri yaklaşık 3 GB |
-| **Toplam** | **yaklaşık 26 GB** | **yaklaşık 13 GB**, artı kullandıkça iOS'un sakladıkları |
+| **Toplam** | **yaklaşık 27 GB** | **yaklaşık 13,6 GB**, artı kullandıkça iOS'un sakladıkları |
 
 ### QEMU
 

@@ -9,6 +9,7 @@
 #     apfs-fuse (sgan81/apfs-fuse at a pinned commit, FUSE 3) into /usr/local/bin
 #     the hfsplus module for this WSL kernel (wsl-build-hfsplus.sh next to this script: WSL's
 #     kernel has none; built from Microsoft's source for `uname -r`, about 5 GB and 20-60 min)
+#     wsl-pro.service masked (Ubuntu's Ubuntu Pro agent; see check)
 # env: ASOFT26_LINUX (default /root/ios26), the build's scratch space
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -55,15 +56,21 @@ check() {
 	else no apfs-fuse "sgan81/apfs-fuse, built from source"; fi
 	if [ -d /sys/module/nbd ] || modinfo nbd > /dev/null 2>&1; then ok nbd "kernel module"
 	else no nbd "WSL's kernel has no nbd module"; fi
-	if grep -q hfsplus /proc/filesystems; then ok hfsplus "loaded"
-	elif [ -f "$KO" ]; then ok hfsplus "built ($KO), loaded when needed"
+	if [ -f "$KO" ]; then ok hfsplus "built ($KO)$(grep -q hfsplus /proc/filesystems && echo ', loaded')"
+	elif grep -q hfsplus /proc/filesystems; then no hfsplus "loaded from another distro's build, none here (a WSL restart unloads it): wsl-build-hfsplus.sh builds it (about 5 GB, 20-60 min)"
 	else no hfsplus "no module for $KVER: wsl-build-hfsplus.sh builds it (about 5 GB, 20-60 min)"; fi
+	# Ubuntu's Ubuntu Pro agent: with no Windows agent it exits and systemd starts it again every
+	# 20 min in a private mount namespace, which keeps a copy of a disk the build has mounted then
+	# (after umount the disk stays busy on its nbd device)
+	if [ "$(systemctl is-enabled wsl-pro.service 2> /dev/null)" = enabled ]; then
+		no wsl-pro "wsl-pro.service restarts every 20 min and keeps the build's mounts: the install mode masks it"
+	fi
 	t=$L; [ -d "$t" ] || t=/root
 	ok scratch "$L: $(df -h --output=avail "$t" | tail -1 | tr -d ' ') free"
 	return $bad
 }
 
-install() {
+do_install() {
 	set -e
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
@@ -74,6 +81,10 @@ install() {
 	fi
 	apt-get install -y -qq $APT_RUN python3.12-minimal:amd64 > /dev/null
 	python_ok || { echo "python3 still does not run: see 'apt-get install --reinstall python3'"; exit 1; }
+	if [ "$(systemctl is-enabled wsl-pro.service 2> /dev/null)" = enabled ]; then
+		systemctl disable --now wsl-pro.service > /dev/null 2>&1 || true
+		systemctl mask wsl-pro.service > /dev/null 2>&1 || true
+	fi
 	if ! command -v ipsw > /dev/null; then
 		t=$(mktemp -d)
 		curl -fsSL -o "$t/ipsw.tar.gz" "$IPSW_URL"
@@ -99,6 +110,6 @@ install() {
 
 case "${1:-}" in
 	check) check ;;
-	install) install ;;
+	install) do_install ;;
 	*) echo "usage: wsl-setup.sh check|install"; exit 2 ;;
 esac

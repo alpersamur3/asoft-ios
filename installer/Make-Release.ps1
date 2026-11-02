@@ -1,6 +1,7 @@
 # Build the Windows release package: what Install-ASoftware.ps1 installs from, in one zip.
 #   powershell -ExecutionPolicy Bypass -File installer\Make-Release.ps1 -Version 0.1.0 [-QemuDist DIR]
-# The repository's tracked files (git archive: no research\ or other local files), the helper VM
+# The repository's tracked files (git archive: no research\ or other local files; ios26\ for the iOS 26
+# installer Setup-ASoftware.ps1 runs), the helper VM
 # (installer/helper/build-*.sh), the newest kernel build (xnu\out-*) and our QEMU build, the one
 # iOS 26 runs on too (ios26/scripts/win-build.sh's dist). Nothing of Apple's: the installer
 # downloads iOS from Apple.
@@ -17,7 +18,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 if (git -C $repo status --porcelain) { throw 'commit first: the package takes the committed files' }
 
-git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Install-ASoftware.cmd LICENSE README.md scripts tools assets installer
+git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Install-ASoftware.cmd LICENSE README.md scripts tools assets installer ios26
 tar -x -f "$Out\src.tar" -C $stage
 Remove-Item "$Out\src.tar"
 
