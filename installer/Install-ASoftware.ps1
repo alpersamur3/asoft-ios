@@ -56,7 +56,7 @@ $ipswSize = 6171035648
 $pythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
 # Our QEMU as a release package, the one ios26/Install-iOS26.ps1 downloads: qemu-sptm's asoft
 # branch (-M virt for iOS 16, -M vresearch for iOS 26) built by ios26/scripts/win-build.sh
-$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-9fa4e67/asoft-qemu-2026.11.01b.zip'; Sha256 = '53DD9F2B95A3DA36B3F371E64591F84D7DC6E5FF54F28B6321FD48FB9E4963D9' }
+$QemuRelease = @{ Version = '2026.11.03'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-7364c4e/asoft-qemu-2026.11.03.zip'; Sha256 = 'C0D48F95ABEB467D8AFDE898BF2987123C60F19D62CFC8400C446F0569E4D5C2' }
 
 # Disk space in GB as Windows shows them, measured for 20H392: the IPSW, the iOS disk as built
 # and after iOS's first start, the room the helper unpacks the IPSW into, the rest, and a saved
@@ -216,6 +216,8 @@ if (-not (Test-Path "$qemuDir\qemu-system-aarch64.exe")) {
                 if ((Get-FileHash $qemuZip -Algorithm SHA256).Hash -ne $QemuRelease.Sha256) { Remove-Item $qemuZip; throw "$($QemuRelease.Url) is not our QEMU package (SHA-256 differs)" }
             }
             Expand-Archive $qemuZip $qemuDir -Force
+            # Install-iOS26.ps1's qemu step leaves the same package where it is
+            Set-Content "$qemuDir\package.sha256" $QemuRelease.Sha256 -Encoding ASCII
             if (-not $KeepQemuZip) { Remove-Item $qemuZip }
         }
     }

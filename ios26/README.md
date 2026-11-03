@@ -21,8 +21,7 @@ same GPU stack on Linux; this is the Windows host.
 
 > [!WARNING]
 > A research preview, not a product. `Install-iOS26.cmd` runs the build below for you, but it
-> takes about 60 GB and several hours (no WSL needed), and until we
-> publish a QEMU package it builds QEMU too. Apple's security model is mostly switched off. Not
+> needs about 50 GB at its peak and one to two hours (no WSL needed). Apple's security model is mostly switched off. Not
 > affiliated with Apple. No Apple software is in this repository or in our forks: you build
 > everything from your own downloads from Apple, the guest's GPU driver too (the installer takes it
 > out of Apple's cloudOS IPSW on your PC).
@@ -67,24 +66,23 @@ yourself; iOS's own date formats are the Turkish ones there (19.08.2026, *19 Aug
 Wednesday*). *Restore* into an emulator that booted on its own needs
 reims-vgpu **ae389a2c** and metal2vulkan **fbb1ae35**: an older build kept the GPU addresses of heaps
 the running emulator had deleted, and the restored state came up with its dock flickering and black
-squares for icons. A state another run saved needs reims-vgpu **ac33003f** (newer than the release
-package's 44a9dac6): an older one kept Metal's own GPU ranges where the running emulator first made
+squares for icons. A state another run saved needs reims-vgpu **ac33003f**: an older one kept Metal's own GPU ranges where the running emulator first made
 them and refused the state's buffers there, and the loaded screen froze while the guest's GPU
 restarted.
 
-**OpenGL ES** (a build from source only; the installer does not set it up yet): as far as we could
-find, the first OpenGL ES drawing on Apple's paravirtual GPU in an iOS guest
-([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793), still open on 2026-11-02). iOS's
-kernel names no OpenGL ES renderer for that GPU, so every `EAGLContext` is nil; `scripts\kc-gles.py`
-adds AppleMetalGLRenderer (OpenGL ES on Metal, in the guest's own shared cache) to the GPU's
-personality in the kernelcache. The renderer's shaders then need GraphicLoader with this repository's
-patch from 9cadb5c (it completes their AIR metadata, on which the guest's Metal compiler crashed),
-reims-vgpu **fd7bd0b5** (it faulted on the renderer's primitive-restart index) and metal2vulkan
-**79e1dd02** (it refused their language tag). With all four, the test app in `glestest\` gets OpenGL ES
-1, 2 and 3 contexts, and its OpenGL ES 2.0 triangles (vertex attributes, a uniform, varyings) draw on
-the PC's GPU and read back the expected pixels. Textures, depth and `discard` are not tested yet. No
-QEMU package or GraphicLoader release with these fixes is published yet; with the older ones OpenGL ES
-draws are dropped or fault the guest's GPU, so the installer leaves the kernel as it is.
+**OpenGL ES**: iOS's kernel names no OpenGL ES renderer for Apple's paravirtual GPU, so every
+`EAGLContext` is nil ([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793), which
+[#798](https://github.com/Lakr233/vphone-cli/pull/798) closed for its Mac guests on 2026-11-02). The
+installer's `gpu` step runs `scripts\kc-gles.py`, which adds AppleMetalGLRenderer (OpenGL ES on Metal,
+in the guest's own shared cache) to the GPU's personality in the kernelcache. The renderer's shaders
+then need GraphicLoader with this repository's patch from 9cadb5c (it completes their AIR metadata,
+on which the guest's Metal compiler crashed), reims-vgpu **fd7bd0b5** (it faulted on the renderer's
+primitive-restart index) and metal2vulkan **79e1dd02** (it refused their language tag). With all four,
+the test app in `glestest\` gets OpenGL ES 1, 2 and 3 contexts, and its OpenGL ES 2.0 triangles (vertex
+attributes, a uniform, varyings) draw on the PC's GPU and read back the expected pixels. Textures,
+depth and `discard` are not tested yet. A compiler plugin of your own (`-GpuPlugin FILE`) or a driver
+bundle of your own keeps the plain kernelcache, since other plugins crash on these shaders; a folder
+installed before this release keeps what it has until `-From gpu`.
 
 Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
 shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
@@ -170,7 +168,7 @@ step and the time left in the window title, and goes on after a stop or a restar
 
 | | Fast install (WSL) | Install without WSL |
 | --- | --- | --- |
-| Needs | WSL 2: if it is missing the installer offers to install it (administrator, one restart) | nothing more: the helper VM is in the release package (from the next release on) |
+| Needs | WSL 2: if it is missing the installer offers to install it (administrator, one restart) | nothing more: the helper VM is in the release package |
 | Linux steps run in | a WSL distro (Ubuntu 24.04, made and set up by the `linux` step) | the helper VM: our QEMU under TCG, up to 8 vCPUs and 4 GB |
 | Download | 11.4 GB; a new distro and the kernel source for its hfsplus module another 0.9 GB | 11.4 GB |
 | Disk: peak / after | 49 GB / 24 GB, and about 7 GB for the distro where WSL keeps them | 49 GB / 24 GB |
@@ -199,9 +197,9 @@ It needs **no WSL**, no administrator and no restart: the steps that need Linux 
 APFS images, writing the HFS+ disk) run in WSL if it is installed, and otherwise in a small Linux VM
 on the QEMU it downloads anyway, as iOS 16's installer does ([below](#without-wsl-the-helper-vm)).
 
-QEMU comes prebuilt: the installer downloads `asoft-qemu-2026.11.01b.zip` (125 MB) from
-qemu-sptm's [`asoft-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
-(qemu-sptm `asoft` 9fa4e67 with reims-vgpu `windows` 44a9dac6 and metal2vulkan `windows` e5b58af7,
+QEMU comes prebuilt: the installer downloads `asoft-qemu-2026.11.03.zip` (125 MB) from
+qemu-sptm's [`asoft-7364c4e` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)
+(qemu-sptm `asoft` 7364c4e with reims-vgpu `windows` fd7bd0b5 and metal2vulkan `windows` 79e1dd02,
 `qemu-img.exe` included; iOS 16's installer takes the same package), checks its SHA-256 and unpacks
 it into `<Work>\qemu`. `-QemuFrom source`
 builds it in MSYS2 instead (hours; MSYS2 is installed with winget if it is missing) and `-QemuFrom
@@ -210,7 +208,7 @@ D:\path\to\dist` takes a build you have (`win-build.sh`'s `dist`).
 ### You need
 
 - Windows 10 2004 or later, or Windows 11, x64; 8 or more cores, 16 GB RAM (the guest gets 4 GB)
-- About 60 GB free on the work folder's drive (the build peaks at about 55 GB and keeps about 30);
+- About 55 GB free on the work folder's drive (the build peaks at about 49 GB and keeps about 24);
   with WSL, about 5 GB more on WSL's drive for its tools and the `hfsplus` module
 - A Vulkan GPU whose driver has `VK_EXT_external_memory_host` (tested: NVIDIA RTX 4080 Laptop)
 
@@ -427,16 +425,16 @@ step rebuilds its layer from scratch; your own overlays on a rebuilt disk (`root
 `-apps` overlays of `.ipa` installs) can no longer boot and are kept as `.old`. The encrypted and
 decrypted Apple images and the intermediate disk are removed once used (`-KeepBuildFiles` keeps them).
 
-The release package `-QemuFrom auto` downloads is `asoft-qemu-2026.11.01b.zip` of qemu-sptm's
-[`asoft-9fa4e67` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67) (125 MB,
+The release package `-QemuFrom auto` downloads is `asoft-qemu-2026.11.03.zip` of qemu-sptm's
+[`asoft-7364c4e` release](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e) (125 MB,
 531 MB unpacked; `$QemuRelease` in `Install-iOS26.ps1` has its URL and SHA-256): `win-build.sh`'s
 `dist` without its `backup-*` folders,
 that is `qemu-system-aarch64.exe` and the windowless `qemu-system-aarch64w.exe` 11.1.0 (qemu-sptm
-`asoft` **9fa4e67**, `-M vresearch` for iOS 26 and `-M virt` for iOS 16, built with reims-vgpu
-`windows` **44a9dac6** and metal2vulkan `windows` **e5b58af7**), `qemu-img.exe` from the same build
+`asoft` **7364c4e**, `-M vresearch` for iOS 26 and `-M virt` for iOS 16, built with reims-vgpu
+`windows` **fd7bd0b5** and metal2vulkan `windows` **79e1dd02**), `qemu-img.exe` from the same build
 (the launcher's overlays, quick boot's saved states), the ANGLE, GTK and GLib runtime they load (DLLs, `lib\`, `share\`, from MSYS2 UCRT64)
 and `BUILD.txt`. For a new build, `installer\Make-QemuPackage.ps1 -Dist <win-build.sh's dist>
--Version 2026.11.01b -Url https://...` makes the zip and prints the `$QemuRelease` line with its
+-Version 2026.11.03 -Url https://...` makes the zip and prints the `$QemuRelease` line with its
 SHA-256; put that line into `Install-iOS26.ps1` and `installer\Install-ASoftware.ps1`.
 
 The published launcher needs a recent build: qemu-sptm `asoft` **4eee4e5** or later (older QEMU
@@ -448,9 +446,9 @@ Home and a page swipe, an older reims-vgpu can break the dock and the icons when
 state into a running emulator, a pair older than reims-vgpu 44a9dac6 and metal2vulkan e5b58af7 can
 place a restored app's texture over another app's live one, and a reims-vgpu older than ac33003f
 can refuse the buffers of a state another run saved, its GPU restarting until the screen freezes);
-the clock catching up after a load needs qemu-sptm **ad92276**. The release package above
-(`asoft-9fa4e67`, reims-vgpu 44a9dac6) is older than this minimum; `-QemuFrom source` builds one
-that has it. Rebuild QEMU (step 1) if yours is older.
+the clock catching up after a load needs qemu-sptm **ad92276**, and the right date at every cold
+boot needs qemu-sptm **7364c4e**. The release package above has all of these. Rebuild QEMU (step 1) if
+yours is older.
 
 `.ipa` installs: the side bar's *Install .ipa…* and the `ipa` folder are wired in the launcher
 (`ipa-server.py`, `ASOFT_IPA_DIR`, and `-Net`), and the `asoftinstalld` daemon (built on macOS, as
@@ -458,8 +456,9 @@ in the iOS 16 build) runs on the disk, fetches the `.ipa` and reaches installd. 
 an APFS volume and the disk's Data volume is HFS+, so the *live* install stops there (error -4). An
 app from an `.ipa` does run on iOS 26 another way: place its `.app` into `/Applications` with its
 Mach-O's CDHash in the trust cache and rebuild LaunchServices, exactly as the system apps are
-installed (step 5.3 / `apply-apps.sh`). Tested with a small Hello app: it appears on the home screen
-and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
+installed (step 5.3 / `apply-apps.sh`). `Install-Ipa.ps1` does that offline, in WSL or, on a PC set up
+without WSL, in the helper VM (about a minute). Tested with a small Hello app: it appears on the home
+screen and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
 
 ### Without WSL (the helper VM)
 
@@ -590,8 +589,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 
 > [!WARNING]
 > Bir araştırma önizlemesi, ürün değil. `Install-iOS26.cmd` yukarıdaki derleme adımlarını sizin
-> yerinize yürütüyor, ama yaklaşık 60 GB ve birkaç saat istiyor (WSL gerekmez) ve biz bir QEMU paketi
-> yayımlayana dek QEMU'yu da derliyor. Apple'ın güvenlik modeli
+> yerinize yürütüyor, ama en çok yaklaşık 50 GB ve bir iki saat istiyor (WSL gerekmez). Apple'ın güvenlik modeli
 > büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur:
 > her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de (kurucu onu
 > sizin bilgisayarınızda Apple'ın cloudOS IPSW'sinden çıkarır).
@@ -636,25 +634,23 @@ biçimleri Türk düzenindedir (19.08.2026, *19 August 2026 Wednesday*). Kendi a
 *Restore* ile durum yüklemek
 reims-vgpu ae389a2c ve metal2vulkan fbb1ae35 ister: eski derleme çalışan emülatörün sildiği heap'lerin
 GPU adreslerini tutuyordu, yüklenen durumun dock'u yanıp sönüyor, ikonları siyah kare çıkıyordu.
-Başka bir çalışmanın kaydettiği durum reims-vgpu ac33003f ister (yayındaki QEMU paketindeki
-44a9dac6'dan yeni): eski derleme Metal'in kendi GPU aralıklarını emülatörün onları ilk yaptığı yerde
+Başka bir çalışmanın kaydettiği durum reims-vgpu ac33003f ister: eski derleme Metal'in kendi GPU aralıklarını emülatörün onları ilk yaptığı yerde
 tutuyor, durumun buffer'larını orada reddediyordu; yüklenen ekran donuyor, misafirin GPU'su yeniden
 başlıyordu.
 
-**OpenGL ES** (yalnız kaynaktan derlemede; kurucu henüz kurmuyor): bulabildiğimiz kadarıyla Apple'ın
-paravirtual GPU'sunda, bir iOS misafirinde ilk OpenGL ES çizimi
-([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793), 2026-11-02'de hâlâ açık). iOS
-çekirdeği bu GPU için bir OpenGL ES renderer'ı adlandırmıyor, bu yüzden her `EAGLContext` nil;
-`scripts\kc-gles.py` kernelcache'te GPU'nun personality'sine AppleMetalGLRenderer'ı (Metal üstünde
-OpenGL ES, misafirin kendi shared cache'inde) ekler. Renderer'ın shader'ları ayrıca bu deponun
-9cadb5c'deki yamasıyla GraphicLoader'ı (misafirin Metal derleyicisinin çöktüğü AIR metadata'sını
-tamamlar), reims-vgpu **fd7bd0b5**'i (renderer'ın primitive-restart index'inde fault veriyordu) ve
-metal2vulkan **79e1dd02**'yi (dil etiketlerini reddediyordu) ister. Dördüyle `glestest\`'teki test
-uygulaması OpenGL ES 1, 2 ve 3 bağlamı alıyor; OpenGL ES 2.0 üçgenleri (vertex attribute, uniform,
-varying) bilgisayarın GPU'sunda çiziliyor ve beklenen pikseller okunuyor. Texture, derinlik ve
-`discard` henüz denenmedi. Bu düzeltmeleri içeren QEMU paketi ve GraphicLoader sürümü henüz
-yayınlanmadı; eskileriyle OpenGL ES çizimleri çizilmeden düşüyor ya da misafirin GPU'sunda fault
-veriyor, bu yüzden kurucu çekirdeğe dokunmuyor.
+**OpenGL ES**: iOS çekirdeği Apple'ın paravirtual GPU'su için bir OpenGL ES renderer'ı adlandırmıyor, bu
+yüzden her `EAGLContext` nil ([vphone-cli #793](https://github.com/Lakr233/vphone-cli/issues/793); bunu
+[#798](https://github.com/Lakr233/vphone-cli/pull/798) 2026-11-02'de kendi Mac misafirleri için kapattı).
+Kurucunun `gpu` adımı `scripts\kc-gles.py`'yi çalıştırır: kernelcache'te GPU'nun personality'sine
+AppleMetalGLRenderer'ı (Metal üstünde OpenGL ES, misafirin kendi shared cache'inde) ekler. Renderer'ın
+shader'ları ayrıca bu deponun 9cadb5c'deki yamasıyla GraphicLoader'ı (misafirin Metal derleyicisinin
+çöktüğü AIR metadata'sını tamamlar), reims-vgpu **fd7bd0b5**'i (renderer'ın primitive-restart index'inde
+fault veriyordu) ve metal2vulkan **79e1dd02**'yi (dil etiketlerini reddediyordu) ister. Dördüyle
+`glestest\`'teki test uygulaması OpenGL ES 1, 2 ve 3 bağlamı alıyor; OpenGL ES 2.0 üçgenleri (vertex
+attribute, uniform, varying) bilgisayarın GPU'sunda çiziliyor ve beklenen pikseller okunuyor. Texture,
+derinlik ve `discard` henüz denenmedi. Kendi derleyici eklentiniz (`-GpuPlugin DOSYA`) ya da kendi sürücü
+paketiniz düz kernelcache'i korur, çünkü başka eklentiler bu shader'larda çöküyor; bu sürümden önce
+kurulmuş bir klasör `-From gpu`'ya kadar olduğu gibi kalır.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
@@ -690,9 +686,9 @@ sonra 24 GB; yeni bir WSL dağıtımı 0,9 GB ve ~15 dk daha, dağıtım için a
 tahminen **1 sa 40 dk**, yönetici ve yeniden başlatma gerekmez. Kurucu 2026-11-02'de bu bilgisayarda
 boş bir klasör ve yeni bir WSL dağıtımından uçtan uca iOS 26'nın açıldığı bir disk kurdu.
 QEMU hazır gelir: kurucu qemu-sptm'nin
-[`asoft-9fa4e67` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-9fa4e67)
-`asoft-qemu-2026.11.01b.zip`'i (125 MB; qemu-sptm `asoft` 9fa4e67, reims-vgpu `windows` 44a9dac6,
-metal2vulkan `windows` e5b58af7, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
+[`asoft-7364c4e` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)
+`asoft-qemu-2026.11.03.zip`'i (125 MB; qemu-sptm `asoft` 7364c4e, reims-vgpu `windows` fd7bd0b5,
+metal2vulkan `windows` 79e1dd02, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
 açar (aynı derleme iOS 16'yı `-M virt` ile açar, iOS 16 kurucusu da bu paketi alır); `-QemuFrom
 source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
 ve WSL'siz uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar

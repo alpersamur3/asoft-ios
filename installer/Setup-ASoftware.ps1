@@ -126,7 +126,7 @@ $HelperWhy = if (-not $Has26Linux) { L 'not in this version yet' 'bu sürümde h
 
 # --- Estimates ---------------------------------------------------------------------------------
 # Sizes of the small downloads the tables give only as URLs (bytes, HTTP Content-Length, 2026-11-01)
-$Bytes = @{ Qemu = 130775266; Python = 11133606; Sysroot = 5409409; DtFixup = 12448; GpuPlugin = 71216; IpswWin = 30720439 }
+$Bytes = @{ Qemu = 130774263; Python = 11133606; Sysroot = 5409409; DtFixup = 12448; GpuPlugin = 72160; IpswWin = 30720439 }
 # The build distro from nothing (the wsl step without one): Ubuntu 24.04's WSL package (388 975 696
 # bytes), the WSL kernel's source for the hfsplus module (230 259 456), ipsw (33 619 542) and the apt
 # packages (about 250 MB). S: apt, apfs-fuse and the rest on one thread; KernelS: the module build
@@ -391,7 +391,7 @@ if (-not $Version) {
         @((L 'iOS 16.7.16 (iPhone X): ready to use, Safari and .ipa apps' 'iOS 16.7.16 (iPhone X): kullanıma hazır, Safari ve .ipa uygulamaları'),
           (L 'no WSL and no administrator needed; about an hour' 'WSL ve yönetici izni gerekmez; yaklaşık bir saat'), $false),
         @((L "iOS 26.6.2 (iPhone 16): research preview, drawn by your PC's GPU" "iOS 26.6.2 (iPhone 16): araştırma önizlemesi, PC'nin GPU'suyla çizilir"),
-          (L 'hours, about 55 GB at its peak; a Vulkan GPU' 'saatler sürer, en çok yaklaşık 55 GB; Vulkan destekli GPU'), $false),
+          (L 'one to two hours, about 50 GB at its peak; a Vulkan GPU' 'bir iki saat sürer, en çok yaklaşık 50 GB; Vulkan destekli GPU'), $false),
         @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false)) 0
     $Version = @('ios16', 'ios26', 'both')[$i]
 }

@@ -72,16 +72,16 @@ $repo = Split-Path $here
 
 # --- What it downloads, pinned (one place) -------------------------------------------------------
 # Our QEMU for Windows as a release package: win-build.sh's dist (qemu-system-aarch64.exe and the
-# windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.01b is
-# qemu-sptm asoft 9fa4e67 (-M vresearch, and -M virt for iOS 16) with reims-vgpu windows 44a9dac6
-# and metal2vulkan windows e5b58af7. For a new build, installer\Make-QemuPackage.ps1 prints this line.
-$QemuRelease = @{ Version = '2026.11.01b'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-9fa4e67/asoft-qemu-2026.11.01b.zip'; Sha256 = '53DD9F2B95A3DA36B3F371E64591F84D7DC6E5FF54F28B6321FD48FB9E4963D9' }
+# windowless w.exe, qemu-img.exe, the ANGLE, GTK and GLib runtime) zipped, 125 MB. 2026.11.03 is
+# qemu-sptm asoft 7364c4e (-M vresearch, and -M virt for iOS 16) with reims-vgpu windows fd7bd0b5
+# and metal2vulkan windows 79e1dd02. For a new build, installer\Make-QemuPackage.ps1 prints this line.
+$QemuRelease = @{ Version = '2026.11.03'; Url = 'https://github.com/alpersamur3/qemu-sptm/releases/download/asoft-7364c4e/asoft-qemu-2026.11.03.zip'; Sha256 = 'C0D48F95ABEB467D8AFDE898BF2987123C60F19D62CFC8400C446F0569E4D5C2' }
 # -QemuFrom source: the checkouts README.md step 1 clones, and the oldest commit of each the
 # launcher works with (README.md, "Start menu and setup")
 $Sources = @(
-    @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'asoft'; Min = 'ad92276' }
-    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = 'ac33003f' }
-    @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = 'e5b58af7' }
+    @{ Dir = 'qemu-sptm'; Url = 'https://github.com/alpersamur3/qemu-sptm'; Branch = 'asoft'; Min = '7364c4e' }
+    @{ Dir = 'reims-vgpu'; Url = 'https://github.com/alpersamur3/reims-vgpu'; Branch = 'windows'; Min = 'fd7bd0b5' }
+    @{ Dir = 'metal2vulkan-win'; Url = 'https://github.com/alpersamur3/metal2vulkan'; Branch = 'windows'; Min = '79e1dd02' }
 )
 # MSYS2 UCRT64 packages: QEMU's build dependencies, plus Rust (reims-vgpu) and GMP (nettle's hogweed)
 $MsysPackages = @('bison', 'diffutils', 'flex', 'git', 'grep', 'make', 'sed', 'tar', 'gzip', 'curl') +
@@ -145,12 +145,12 @@ $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 # The guest GPU driver's Metal compiler plugin (GpuMode cloudos), which no cloudOS has: not Apple's
 # but vphone-cli's GraphicLoader (MIT), built by .github/workflows/graphicloader.yml (arm64e, ad-hoc
 # signed) with ios26/graphicloader/main.mm.patch, published as a release of this repository:
-# graphicloader-57bbc93-p1 is vphone-cli 57bbc93 + that patch, workflow run 41334758482 (Xcode 26.6,
-# iphoneos SDK 26.5), CDHash b02948cceca185f863ebc5896a7ebac6cd00bcc6
-$GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-57bbc93-p1/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '6D7FD8FCC9BD62885997A9091081EB56C9E1D043CBB8A277607BA30EE144B6FE' }
+# graphicloader-9cadb5c is vphone-cli 57bbc93 + that patch (which also compiles OpenGL ES shaders),
+# workflow run 41362155319 (Xcode 26.6, iphoneos SDK 26.5), CDHash f1f51a9a03dab30edcf5a33095942dd24dd41b05
+$GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-9cadb5c/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '089E725E7733B0B84F5F7821E80DF4E7FC12BD876DD84D753493FA51BD57B8A5' }
 # GB (10^9) a step adds on the work folder's drive at most, measured on our build; a build from
-# nothing peaks at about 55 GB (during partition) and keeps about 30 GB
-$Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 23.5; apps = 3.5
+# nothing peaks at about 49 GB (during partition) and keeps about 24 GB
+$Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 18.5; apps = 3.5
             gpu = 1.5; wallpaper = 3.0; collections = 1.5; qemu = 1.5 }
 
 # --- Output, running tools ---------------------------------------------------------------------
@@ -672,8 +672,9 @@ function Get-Wsl {
 
 # --- Booting iOS for a step (the launcher, as the menu runs it) ----------------------------------
 function Assert-Slot {
-    $q = @(Get-Process -Name 'qemu-system-*' -ErrorAction SilentlyContinue)
-    if ($q) { Fail ("a QEMU is running (pid {0}): this step boots iOS and needs ports 4451-4453; close it first" -f (($q | ForEach-Object Id) -join ', ')) }
+    # an iOS 16 QEMU (-M virt) may stay: it has ports of its own
+    $q = @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system-%'" | Where-Object { $_.CommandLine -cmatch '-M\s+"?vresearch' })
+    if ($q) { Fail ("an iOS 26 QEMU is running (pid {0}): this step boots iOS and needs ports 4451-4453; close it first" -f (($q | ForEach-Object ProcessId) -join ', ')) }
     $busy = @(Get-NetTCPConnection -State Listen -LocalPort 4451, 4452, 4453 -ErrorAction SilentlyContinue)
     if ($busy) { Fail ("ports 4451-4453 are in use (pid {0}); this step boots iOS on them" -f (($busy | ForEach-Object OwningProcess) -join ', ')) }
 }
@@ -906,7 +907,7 @@ function Do-Prereq([switch]$Report) {
     }
     $free = Free-GB
     $color = if ($free -lt 56) { 'Yellow' } else { 'Gray' }
-    Say ("{0:N1} GB free on {1}: a build from nothing needs about 55 GB there at its peak and keeps about 30 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
+    Say ("{0:N1} GB free on {1}: a build from nothing needs about 49 GB there at its peak and keeps about 24 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
     $w = Get-Wsl
     if ($LinuxMode -ceq 'helper') {
         Say "the Linux steps: the helper VM (-Linux helper$(if (-not $w.Ok) { '; WSL is not installed' }))"
@@ -1026,10 +1027,17 @@ function Do-Qemu {
     if ($mode -ceq 'keep') {
         Say "keeping the QEMU in $dest (-QemuFrom release, source or FOLDER replaces it)"
     } elseif ($mode -ceq 'release') {
-        Show-Cmd "Expand-Archive $zip $dest"
-        if (-not $DryRun) {
-            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-            Expand-Archive $zip $dest
+        # the same package unpacked here already (iOS 16's installer's, or a QEMU from it running) stays
+        $seen = Join-Path $dest 'package.sha256'
+        if (-not $DryRun -and (Test-Path $exe) -and (Test-Path $seen) -and (Get-Content $seen -Raw).Trim() -ceq $QemuRelease.Sha256) {
+            Say "keeping the QEMU in $dest`: package $($QemuRelease.Version) is unpacked there"
+        } else {
+            Show-Cmd "Expand-Archive $zip $dest"
+            if (-not $DryRun) {
+                if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+                Expand-Archive $zip $dest
+                Set-Content $seen $QemuRelease.Sha256 -Encoding ASCII
+            }
         }
     } elseif ($mode -ceq 'source') {
         Build-Qemu
@@ -1042,7 +1050,7 @@ function Do-Qemu {
     if (-not (Test-Path $exe) -and -not (Test-Path (Join-Path $dest 'qemu-system-aarch64.exe'))) { Fail "no qemu-system-aarch64w.exe in $dest" }
     $build = Join-Path $dest 'BUILD.txt'
     if (Test-Path $build) { foreach ($l in Get-Content $build) { Say $l } }
-    Say 'the launcher needs qemu-sptm ad92276, reims-vgpu ae389a2c and metal2vulkan fbb1ae35 or later, built together' DarkGray
+    Say 'the launcher needs qemu-sptm 7364c4e, reims-vgpu fd7bd0b5 and metal2vulkan 79e1dd02 or later, built together' DarkGray
     if (-not (Test-Path (Join-Path $dest 'qemu-img.exe'))) {
         Say "no qemu-img.exe in $dest`: quick boot (saved states) needs one there or in C:\Program Files\qemu" Yellow
     }
@@ -1445,12 +1453,27 @@ EOF
     $null = Run-Linux 'apps-put' $body -Disks @($osDisk) -In @('dsc', 'dscpatch')
 }
 
+# fw\bootkc: the kernelcache as the firmware step left it, with OpenGL ES's personality keys
+# (kc-gles.py) when the compiler plugin is the release's. GL shaders crash another plugin's guest
+# compiler or fault an older QEMU's GPU, so a driver folder or -GpuPlugin FILE gets the plain one.
+function Set-BootKc([bool]$gles) {
+    $plain = In-Work 'cloud\kernelcache.research.vphone600.decompressed'
+    $kc = In-Work 'fw\bootkc'
+    if ($gles) {
+        $null = Py 'kc-gles.py' @($plain, $kc)
+    } else {
+        Show-Cmd 'copy cloud\kernelcache.research.vphone600.decompressed fw\bootkc'
+        if (-not $DryRun) { Copy-Item $plain $kc -Force }
+    }
+}
+
 function Do-Gpu {
     # 5.2: the guest GPU driver into /System/Library/Extensions (root:wheel, 755/644), its Mach-Os'
     # CDHashes into the trust cache. GpuMode cloudos: Apple's bundle out of the cloudOS OS image
     # (cloudos-gpu-driver.sh: its binary's CDHash must be in that image's trust cache) and the
     # compiler plugin; gpu: the folder you chose, as it is. Without one (GPU-less) no GPU layer.
     $route = Gpu-Route
+    Set-BootKc ($route -ceq 'cloudos' -and -not $GpuPlugin)
     if (-not $route) {
         Say 'GPU-less (no guest GPU driver in the config): no GPU layer' Yellow
         foreach ($f in 'root26-gpu.qcow2', 'root26-gpu.tc') { if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; if (-not $DryRun) { Remove-Item (In-Work $f); Drop-Owned $f } } }
@@ -1625,9 +1648,6 @@ function Show-Checklist {
     foreach ($o in @(@('qemu\qemu-img.exe', 'quick boot''s saved states'), @('root-collections.qcow2', 'the Collections wallpaper (-Collections)'))) {
         $ok = Test-Path (In-Work $o[0])
         Say ("{0} {1,-30} optional: {2}" -f $(if ($ok) { '[ok]  ' } else { '[--]  ' }), $o[0], $o[1]) $(if ($ok) { 'Green' } else { 'DarkGray' })
-    }
-    if (-not (Get-Command python.exe -ErrorAction SilentlyContinue)) {
-        Say ".ipa installs (Install-Ipa.ps1) need python.exe on PATH; $Py is this installer's" DarkGray
     }
     $missing
 }
