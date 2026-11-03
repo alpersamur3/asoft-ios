@@ -28,10 +28,10 @@ English · [Türkçe](#turkce)
 
 | | iOS 16 | iOS 26 (new) |
 | --- | --- | --- |
-| **State** | Ready: a one-line installer | Research preview: the same installer builds it on your PC (hours, 57 GB at the peak) |
+| **State** | Ready: a one-line installer | Research preview: the same installer builds it on your PC (two to three hours, about 50 GB at the peak) |
 | **Graphics** | The CPU | **The PC's GPU**: iOS's own Metal, through Vulkan |
 | **iOS** | 16.7.16 of the iPhone X | 26.6.2 of the iPhone 16, on the kernel of Apple's research VM |
-| **Apps** | Safari with real web pages, `.ipa` installs | The system apps, Settings |
+| **Apps** | Safari with real web pages, `.ipa` installs | Safari with real web pages, `.ipa` installs (at the next start), the system apps, Settings, [OpenGL ES](ios26/README.md#what-works) (our test app so far) |
 | **Quick boot** | Yes: iOS goes on in seconds | Yes: iOS goes on in seconds |
 | **Start** | [Install](#install) | [Install](#install), then [`ios26/`](ios26/README.md) |
 
@@ -106,9 +106,9 @@ On our PC (i7-13700HX, 24 threads, NVMe SSD, 40 Mbit/s):
 | | Download | Disk: peak / after | Time |
 | --- | --- | --- | --- |
 | iOS 16 | 6.3 GB | 27 GB / 13.6 GB | about 1 h 5 min (measured: 43 min plus the download) |
-| iOS 26, fast install (WSL) | 11.4 GB | 49 GB / 24 GB | about 1 h (measured: 48 min of steps, the 10.2 GB from Apple at 52 Mbit/s) |
-| iOS 26, without WSL | 11.4 GB | 49 GB / 24 GB | about 1 h 40 min (its steps timed one by one) |
-| Both (WSL) | 17.6 GB | 62 GB / 37 GB | about 2 h 5 min |
+| iOS 26, fast install (WSL) | 11.4 GB | 49 GB / 25 GB | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s) |
+| iOS 26, without WSL | 11.4 GB | 49 GB / 25 GB | about 1 h 40 min (its steps timed one by one) |
+| Both (WSL) | 17.6 GB | 62 GB / 38 GB | about 2 h 50 min |
 
 A new WSL distro for iOS 26 adds 0.9 GB to the download, about 15 minutes (the hfsplus module is
 built for your WSL kernel) and about 7 GB on the drive WSL keeps its distros on.
@@ -242,10 +242,10 @@ refresh was measured against (2026-10-21).
 
 | | iOS 16 | iOS 26 (yeni) |
 | --- | --- | --- |
-| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: aynı kurucu bilgisayarınızda derler (saatler, en çok 57 GB) |
+| **Durum** | Hazır: tek satırlık kurulum | Araştırma önizlemesi: aynı kurucu bilgisayarınızda derler (iki üç saat, en çok yaklaşık 50 GB) |
 | **Grafik** | İşlemci | **Bilgisayarın ekran kartı**: iOS'un kendi Metal'i, Vulkan üzerinden |
 | **iOS** | iPhone X'in 16.7.16'sı | iPhone 16'nın 26.6.2'si, Apple'ın araştırma VM'inin çekirdeğinde |
-| **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Sistem uygulamaları, Ayarlar |
+| **Uygulamalar** | Gerçek web sayfalarıyla Safari, `.ipa` kurma | Gerçek web sayfalarıyla Safari, `.ipa` kurma (sonraki açılışta), sistem uygulamaları, Ayarlar, [OpenGL ES](ios26/README.md#turkce) (şimdilik test uygulamamız) |
 | **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Var: iOS saniyeler içinde kaldığı yerden devam eder |
 | **Başlangıç** | [Kurulum](#kurulum) | [Kurulum](#kurulum), sonra [`ios26/`](ios26/README.md#turkce) |
 
@@ -318,9 +318,9 @@ Bizim bilgisayarda (i7-13700HX, 24 iş parçacığı, NVMe SSD, 40 Mbit/s):
 | | İndirme | Disk: en çok / sonra | Süre |
 | --- | --- | --- | --- |
 | iOS 16 | 6,3 GB | 27 GB / 13,6 GB | yaklaşık 1 sa 5 dk (ölçülen: 43 dk artı indirme) |
-| iOS 26, hızlı kurulum (WSL) | 11,4 GB | 49 GB / 24 GB | yaklaşık 1 sa (ölçülen: 48 dk adım süresi; Apple'dan 10,2 GB, 52 Mbit/s) |
-| iOS 26, WSL'siz | 11,4 GB | 49 GB / 24 GB | yaklaşık 1 sa 40 dk (adımları tek tek ölçüldü) |
-| İkisi (WSL) | 17,6 GB | 62 GB / 37 GB | yaklaşık 2 sa 5 dk |
+| iOS 26, hızlı kurulum (WSL) | 11,4 GB | 49 GB / 25 GB | yaklaşık 1 sa 45 dk (ölçülen: 75 dk adım süresi, artı Apple'dan 11 GB, 52 Mbit/s'de ~30 dk) |
+| iOS 26, WSL'siz | 11,4 GB | 49 GB / 25 GB | yaklaşık 1 sa 40 dk (adımları tek tek ölçüldü) |
+| İkisi (WSL) | 17,6 GB | 62 GB / 38 GB | yaklaşık 2 sa 50 dk |
 
 iOS 26 için yeni bir WSL dağıtımı indirmeye 0,9 GB, süreye yaklaşık 15 dakika (hfsplus modülü WSL
 çekirdeğinize göre derlenir) ve WSL'in dağıtımları tuttuğu sürücüde yaklaşık 7 GB ekler.

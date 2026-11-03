@@ -149,7 +149,7 @@ $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 # workflow run 41362155319 (Xcode 26.6, iphoneos SDK 26.5), CDHash f1f51a9a03dab30edcf5a33095942dd24dd41b05
 $GpuPluginRelease = @{ Name = 'libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Url = 'https://github.com/alpersamur3/asoft-ios/releases/download/graphicloader-9cadb5c/libAppleParavirtCompilerPluginIOGPUFamily.dylib'; Sha256 = '089E725E7733B0B84F5F7821E80DF4E7FC12BD876DD84D753493FA51BD57B8A5' }
 # GB (10^9) a step adds on the work folder's drive at most, measured on our build; a build from
-# nothing peaks at about 49 GB (during partition) and keeps about 24 GB
+# nothing peaks at about 49 GB (during partition) and keeps about 25 GB
 $Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partition = 18.5; apps = 3.5
             gpu = 1.5; wallpaper = 3.0; collections = 1.5; qemu = 1.5 }
 
@@ -767,6 +767,30 @@ function Wait-PcTime($g) {
     if ($lines) { foreach ($l in $lines) { Say "  $l" DarkGray } }
     else { Say 'not set here (the launcher found no Python, or they were set before); the first start sets them' Yellow }
 }
+# DataMigration (root26-staged.py has it run in this boot) puts LastSystemVersion back into
+# com.apple.migration when it is done; a disk stopped before that runs it again at every start from
+# it, under the Apple logo's progress bar (20 min and more)
+function Wait-Migration($g, [int]$minutes) {
+    $plist = '/var/mobile/Library/Preferences/com.apple.migration.plist'
+    Say "waiting for DataMigration to finish: LastSystemVersion in $plist (up to $minutes min, about 50 on our PC)"
+    Say "the bar under the Apple logo can sit still that long, and the screen goes dark after the lock screen: leave the window open"
+    if ($DryRun) { return }
+    $t0 = Get-Date
+    while (((Get-Date) - $t0).TotalMinutes -lt $minutes) {
+        if (-not (Guest-Alive $g)) { Fail "QEMU ended (the window was closed?) before DataMigration was done; run again to redo this step" }
+        $ErrorActionPreference = 'Continue'
+        try { $out = & $Py -I -B (Join-Path $Scripts 'guest-shell.py') 4451 60 "cat $plist" 2>&1 | Out-String }
+        finally { $ErrorActionPreference = 'Stop' }
+        if ($out.Contains('LastSystemVersion')) {
+            Write-Progress -Activity 'iOS' -Completed
+            Say ("DataMigration done after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes)
+            return
+        }
+        Write-Progress -Activity 'iOS' -Status ("DataMigration ({0:N0} min)" -f ((Get-Date) - $t0).TotalMinutes)
+        Start-Sleep -Seconds 30
+    }
+    Fail "DataMigration was not done in $minutes minutes; run again to redo this step"
+}
 # sync the guest's disks, then quit QEMU (QMP); a QEMU that does not end is stopped
 function Stop-Guest($g, [switch]$NoSync) {
     $synced = $true
@@ -907,7 +931,7 @@ function Do-Prereq([switch]$Report) {
     }
     $free = Free-GB
     $color = if ($free -lt 56) { 'Yellow' } else { 'Gray' }
-    Say ("{0:N1} GB free on {1}: a build from nothing needs about 49 GB there at its peak and keeps about 24 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
+    Say ("{0:N1} GB free on {1}: a build from nothing needs about 49 GB there at its peak and keeps about 25 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
     $w = Get-Wsl
     if ($LinuxMode -ceq 'helper') {
         Say "the Linux steps: the helper VM (-Linux helper$(if (-not $w.Ok) { '; WSL is not installed' }))"
@@ -1539,9 +1563,9 @@ EOF
 }
 
 function Do-Wallpaper {
-    # 5.3.6: root.qcow2 on the top layer, booted once with -Keep: PosterBoard's first run writes the
-    # poster store into it (a throwaway start would redo that every time). Since root26-staged.py,
-    # DataMigration also runs once in this boot.
+    # 5.3.6: root.qcow2 on the top layer, booted once with -Keep: DataMigration (since
+    # root26-staged.py) and then PosterBoard's first run write into it (a throwaway start would redo
+    # them every time).
     $top = Top-Layer
     Need-Space $Space.wallpaper
     Retire-Top
@@ -1551,8 +1575,9 @@ function Do-Wallpaper {
     $g = Start-Guest 'install-wallpaper' @('-Disk', 'root.qcow2', '-Tc', 'root.tc')
     try {
         Wait-Ui $g 40
-        Wait-Running $g ($BakeMinutes * 60) 'PosterBoard writes its poster store'
         Wait-PcTime $g
+        Wait-Migration $g 90
+        Wait-Running $g ($BakeMinutes * 60) 'PosterBoard writes its poster store'
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo the wallpaper' }
     } catch { Boot-Failed $g; throw }
 }

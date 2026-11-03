@@ -21,7 +21,7 @@ same GPU stack on Linux; this is the Windows host.
 
 > [!WARNING]
 > A research preview, not a product. `Install-iOS26.cmd` runs the build below for you, but it
-> needs about 50 GB at its peak and one to two hours (no WSL needed). Apple's security model is mostly switched off. Not
+> needs about 50 GB at its peak and two to three hours (no WSL needed). Apple's security model is mostly switched off. Not
 > affiliated with Apple. No Apple software is in this repository or in our forks: you build
 > everything from your own downloads from Apple, the guest's GPU driver too (the installer takes it
 > out of Apple's cloudOS IPSW on your PC).
@@ -40,6 +40,7 @@ same GPU stack on Linux; this is the Windows host.
 | **Saved states** | The side bar's *Save state* and *Saved states…* |
 | **Network** | `-Net`: a virtio-net NIC on QEMU's user-mode network; iOS brings `en0` up with 10.0.2.15 and Safari loads pages from the internet through it (checked by hand with a real site; DNS and TLS timings not measured) |
 | **Wallpaper** | iOS 26's own wallpaper (MercuryPoster: a 3D scene iOS's Metal draws on the PC's GPU) on the lock and home screens, the Liquid Glass clock over it; `-Wallpaper collections` for iOS 17's Collections one (build step 5.3.6) |
+| **OpenGL ES** | Apple's older graphics API, which many older iOS games and apps still draw with: without it they get no context and crash or draw nothing. Here OpenGL ES 1, 2 and 3 contexts open and OpenGL ES 2.0 draws on the PC's GPU (so far only our own test app, see below: no real game yet, textures and depth untested) |
 | **Speed** | All CPU work is emulated (QEMU TCG). Measured on an i7-13700HX: lock screen about 2 minutes after start, Settings opens in about 4 s, a scroll answers in 0.3 s |
 
 <img src="screenshots/lock-screen-wallpaper.png" width="24%" alt="Lock screen with iOS 26's wallpaper"> <img src="screenshots/lock-screen.png" width="24%" alt="Lock screen with iOS 17's Collections wallpaper"> <img src="screenshots/home-screen.png" width="24%" alt="Home screen"> <img src="screenshots/settings.png" width="24%" alt="Settings">
@@ -81,11 +82,12 @@ primitive-restart index) and metal2vulkan **79e1dd02** (it refused their languag
 the test app in `glestest\` gets OpenGL ES 1, 2 and 3 contexts, and its OpenGL ES 2.0 triangles (vertex
 attributes, a uniform, varyings) draw on the PC's GPU and read back the expected pixels. Textures,
 depth and `discard` are not tested yet. A compiler plugin of your own (`-GpuPlugin FILE`) or a driver
-bundle of your own keeps the plain kernelcache, since other plugins crash on these shaders; a folder
-installed before this release keeps what it has until `-From gpu`.
+bundle of your own keeps the plain kernelcache, since other plugins crash on these shaders. To update
+a folder installed before this release, run `Install-iOS26.cmd -Only qemu` and then `Install-iOS26.cmd`:
+the new plugin redoes the GPU layer and what is built on it by itself, but not the QEMU.
 
-Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start), a clean
-shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
+Not yet: a live `.ipa` install (`.ipa`s install by direct placement at the next start, and that start
+takes about 11 minutes while iOS rebuilds its app database), a clean shutdown from the window (closing it saves or quits at once), audio, the App Store and Apple ID
 services. App switcher cards show a blank page, not the app's last screen. For about 3 minutes after
 the lock screen appears iOS's daemons keep every vCPU busy, so the first taps are slow.
 
@@ -171,8 +173,8 @@ step and the time left in the window title, and goes on after a stop or a restar
 | Needs | WSL 2: if it is missing the installer offers to install it (administrator, one restart) | nothing more: the helper VM is in the release package |
 | Linux steps run in | a WSL distro (Ubuntu 24.04, made and set up by the `linux` step) | the helper VM: our QEMU under TCG, up to 8 vCPUs and 4 GB |
 | Download | 11.4 GB; a new distro and the kernel source for its hfsplus module another 0.9 GB | 11.4 GB |
-| Disk: peak / after | 49 GB / 24 GB, and about 7 GB for the distro where WSL keeps them | 49 GB / 24 GB |
-| Time | measured: 48 min of steps (the 10.2 GB from Apple at 52 Mbit/s, the distro set up); a new distro about 15 min more | about 1 h 40 min (its steps timed one by one, not end to end) |
+| Disk: peak / after | 49 GB / 25 GB, and about 7 GB for the distro where WSL keeps them | 49 GB / 25 GB |
+| Time | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s); a new distro about 15 min more | about 1 h 40 min (its steps timed one by one, not end to end) |
 
 `ios26\Install-iOS26.cmd` is the same build on its own:
 
@@ -208,7 +210,7 @@ D:\path\to\dist` takes a build you have (`win-build.sh`'s `dist`).
 ### You need
 
 - Windows 10 2004 or later, or Windows 11, x64; 8 or more cores, 16 GB RAM (the guest gets 4 GB)
-- About 55 GB free on the work folder's drive (the build peaks at about 49 GB and keeps about 24);
+- About 55 GB free on the work folder's drive (the build peaks at about 49 GB and keeps about 25);
   with WSL, about 5 GB more on WSL's drive for its tools and the `hfsplus` module
 - A Vulkan GPU whose driver has `VK_EXT_external_memory_host` (tested: NVIDIA RTX 4080 Laptop)
 
@@ -400,7 +402,9 @@ QEMU, only the needed members of Apple's two IPSWs (about 10.5 GB, resumable), t
 trees, ramdisk and disk, three boots without you (the first boot of 4.5, the wallpaper bake of 5.3.6
 and, with `-Collections`, the Collections disk), the checklist of what the launcher needs, and a
 Start-menu shortcut. Close a running iOS 26 before the boot steps and let their window close by
-itself. Options:
+itself. The wallpaper step takes about an hour: most of it is iOS's DataMigration, once per disk, whose
+bar under the Apple logo can sit still for a long time, and then the screen goes dark. Doing it here
+is what makes your own first start take about 2.5 minutes instead of about 50. Options:
 
 | Option | What it does |
 |---|---|
@@ -589,7 +593,7 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 
 > [!WARNING]
 > Bir araştırma önizlemesi, ürün değil. `Install-iOS26.cmd` yukarıdaki derleme adımlarını sizin
-> yerinize yürütüyor, ama en çok yaklaşık 50 GB ve bir iki saat istiyor (WSL gerekmez). Apple'ın güvenlik modeli
+> yerinize yürütüyor, ama en çok yaklaşık 50 GB ve iki üç saat istiyor (WSL gerekmez). Apple'ın güvenlik modeli
 > büyük ölçüde kapalı. Apple ile bir bağı yoktur. Bu repoda ve fork'larımızda Apple yazılımı yoktur:
 > her şeyi Apple'dan kendi indirdiklerinizden üretirsiniz, misafirin GPU sürücüsünü de (kurucu onu
 > sizin bilgisayarınızda Apple'ın cloudOS IPSW'sinden çıkarır).
@@ -610,6 +614,10 @@ NVIDIA RTX 4080'de çiziliyor. Aynı misafiri aynı GPU yığınıyla Linux'ta
 - **Duvar kağıdı:** iOS 26'nın kendi duvar kağıdı (MercuryPoster: iOS'un Metal'inin ekran kartında
   çizdiği 3B sahne), üstünde Liquid Glass saat; `-Wallpaper collections` iOS 17 Collections duvar kağıdı
   (derleme adımı 5.3.6, misafir CPU'suna daha hafif).
+- **OpenGL ES:** Apple'ın eski grafik arayüzü; birçok eski iOS oyunu ve uygulaması hâlâ onunla çiziyor,
+  o olmadan bağlam alamıyor, çöküyor ya da hiçbir şey çizmiyor. Burada OpenGL ES 1, 2 ve 3 bağlamları
+  açılıyor, OpenGL ES 2.0 ekran kartında çiziyor (şimdilik yalnız kendi test uygulamamız: gerçek bir oyun
+  henüz denenmedi, doku ve derinlik denenmedi).
 
 **Kayıtlı durumlar ve hızlı açılış:** yan çubuğun *Save state* ve *Saved states…* düğmeleri çalışıyor.
 Değişikliklerini tutan bir diskte pencereyi kapatmak iOS'u olduğu gibi kaydeder, sonraki açılış oradan
@@ -649,8 +657,9 @@ fault veriyordu) ve metal2vulkan **79e1dd02**'yi (dil etiketlerini reddediyordu)
 `glestest\`'teki test uygulaması OpenGL ES 1, 2 ve 3 bağlamı alıyor; OpenGL ES 2.0 üçgenleri (vertex
 attribute, uniform, varying) bilgisayarın GPU'sunda çiziliyor ve beklenen pikseller okunuyor. Texture,
 derinlik ve `discard` henüz denenmedi. Kendi derleyici eklentiniz (`-GpuPlugin DOSYA`) ya da kendi sürücü
-paketiniz düz kernelcache'i korur, çünkü başka eklentiler bu shader'larda çöküyor; bu sürümden önce
-kurulmuş bir klasör `-From gpu`'ya kadar olduğu gibi kalır.
+paketiniz düz kernelcache'i korur, çünkü başka eklentiler bu shader'larda çöküyor. Bu sürümden önce
+kurulmuş bir klasörü güncellemek için önce `Install-iOS26.cmd -Only qemu`, sonra `Install-iOS26.cmd`
+çalıştırın: yeni eklenti GPU katmanını ve üstüne kurulanları kendiliğinden yeniden yapar, QEMU'yu yapmaz.
 
 **Henüz yok:** canlı `.ipa` kurma (`.ipa` bir sonraki açılışta doğrudan yerleştirilir), pencereden temiz
 kapanış, ses, App Store ve Apple ID hizmetleri. Uygulama değiştirici kartları uygulamanın son ekranı
@@ -681,8 +690,8 @@ iOS 26'yı (ya da ikisini) seçin, sonra *Hızlı kurulum (WSL)* ya da *WSL'siz 
 bilgisayarı bir kez denetler; başlamadan önce indirmeyi, en çok ve sonra kalan disk alanını ve
 süreyi gösterir. Ardından `Install-iOS26.ps1`'i iOS 16 ile ortak QEMU'yla yürütür, pencere
 başlığında adımı ve kalan süreyi gösterir, durunca ya da yeniden başlayınca kaldığı yerden sürer.
-Bizim bilgisayarda (40 Mbit/s): WSL'li yol ölçülen **48 dk** adım süresi (11,4 GB indirme, disk en çok 49 GB,
-sonra 24 GB; yeni bir WSL dağıtımı 0,9 GB ve ~15 dk daha, dağıtım için ayrıca ~7 GB); WSL'siz yol
+Bizim bilgisayarda (40 Mbit/s): WSL'li yol yaklaşık **1 sa 45 dk** (ölçülen 75 dk adım süresi, 52 Mbit/s'de ~30 dk indirme; 11,4 GB indirme, disk en çok 49 GB,
+sonra 25 GB; yeni bir WSL dağıtımı 0,9 GB ve ~15 dk daha, dağıtım için ayrıca ~7 GB); WSL'siz yol
 tahminen **1 sa 40 dk**, yönetici ve yeniden başlatma gerekmez. Kurucu 2026-11-02'de bu bilgisayarda
 boş bir klasör ve yeni bir WSL dağıtımından uçtan uca iOS 26'nın açıldığı bir disk kurdu.
 QEMU hazır gelir: kurucu qemu-sptm'nin

@@ -148,10 +148,10 @@ $Ref16 = [ordered]@{
     firststart = @{ S = 1292; Thr = 3; Add = 0.5; Keep = 0.5 }    # then the downloaded IPSW goes
     shortcut   = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
 }
-# iOS 26: measured through this script on 2026-11-02 (WSL; the iPhone files at 6.5 MB/s over 8
-# connections; 48 min in all); Add/Keep from the drive's free space and the files left. H: the step
-# without WSL (-Linux helper), measured step by step the same day with an iOS 16 and an iOS 26 QEMU
-# running alongside (IOS26-INSTALLER.md); persona and cleanup estimated from activation's pattern
+# iOS 26: measured through this script on 2026-11-03 (WSL; 75 min of steps, 59 of them the wallpaper
+# step, which now waits for DataMigration); Add/Keep from the drive's free space and the files left.
+# H: the step without WSL (-Linux helper), measured step by step on 2026-11-02 with an iOS 16 and an
+# iOS 26 QEMU running alongside (IOS26-INSTALLER.md); persona and cleanup estimated from activation's pattern
 $Ref26 = [ordered]@{
     setup       = @{ S = 2; Thr = 1; Add = 0.01; Keep = 0.01 }
     prereq      = @{ S = 2; Thr = 1; Add = 0; Keep = 0 }
@@ -161,22 +161,22 @@ $Ref26 = [ordered]@{
     sysroot     = @{ S = 3; Thr = 1; Add = 0.01; Keep = 0.01 }
     cloudos     = @{ S = 10; Thr = 1; Add = 1.02; Keep = 1.02 }
     iphone      = @{ S = 30; Thr = 1; Add = 10.2; Keep = 10.2 }
-    decrypt     = @{ S = 75; Thr = 4; Add = 10.3; Keep = 0; Linux = $true; H = 60 }   # rootfs removes its images
+    decrypt     = @{ S = 98; Thr = 4; Add = 10.3; Keep = 0; Linux = $true; H = 60 }   # rootfs removes its images
     firmware    = @{ S = 10; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 2 }
-    devicetree  = @{ S = 2; Thr = 1; Add = 0; Keep = 0 }
-    ramdisk     = @{ S = 25; Thr = 2; Add = 0.3; Keep = 0.1; Linux = $true; H = 80 }
-    rootfs      = @{ S = 370; Thr = 4; Add = 23.5; Keep = 18.4; Linux = $true; H = 2080 }   # root26.qcow2 18.4 GB
+    devicetree  = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
+    ramdisk     = @{ S = 14; Thr = 2; Add = 0.3; Keep = 0.1; Linux = $true; H = 80 }
+    rootfs      = @{ S = 332; Thr = 4; Add = 23.5; Keep = 18.4; Linux = $true; H = 2080 }   # root26.qcow2 18.4 GB
     trustcache  = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
-    partition   = @{ S = 190; Thr = 2; Add = 18.2; Keep = 0; Linux = $true; H = 157 }      # root26g replaces root26
-    tweaks      = @{ S = 10; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 78 }
-    firstboot   = @{ S = 65; Thr = 6; Add = 0.2; Keep = 0.2 }
+    partition   = @{ S = 197; Thr = 2; Add = 18.2; Keep = 0; Linux = $true; H = 157 }      # root26g replaces root26
+    tweaks      = @{ S = 8; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 78 }
+    firstboot   = @{ S = 106; Thr = 6; Add = 0.2; Keep = 0.2 }
     persona     = @{ S = 7; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 80 }
     activation  = @{ S = 13; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 87 }
-    apps        = @{ S = 73; Thr = 2; Add = 2.0; Keep = 2.0; Linux = $true; H = 365 }
-    gpu         = @{ S = 20; Thr = 2; Add = 0.3; Keep = 0; Linux = $true; H = 78 }
-    wallpaper   = @{ S = 405; Thr = 6; Add = 1.0; Keep = 0.9 }
+    apps        = @{ S = 76; Thr = 2; Add = 2.0; Keep = 2.0; Linux = $true; H = 365 }
+    gpu         = @{ S = 19; Thr = 2; Add = 0.3; Keep = 0; Linux = $true; H = 78 }
+    wallpaper   = @{ S = 3524; Thr = 6; Add = 1.9; Keep = 1.75 }   # 52 min of it DataMigration
     collections = @{ S = 0; Thr = 1; Add = 0; Keep = 0 }
-    cleanup     = @{ S = 2; Thr = 1; Add = 0; Keep = -10.2; Linux = $true; H = 30 }
+    cleanup     = @{ S = 21; Thr = 1; Add = 0; Keep = -10.2; Linux = $true; H = 30 }
     shortcut    = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
 }
 # The install without WSL: a Linux step with no H takes this many times its WSL time (the helper VM
@@ -391,7 +391,7 @@ if (-not $Version) {
         @((L 'iOS 16.7.16 (iPhone X): ready to use, Safari and .ipa apps' 'iOS 16.7.16 (iPhone X): kullanıma hazır, Safari ve .ipa uygulamaları'),
           (L 'no WSL and no administrator needed; about an hour' 'WSL ve yönetici izni gerekmez; yaklaşık bir saat'), $false),
         @((L "iOS 26.6.2 (iPhone 16): research preview, drawn by your PC's GPU" "iOS 26.6.2 (iPhone 16): araştırma önizlemesi, PC'nin GPU'suyla çizilir"),
-          (L 'one to two hours, about 50 GB at its peak; a Vulkan GPU' 'bir iki saat sürer, en çok yaklaşık 50 GB; Vulkan destekli GPU'), $false),
+          (L 'two to three hours, about 50 GB at its peak; a Vulkan GPU' 'iki üç saat sürer, en çok yaklaşık 50 GB; Vulkan destekli GPU'), $false),
         @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false)) 0
     $Version = @('ios16', 'ios26', 'both')[$i]
 }
