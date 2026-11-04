@@ -115,6 +115,9 @@ if (-not $NoSend -and $adb) {
         Say "Sending to the phone ($dest)"
         Run $adb @('shell', "mkdir -p $dest")
         Run $adb @('push', $Out, "$dest/")
+        # adb's folder and file belong to the shell user (mode 2770): a release build of the app
+        # cannot list them until they are open to it (it also deletes the file after the import)
+        Run $adb @('shell', "chmod 2777 $dest; chmod 666 $dest/$([IO.Path]::GetFileName($Out))")
         $sent = $true
     }
 }
