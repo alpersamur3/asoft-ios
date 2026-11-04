@@ -543,8 +543,9 @@ and never will be: vphone-cli stopped shipping it for the same reason. The insta
   [`graphicloader/main.mm.patch`](graphicloader/main.mm.patch): `main.mm` hands
   `MTLMetalLibCreateExecutableWithTriple` the shared module instead of the module's target triple,
   and unpatched the guest's libraries come out with a garbage triple that reims refuses (QEMU stops
-  30 s into the boot). The installer downloads that build from the release
-  [graphicloader-57bbc93-p1](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-57bbc93-p1)
+  30 s into the boot). The patch also makes it compile OpenGL ES shaders. The installer downloads
+  that build from the release
+  [graphicloader-9cadb5c](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-9cadb5c)
   (vphone-cli 57bbc93 and the patch, with its license and build record) and checks its SHA-256
   (`$GpuPluginRelease`). `-GpuPlugin FILE` takes another build.
 
@@ -714,8 +715,9 @@ IPSW'nin kendi trust cache'inde olduğuna bakar. cloudOS'ta olmayan Metal derley
 (`libAppleParavirtCompilerPluginIOGPUFamily.dylib`; eklentisiz backboardd çöküyor) Apple'ın değil:
 vphone-cli'nin GraphicLoader'ı (MIT), bizim `graphicloader.yml` iş akışımız tek bir düzeltmeyle
 (`graphicloader/main.mm.patch`: `MTLMetalLibCreateExecutableWithTriple`'a modülün target triple'ı
-verilir; yamasız derlemede reims misafirin kütüphanelerini reddeder ve QEMU durur) derliyor, kurucu onu
-[graphicloader-57bbc93-p1](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-57bbc93-p1)
+verilir; yamasız derlemede reims misafirin kütüphanelerini reddeder ve QEMU durur; yama OpenGL ES
+gölgelendiricilerini de derletir) derliyor, kurucu onu
+[graphicloader-9cadb5c](https://github.com/alpersamur3/asoft-ios/releases/tag/graphicloader-9cadb5c)
 sürümünden indirip SHA-256'sını denetler (`-GpuPlugin DOSYA` başka bir derlemeyi alır).
 Menüde `[G]` ile kendi paketinizi (klasör) ya da GPU'suz çalışmayı seçebilirsiniz; seçimi değiştirince
 kurucuyu yeniden çalıştırın, yalnız GPU katmanını ve duvar kağıdını yeniden yapar.
