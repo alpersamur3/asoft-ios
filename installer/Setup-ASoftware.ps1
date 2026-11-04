@@ -150,37 +150,38 @@ $Ref16 = [ordered]@{
 }
 # iOS 26: measured through this script on 2026-11-03 (WSL; 75 min of steps, 59 of them the wallpaper
 # step, which now waits for DataMigration); Add/Keep from the drive's free space and the files left.
-# H: the step without WSL (-Linux helper), measured step by step on 2026-11-02 with an iOS 16 and an
-# iOS 26 QEMU running alongside (IOS26-INSTALLER.md); persona and cleanup estimated from activation's pattern
+# H: the step without WSL (-Linux helper), measured through this script on 2026-11-04 (107 min of
+# steps, 46 of them the Linux steps; the wallpaper and first boot steps took what they take with WSL),
+# partly with an iOS 27 QEMU running alongside
 $Ref26 = [ordered]@{
     setup       = @{ S = 2; Thr = 1; Add = 0.01; Keep = 0.01 }
     prereq      = @{ S = 2; Thr = 1; Add = 0; Keep = 0 }
-    wsl         = @{ S = 60; Thr = 4; Add = 0; Keep = 0; Linux = $true; H = 10 }    # the tools there already: apt, a check
+    wsl         = @{ S = 60; Thr = 4; Add = 0; Keep = 0; Linux = $true; H = 15 }    # the tools there already: apt, a check
     python      = @{ S = 1; Thr = 1; Add = 0.05; Keep = 0.05 }
     qemu        = @{ S = 5; Thr = 1; Add = 0.66; Keep = 0.66 }
     sysroot     = @{ S = 3; Thr = 1; Add = 0.01; Keep = 0.01 }
     cloudos     = @{ S = 10; Thr = 1; Add = 1.02; Keep = 1.02 }
     iphone      = @{ S = 30; Thr = 1; Add = 10.2; Keep = 10.2 }
-    decrypt     = @{ S = 98; Thr = 4; Add = 10.3; Keep = 0; Linux = $true; H = 60 }   # rootfs removes its images
-    firmware    = @{ S = 10; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 2 }
+    decrypt     = @{ S = 98; Thr = 4; Add = 10.3; Keep = 0; Linux = $true; H = 19 }   # rootfs removes its images
+    firmware    = @{ S = 10; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 1 }
     devicetree  = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
-    ramdisk     = @{ S = 14; Thr = 2; Add = 0.3; Keep = 0.1; Linux = $true; H = 80 }
-    rootfs      = @{ S = 332; Thr = 4; Add = 23.5; Keep = 18.4; Linux = $true; H = 2080 }   # root26.qcow2 18.4 GB
+    ramdisk     = @{ S = 14; Thr = 2; Add = 0.3; Keep = 0.1; Linux = $true; H = 106 }
+    rootfs      = @{ S = 332; Thr = 4; Add = 23.5; Keep = 18.4; Linux = $true; H = 1774 }   # root26.qcow2 18.4 GB
     trustcache  = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
-    partition   = @{ S = 197; Thr = 2; Add = 18.2; Keep = 0; Linux = $true; H = 157 }      # root26g replaces root26
-    tweaks      = @{ S = 8; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 78 }
+    partition   = @{ S = 197; Thr = 2; Add = 18.2; Keep = 0; Linux = $true; H = 176 }      # root26g replaces root26
+    tweaks      = @{ S = 8; Thr = 1; Add = 0.1; Keep = 0.1; Linux = $true; H = 86 }
     firstboot   = @{ S = 106; Thr = 6; Add = 0.2; Keep = 0.2 }
-    persona     = @{ S = 7; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 80 }
+    persona     = @{ S = 7; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 46 }
     activation  = @{ S = 13; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 87 }
-    apps        = @{ S = 76; Thr = 2; Add = 2.0; Keep = 2.0; Linux = $true; H = 365 }
-    gpu         = @{ S = 19; Thr = 2; Add = 0.3; Keep = 0; Linux = $true; H = 78 }
+    apps        = @{ S = 76; Thr = 2; Add = 2.0; Keep = 2.0; Linux = $true; H = 359 }
+    gpu         = @{ S = 19; Thr = 2; Add = 0.3; Keep = 0; Linux = $true; H = 58 }
     wallpaper   = @{ S = 3524; Thr = 6; Add = 1.9; Keep = 1.75 }   # 52 min of it DataMigration
     collections = @{ S = 0; Thr = 1; Add = 0; Keep = 0 }
-    cleanup     = @{ S = 21; Thr = 1; Add = 0; Keep = -10.2; Linux = $true; H = 30 }
+    cleanup     = @{ S = 21; Thr = 1; Add = 0; Keep = -10.2; Linux = $true; H = 1 }
     shortcut    = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
 }
 # The install without WSL: a Linux step with no H takes this many times its WSL time (the helper VM
-# runs Linux under TCG; the measured ones took 0.2 to 8 times as long)
+# runs Linux under TCG; the measured ones took 0.05 to 11 times as long)
 $HelperFactor = 4
 
 # GB as the README and both installers count them (10^9; Explorer's are 2^30)
@@ -525,10 +526,7 @@ foreach ($k in $Plans.Keys) {
     $s = Sum-Plan $Plans[$k] $bps
     $sums[$k] = $s
     $note = ''
-    if ($k -eq 'ios26-helper') {
-        if (-not $Helper) { Write-Host ('  {0,-30} {1}' -f (Row-Name $k), $HelperWhy) -ForegroundColor DarkGray; continue }
-        $note = L ' (its steps measured one by one, not end to end)' ' (adımları tek tek ölçüldü, uçtan uca değil)'
-    }
+    if ($k -eq 'ios26-helper' -and -not $Helper) { Write-Host ('  {0,-30} {1}' -f (Row-Name $k), $HelperWhy) -ForegroundColor DarkGray; continue }
     $chosen = ($k -eq 'ios16') -or ($k -eq "ios26-$Linux")
     Write-Host ('  {0,-30} {1,10} {2,22} {3,16}{4}' -f (Row-Name $k), (Fmt-Size $s.Dl), ('{0} / {1}' -f (Fmt-Size $s.Peak), (Fmt-Size $s.After)), ('~' + (Fmt-Time $s.S)), $note) -ForegroundColor $(if ($chosen) { 'Gray' } else { 'DarkGray' })
 }

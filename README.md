@@ -107,7 +107,7 @@ On our PC (i7-13700HX, 24 threads, NVMe SSD, 40 Mbit/s):
 | --- | --- | --- | --- |
 | iOS 16 | 6.3 GB | 27 GB / 13.6 GB | about 1 h 5 min (measured: 43 min plus the download) |
 | iOS 26, fast install (WSL) | 11.4 GB | 49 GB / 25 GB | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s) |
-| iOS 26, without WSL | 11.4 GB | 49 GB / 25 GB | about 1 h 40 min (its steps timed one by one) |
+| iOS 26, without WSL | 11.4 GB | 49 GB / 25 GB | about 2 h 35 min (measured end to end: 107 min of steps, plus the 11 GB from Apple, 47 min at about 32 Mbit/s) |
 | Both (WSL) | 17.6 GB | 62 GB / 38 GB | about 2 h 50 min |
 
 A new WSL distro for iOS 26 adds 0.9 GB to the download, about 15 minutes (the hfsplus module is
@@ -319,7 +319,7 @@ Bizim bilgisayarda (i7-13700HX, 24 iş parçacığı, NVMe SSD, 40 Mbit/s):
 | --- | --- | --- | --- |
 | iOS 16 | 6,3 GB | 27 GB / 13,6 GB | yaklaşık 1 sa 5 dk (ölçülen: 43 dk artı indirme) |
 | iOS 26, hızlı kurulum (WSL) | 11,4 GB | 49 GB / 25 GB | yaklaşık 1 sa 45 dk (ölçülen: 75 dk adım süresi, artı Apple'dan 11 GB, 52 Mbit/s'de ~30 dk) |
-| iOS 26, WSL'siz | 11,4 GB | 49 GB / 25 GB | yaklaşık 1 sa 40 dk (adımları tek tek ölçüldü) |
+| iOS 26, WSL'siz | 11,4 GB | 49 GB / 25 GB | yaklaşık 2 sa 35 dk (uçtan uca ölçülen: 107 dk adım süresi, artı Apple'dan 11 GB, ~32 Mbit/s'de 47 dk) |
 | İkisi (WSL) | 17,6 GB | 62 GB / 38 GB | yaklaşık 2 sa 50 dk |
 
 iOS 26 için yeni bir WSL dağıtımı indirmeye 0,9 GB, süreye yaklaşık 15 dakika (hfsplus modülü WSL

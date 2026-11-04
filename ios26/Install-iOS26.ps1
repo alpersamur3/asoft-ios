@@ -672,8 +672,9 @@ function Get-Wsl {
 
 # --- Booting iOS for a step (the launcher, as the menu runs it) ----------------------------------
 function Assert-Slot {
-    # an iOS 16 QEMU (-M virt) may stay: it has ports of its own
-    $q = @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system-%'" | Where-Object { $_.CommandLine -cmatch '-M\s+"?vresearch' })
+    # an iOS 16 QEMU (-M virt), or a -M vresearch one on other ports, may stay: it has ports of its own
+    $q = @(Get-CimInstance Win32_Process -Filter "Name like 'qemu-system-%'" | Where-Object {
+        $_.CommandLine -cmatch '-M\s+"?vresearch' -and $_.CommandLine -cmatch '(port=|127\.0\.0\.1:)445[123]\b' })
     if ($q) { Fail ("an iOS 26 QEMU is running (pid {0}): this step boots iOS and needs ports 4451-4453; close it first" -f (($q | ForEach-Object ProcessId) -join ', ')) }
     $busy = @(Get-NetTCPConnection -State Listen -LocalPort 4451, 4452, 4453 -ErrorAction SilentlyContinue)
     if ($busy) { Fail ("ports 4451-4453 are in use (pid {0}); this step boots iOS on them" -f (($busy | ForEach-Object OwningProcess) -join ', ')) }

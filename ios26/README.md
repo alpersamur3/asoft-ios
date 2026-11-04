@@ -157,9 +157,9 @@ Windows ── QEMU: jprx/qemu-sptm + our -M vresearch machine (TCG)
 
 > [!IMPORTANT]
 > Written down from the runs that built our disk; `Install-iOS26.cmd` runs the steps in this
-> order. The installer has built a disk iOS 26 boots from end to end once, on our PC, from an empty
-> folder and a new WSL distro (2026-11-02); not yet on a second PC, and not yet without WSL. Read
-> each script before you run it.
+> order. The installer has built a disk iOS 26 boots from end to end on our PC: from an empty folder
+> and a new WSL distro (2026-11-02), and without WSL from an empty folder through the release package
+> (2026-11-04); not yet on a second PC. Read each script before you run it.
 
 The easy way is the repository's one installer, `Install-ASoftware.cmd` at the top of the checkout
 ([Install](../README.md#install)): choose iOS 26 (or both), then *Fast install (WSL)* or *Install
@@ -174,7 +174,7 @@ step and the time left in the window title, and goes on after a stop or a restar
 | Linux steps run in | a WSL distro (Ubuntu 24.04, made and set up by the `linux` step) | the helper VM: our QEMU under TCG, up to 8 vCPUs and 4 GB |
 | Download | 11.4 GB; a new distro and the kernel source for its hfsplus module another 0.9 GB | 11.4 GB |
 | Disk: peak / after | 49 GB / 25 GB, and about 7 GB for the distro where WSL keeps them | 49 GB / 25 GB |
-| Time | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s); a new distro about 15 min more | about 1 h 40 min (its steps timed one by one, not end to end) |
+| Time | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s); a new distro about 15 min more | about 2 h 35 min (measured end to end: 107 min of steps, plus the 11 GB from Apple, 47 min at about 32 Mbit/s) |
 
 `ios26\Install-iOS26.cmd` is the same build on its own:
 
@@ -500,9 +500,11 @@ running at the same time, Apple's files from local IPSWs:
 
 The Linux steps took 49 minutes in all without WSL and 13 with it (the WSL column: the end-to-end
 run through `Install-ASoftware.cmd` on the same PC the same day); each
-VM run spends about 40 s starting and checking the disk's journal. With the downloads and the two
-boots a build without WSL takes about 1 h 40 min on a PC like this one at 40 Mbit/s (an estimate:
-not run end to end).
+VM run spends about 40 s starting and checking the disk's journal. End to end through the release
+package on 2026-11-04 (an empty folder, Apple's files downloaded, partly with another QEMU running
+alongside), the build without WSL took about 2 h 35 min: 107 min of steps, 46 of them the Linux
+steps (rootfs 30 min, apps 6 min) and 60 the wallpaper step's boot, plus 47 min of downloads at
+about 32 Mbit/s.
 
 The VM is `installer/helper/out/Image.gz` and `initrd.gz`, which the `linux` step copies into
 `<Work>\tools\helper` and tests. iOS 16's release package has them; one from before 2026-11-02
@@ -683,7 +685,8 @@ okumak, HFS+ diski yazmak) WSL kuruluysa WSL'de, değilse iOS 16 kurucusunun yar
 indirilen QEMU'da küçük bir Linux) çalışır; şifre çözme ve im4p işleri Windows'ta ipsw.exe ile
 yapılır (`-Linux auto|wsl|helper`, *Without WSL* bölümü). i7-13700HX'te yardımcı VM'le Linux
 adımları toplam 49 dk sürdü, 35 dk'sı kök disk (APFS'ten kopya, TCG altında); WSL'de aynı adımlar
-13 dk.
+13 dk. 2026-11-04'te sürüm paketiyle uçtan uca WSL'siz kurulumda Linux adımları 46 dk sürdü (kök
+disk 30 dk).
 
 **Kolay yol:** depo kökündeki tek kurucu `Install-ASoftware.cmd` ([Kurulum](../README.md#kurulum)):
 iOS 26'yı (ya da ikisini) seçin, sonra *Hızlı kurulum (WSL)* ya da *WSL'siz kurulum*. Kurucu
@@ -692,15 +695,16 @@ süreyi gösterir. Ardından `Install-iOS26.ps1`'i iOS 16 ile ortak QEMU'yla yü
 başlığında adımı ve kalan süreyi gösterir, durunca ya da yeniden başlayınca kaldığı yerden sürer.
 Bizim bilgisayarda (40 Mbit/s): WSL'li yol yaklaşık **1 sa 45 dk** (ölçülen 75 dk adım süresi, 52 Mbit/s'de ~30 dk indirme; 11,4 GB indirme, disk en çok 49 GB,
 sonra 25 GB; yeni bir WSL dağıtımı 0,9 GB ve ~15 dk daha, dağıtım için ayrıca ~7 GB); WSL'siz yol
-tahminen **1 sa 40 dk**, yönetici ve yeniden başlatma gerekmez. Kurucu 2026-11-02'de bu bilgisayarda
-boş bir klasör ve yeni bir WSL dağıtımından uçtan uca iOS 26'nın açıldığı bir disk kurdu.
+yaklaşık **2 sa 35 dk** (uçtan uca ölçülen: 107 dk adım süresi, ~32 Mbit/s'de 47 dk indirme), yönetici
+ve yeniden başlatma gerekmez. Kurucu 2026-11-02'de bu bilgisayarda boş bir klasör ve yeni bir WSL
+dağıtımından uçtan uca iOS 26'nın açıldığı bir disk kurdu; 2026-11-04'te sürüm paketinden WSL'siz de.
 QEMU hazır gelir: kurucu qemu-sptm'nin
 [`asoft-7364c4e` sürümündeki](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)
 `asoft-qemu-2026.11.03.zip`'i (125 MB; qemu-sptm `asoft` 7364c4e, reims-vgpu `windows` fd7bd0b5,
 metal2vulkan `windows` 79e1dd02, `qemu-img.exe` ile) indirir, SHA-256'sını denetler ve `<Work>\qemu`'ya
 açar (aynı derleme iOS 16'yı `-M virt` ile açar, iOS 16 kurucusu da bu paketi alır); `-QemuFrom
-source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir bilgisayarda
-ve WSL'siz uçtan uca denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
+source` onu MSYS2'de derler (saatler), `-QemuFrom KLASÖR` elinizdeki bir yapıyı alır. Kendi yapmadığı diskleri yeniden kurmaz: elle kurulmuş bir klasörü reddeder. Henüz ikinci bir
+bilgisayarda denenmedi. Adımlar ve komutlar yukarıdaki *Build* bölümünde (komutlar
 dilden bağımsız). Misafirin GPU sürücüsü (`AppleParavirtGPUMetalIOGPUFamily.bundle`) Apple'ın donanım
 yazılımı içeriğidir, bu repoda yoktur ve olmayacak. Mac gerekmez: kurucu onu zaten indirdiği cloudOS
 26.4b IPSW'sinin OS imajından (`094-39278-029.dmg.aea`) çıkarır. Apple'ın anahtar sunucusu cloudOS
