@@ -70,6 +70,11 @@ param(
     [string]$TimeZone = '',
     [string]$Region = '',
     [ValidateSet('', '12', '24')] [string]$Clock = '',
+    # Always On Display: with dtree-smpN-aod in the work folder (the installer's apps step makes it
+    # with the disk's libMobileGestalt patch) iOS goes to its Always On Display at the side button
+    # (F2) and the first click there wakes it (Home). -NoAod boots the plain tree (a disk without
+    # the patch must: backboardd asserts otherwise).
+    [switch]$NoAod,
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -86,7 +91,10 @@ $Disk = In-Work $Disk
 $Tc = In-Work $Tc
 $UserDisk = In-Work $UserDisk
 $TmpDir = In-Work $TmpDir
-foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', "dtree-smp$Smp", 'rd-shell.hfs')) {
+$dtree = "dtree-smp$Smp"
+$aod = -not $NoAod -and (Test-Path (Join-Path $Work "$dtree-aod"))
+if ($aod) { $dtree += '-aod' }
+foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', $dtree, 'rd-shell.hfs')) {
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
 }
 foreach ($f in @($Disk, $Tc)) { if (-not (Test-Path $f)) { throw "missing $f" } }
@@ -257,6 +265,9 @@ $env:ASOFT_PAGE_BITS = if ($Page4K) { '12' } else { '14' }
 $env:REIMS_VGPU_LOG = 'warn'
 Remove-Item Env:REIMS_VGPU_TRACE -ErrorAction SilentlyContinue
 $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
+# the window's Always On Display handling (qemu-sptm ui/gtk.c): F2 there takes iOS to it, a click wakes
+if ($aod) { $env:ASOFT_AOD = '1'; Write-Host "Always On Display ($dtree): the side button (F2) takes iOS to it" }
+else { Remove-Item Env:ASOFT_AOD -ErrorAction SilentlyContinue }
 # no window-close=off: the research VM has no power key wired, closing quits
 $display = 'gtk,show-cursor=on,sidebar=on,show-menubar=off,zoom-to-fit=on'
 if (-not $NoGl) { $display += ',gl=on' }
@@ -267,7 +278,7 @@ $qargs = @(
     '-name', '"ASoftware iOS 26"',
     '-M', 'vresearch,fb=1179x2556,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on',
     '-bootkc', "`"$Work\fw\bootkc`"", '-sptm', "`"$Work\fw\sptm`"", '-txm', "`"$Work\fw\txm`"",
-    '-dtree', "`"$Work\dtree-smp$Smp`"", '-tc', "`"$Tc`"", '-ramdisk', "`"$Work\rd-shell.hfs`"",
+    '-dtree', "`"$Work\$dtree`"", '-tc', "`"$Tc`"", '-ramdisk', "`"$Work\rd-shell.hfs`"",
     '-args', "`"$boot`"",
     '-display', $display,
     '-monitor', 'tcp:127.0.0.1:4452,server=on,wait=off',

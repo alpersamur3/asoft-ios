@@ -140,7 +140,17 @@ $IPhoneFiles = [ordered]@{     # member = bytes; into <Work>\iphone, without the
 # subcaches they (and edge-patch.py, 5.4) are in, which are all the apps step copies off the disk
 $DscPosterBoard = @('0x220649088', 'f6179f1a20070034', '3600805239000014')
 $DscCollections = @('0x22066ebc0', 'a0000054', '05000014')
-$DscFiles = @('dyld_shared_cache_arm64e.42', 'dyld_shared_cache_arm64e.03')
+# Always On Display: libMobileGestalt's AlwaysOnDisplayFlipbook answer, mov w0,#1 -> mov w0,#0 (its
+# "AlwaysOnTime, so a flipbook" shortcut): backboardd asserts on the paravirtual display's missing
+# hardware flipbook otherwise. With dt-aod.py's /arm-io/disp0 and root26-aod.py (Auto-Lock Never).
+$DscAod = @('0x1b22c75fc', '20008052', '00008052')
+# The side button: SpringBoard's -[SBLockHardwareButtonActions disallowsLongPressForReason:] answers YES
+# (mov w0,#1; ret). Under TCG SpringBoard's main thread stalls ~0.6 s on the press itself (iOS 26's
+# button hint droplet), past the 0.4 s long-press time, so a click came out as a long press for Siri
+# (there is no Siri here) and did nothing; without the long press a click is always a click. In the
+# .42, on top of PosterBoard's patch.
+$DscLockLongPress = @('0x224448a10', '7f2303d5f657bda9', '20008052c0035fd6')
+$DscFiles = @('dyld_shared_cache_arm64e.42', 'dyld_shared_cache_arm64e.03', 'dyld_shared_cache_arm64e.15')
 $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 # The guest GPU driver's Metal compiler plugin (GpuMode cloudos), which no cloudOS has: not Apple's
 # but vphone-cli's GraphicLoader (MIT), built by .github/workflows/graphicloader.yml (arm64e, ad-hoc
@@ -1252,6 +1262,7 @@ function Do-DeviceTree {
     foreach ($n in 4, 8) {
         $null = Py 'dt-root26smp.py' @((In-Work 'fw\dtree.orig'), (In-Work "dtree-smp$n"), '--cpus', "$n")
     }
+    Aod-DeviceTrees
 }
 
 function Do-Ramdisk {
@@ -1359,7 +1370,8 @@ EOF
 function Do-FirstBoot {
     # 4.5: boot once, so usermanagerd writes the persona manifest and the user session (persona.kb,
     # usersession.kb) the persona step completes. HFS+ lets it write them only when they are new.
-    $g = Start-Guest 'install-firstboot' @('-Disk', 'root26g.qcow2', '-Tc', 'root26.tc')
+    # -NoAod: this disk has no libMobileGestalt patch yet (the apps step's)
+    $g = Start-Guest 'install-firstboot' @('-Disk', 'root26g.qcow2', '-Tc', 'root26.tc', '-NoAod')
     try {
         $test = 'test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && echo __READY__ || echo __WAIT__'
         Say 'waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (up to 30 min)'
@@ -1432,14 +1444,15 @@ EOF
 }
 
 function Do-Apps {
-    # 5.3.1-5.3.5 and 5.4: the staged system apps, PosterBoard's purgeable-file patch (.42) and
-    # UIKitCore's touch edge patch (.03), the apps into /Applications, no scene watchdogs
+    # 5.3.1-5.3.5 and 5.4: the staged system apps, PosterBoard's purgeable-file patch and the side
+    # button's (.42), UIKitCore's touch edge patch (.03) and libMobileGestalt's Always On Display
+    # patch (.15, with Auto-Lock Never: root26-aod.py), the apps into /Applications, no scene watchdogs
     Need-OsImage
     Need-Space $Space.apps
     $body = @'
 disk_tools
 overlay root26-activation.qcow2 root26-apps.qcow2
-fresh dsc dscpatch dscpatch-pb dscpatch-edge
+fresh dsc dscpatch dscpatch-pb dscpatch-lp dscpatch-edge dscpatch-aod
 mkdir -p dsc
 in_root root26-apps.qcow2 <<'EOF'
 bash $S/apply-staged.sh
@@ -1452,19 +1465,23 @@ ls -l dsc
     # (apply-staged.sh and apply-apps.sh read the staged apps off the OS image)
     $osDisk = @{ ro = "os/$OsImage" }
     $null = Run-Linux 'apps-get' $body.Replace('{DSC}', $dsc) -Disks @($osDisk) -Out @('dsc')
-    $pb = Py 'dsc-patch.py' (@((In-Work 'dsc')) + $DscPosterBoard + @(In-Work 'dscpatch-pb'))
+    $null = Py 'dsc-patch.py' (@((In-Work 'dsc')) + $DscPosterBoard + @(In-Work 'dscpatch-pb'))
+    # the side button's patch on top of PosterBoard's (both in the .42): only this .42 goes on the disk
+    $pb = Py 'dsc-patch.py' (@((In-Work 'dscpatch-pb')) + $DscLockLongPress + @(In-Work 'dscpatch-lp'))
     $edge = Py 'edge-patch.py' @((In-Work 'dsc'), (In-Work 'dscpatch-edge'))
-    $hashes = if ($DryRun) { @('NEW_42', 'NEW_03') } else {
+    $aod = Py 'dsc-patch.py' (@((In-Work 'dsc')) + $DscAod + @(In-Work 'dscpatch-aod'))
+    $hashes = if ($DryRun) { @('NEW_42', 'NEW_03', 'NEW_15') } else {
         $a = @($pb | Where-Object { "$_" -cmatch '^dyld_shared_cache_arm64e\.\d+ [0-9a-f]{40} [0-9a-f]{40}$' } | ForEach-Object { "$_".Split(' ')[2] })
         $b = @($edge | Where-Object { "$_" -cmatch '^dyld_shared_cache_arm64e\.\d+ [0-9a-f]{40} ' } | ForEach-Object { "$_".Split(' ')[1] })
-        if ($a.Count -ne 1 -or $b.Count -ne 1) { Fail 'dsc-patch.py / edge-patch.py printed no new CDHash' }
-        @($a[0], $b[0])
+        $c = @($aod | Where-Object { "$_" -cmatch '^dyld_shared_cache_arm64e\.\d+ [0-9a-f]{40} [0-9a-f]{40}$' } | ForEach-Object { "$_".Split(' ')[2] })
+        if ($a.Count -ne 1 -or $b.Count -ne 1 -or $c.Count -ne 1) { Fail 'dsc-patch.py / edge-patch.py printed no new CDHash' }
+        @($a[0], $b[0], $c[0])
     }
     $list = In-Work 'install\work\apps.hashes'
-    Show-Cmd "dscpatch = dscpatch-pb\$($DscFiles[0]) + dscpatch-edge\$($DscFiles[1]); $list = $($hashes -join ' ')"
+    Show-Cmd "dscpatch = dscpatch-lp\$($DscFiles[0]) + dscpatch-edge\$($DscFiles[1]) + dscpatch-aod\$($DscFiles[2]); $list = $($hashes -join ' ')"
     if (-not $DryRun) {
         New-Item -ItemType Directory -Force (In-Work 'dscpatch'), (In-Work 'install\work') | Out-Null
-        Copy-Item (In-Work "dscpatch-pb\$($DscFiles[0])"), (In-Work "dscpatch-edge\$($DscFiles[1])") (In-Work 'dscpatch')
+        Copy-Item (In-Work "dscpatch-lp\$($DscFiles[0])"), (In-Work "dscpatch-edge\$($DscFiles[1])"), (In-Work "dscpatch-aod\$($DscFiles[2])") (In-Work 'dscpatch')
         Set-Content $list $hashes -Encoding ASCII
     }
     $null = Py 'mktc.py' @('-2', (In-Work 'root26-apps.tc'), (In-Work 'root26-activation.tc'), $list)
@@ -1473,9 +1490,24 @@ disk_tools
 in_root root26-apps.qcow2 <<'EOF'
 bash $S/apply-apps.sh
 python3 -I $S/root26-nowatchdog.py $R
+python3 -I $S/root26-aod.py $R
 EOF
 '@
     $null = Run-Linux 'apps-put' $body -Disks @($osDisk) -In @('dsc', 'dscpatch')
+    # the device trees with /arm-io/disp0, for the disks from this one up (Start-iOS26.ps1 takes
+    # dtree-smpN-aod when it is there)
+    Aod-DeviceTrees -Make
+}
+
+# dtree-smpN-aod: dtree-smpN with Always On Display's /arm-io/disp0 (dt-aod.py). Only a disk with the
+# apps step's libMobileGestalt patch may boot with it (backboardd asserts without), so the apps step
+# makes them (-Make) and the device tree step, which writes dtree-smpN again, renews the ones there.
+function Aod-DeviceTrees([switch]$Make) {
+    $env:QEMU_SPTM = In-Work 'tools\qemu-sptm'
+    foreach ($n in 4, 8) {
+        $aodTree = In-Work "dtree-smp$n-aod"
+        if ($Make -or (Test-Path $aodTree)) { $null = Py 'dt-aod.py' @((In-Work "dtree-smp$n"), $aodTree) }
+    }
 }
 
 # fw\bootkc: the kernelcache as the firmware step left it, with OpenGL ES's personality keys
@@ -1767,6 +1799,9 @@ function Step-Sig([string]$id) {
             if ($r) { return "gpu $(Gpu-Driver)" } else { return 'gpuless' }
         }
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
+        # aod: the apps step with Always On Display and Auto-Lock Never (an install before it redoes
+        # apps and the layers on it)
+        'apps' { return 'aod lock-longpress' }
         # the other -Linux has its own tools
         'linux' { return $LinuxMode }
     }
