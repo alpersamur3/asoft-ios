@@ -18,7 +18,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 if (git -C $repo status --porcelain) { throw 'commit first: the package takes the committed files' }
 
-git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26
+git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos
 tar -x -f "$Out\src.tar" -C $stage
 Remove-Item "$Out\src.tar"
 

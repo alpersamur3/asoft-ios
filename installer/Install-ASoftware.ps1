@@ -178,13 +178,13 @@ if ($free -lt $needed + 1) {
 
 Step '1/6 App files'
 if ($src.Path -ne $Dir) {
-    Show "copy Start-iOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, installer, the helper VM and the newest kernel -> $Dir"
+    Show "copy Start-iOS.cmd, Start-watchOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, installer, the helper VM and the newest kernel -> $Dir"
     if (-not $DryRun) {
-        foreach ($item in 'Start-iOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
+        foreach ($item in 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
             if (Test-Path "$src\$item") { Copy-Item "$src\$item" $Dir -Force }
         }
-        # ios26: iOS 26's installer and launcher, run from here (Setup-ASoftware.ps1)
-        foreach ($folder in 'scripts', 'tools', 'assets', 'ios26') {
+        # ios26, watchos: iOS 26's and watchOS's installers and launchers, run from here (Setup-ASoftware.ps1)
+        foreach ($folder in 'scripts', 'tools', 'assets', 'ios26', 'watchos') {
             if (Test-Path "$src\$folder") { robocopy "$src\$folder" "$Dir\$folder" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null }
         }
         New-Item -ItemType Directory -Force "$Dir\installer\helper\out", "$Dir\xnu" | Out-Null

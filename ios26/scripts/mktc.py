@@ -50,6 +50,15 @@ def read_tc(buf):
     return out
 
 
+def is_list(buf):
+    """a CDHash list: only 40-hex-digit words (its first can start with '0', which is DER's 0x30)"""
+    try:
+        words = buf.decode('ascii').split()
+    except UnicodeDecodeError:
+        return False
+    return all(len(w) == 40 and all(c in '0123456789abcdefABCDEF' for c in w) for w in words)
+
+
 def main():
     args = sys.argv[1:]
     ver = 2 if args and args[0] == '-2' else 1
@@ -58,11 +67,13 @@ def main():
     entries = {}
     for path in args[1:]:
         buf = open(path, 'rb').read()
-        if buf[:1] in (b'\x30', b'\x01', b'\x02'):
+        if is_list(buf):
+            for line in buf.decode('ascii').split():
+                entries.setdefault(bytes.fromhex(line), (2, 0, 0))	# SHA-256 truncated, no flags
+        elif b'IM4P' in buf[:16] or buf[:4] in (b'\x01\0\0\0', b'\x02\0\0\0'):
             entries.update(read_tc(buf))
         else:
-            for line in buf.decode().split():
-                entries.setdefault(bytes.fromhex(line), (2, 0, 0))	# SHA-256 truncated, no flags
+            raise SystemExit(f'{path}: neither a trust cache (raw or IM4P) nor a CDHash list')
     out = struct.pack('<I', ver) + b'A' * 16 + struct.pack('<I', len(entries))
     for h in sorted(entries):
         t, f, c = entries[h]
