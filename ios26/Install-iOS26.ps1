@@ -314,6 +314,13 @@ fresh() { :; }
 function Run-Linux([string]$name, [string]$body, [object[]]$Disks = @(), [string[]]$In = @(), [string[]]$Out = @()) {
     if ($LinuxMode -ceq 'helper') { Run-Helper $name $body $Disks $In $Out } else { Run-Wsl $name $body }
 }
+# A Linux step's body: steps\NAME.sh beside this script (the Android app's setup reads the same files),
+# its {PLACEHOLDERS} filled by the caller. Read from this release's own folder, never from a work folder.
+function Step-Body([string]$name) {
+    $f = Join-Path $here "steps\$name.sh"
+    if (-not (Test-Path $f)) { Fail "no $f (this installer comes with its steps folder)" }
+    ([IO.File]::ReadAllText($f) -replace "`r`n", "`n").TrimEnd("`n")
+}
 function Run-Wsl([string]$name, [string]$body) {
     $file = Join-Path $Work "install\sh\$name.sh"
     if ($DryRun) {
@@ -1197,20 +1204,7 @@ function Do-IPhone {
 
 function Do-Decrypt {
     Need-Space $Space.decrypt
-    $body = @'
-mkdir -p os
-for i in {SYSOS} {OS}; do
-	if [ -f "iphone/$i.aea" ]; then
-		rm -f "os/${i:?}"
-	elif [ ! -s "os/$i" ]; then
-		echo "neither iphone/$i.aea nor os/$i: run Install-iOS26.cmd -From iphone"
-		exit 1
-	fi
-done
-if [ -f iphone/{SYSOS}.aea ]; then bash $S/sysos.sh; fi
-if [ -f iphone/{OS}.aea ]; then bash $S/m2-decrypt.sh; fi
-ls -l os/{SYSOS} os/{OS}
-'@
+    $body = Step-Body 'decrypt'
     if ($LinuxMode -ceq 'helper') {
         # the same with ipsw.exe
         foreach ($i in $SysOsImage, $OsImage) {
@@ -1229,12 +1223,7 @@ ls -l os/{SYSOS} os/{OS}
 }
 
 function Do-Firmware {
-    $body = @'
-mkdir -p cloud fw
-ipsw img4 im4p extract cloudos/Firmware/all_flash/DeviceTree.vphone600ap.im4p -o cloud/vphone600ap.adt
-bash $S/kdec.sh
-bash $S/unwrap-fw.sh
-'@
+    $body = Step-Body 'firmware'
     if ($LinuxMode -cne 'helper') { $null = Run-Wsl 'firmware' $body; return }
     # the same with ipsw.exe
     if (-not $DryRun) { New-Item -ItemType Directory -Force (In-Work 'cloud'), (In-Work 'fw') | Out-Null }
@@ -1266,18 +1255,7 @@ function Do-DeviceTree {
 }
 
 function Do-Ramdisk {
-    $body = @'
-disk_tools
-SYSROOT_TAR=$A/downloads/ios_sysroot.tar.gz bash $S/sysroot-check.sh
-mkdir -p $L/rd cloud
-# (the helper VM has it as a disk already, unwrapped by ipsw.exe)
-[ -b $L/rd/rd.apfs ] || ipsw img4 im4p extract cloudos/094-39914-031.dmg -o $L/rd/rd.apfs
-cp cloudos/Firmware/094-39914-031.dmg.trustcache cloud/rd.trustcache.im4p
-bash $S/mk-ramdisk.sh
-cp $L/rd/rd-shell.hfs $A/rd-shell.hfs
-rm -f "${L:?}/rd/rd.apfs"
-ls -l $A/rd-shell.hfs
-'@
+    $body = Step-Body 'ramdisk'
     $rd = 'install\work\rd.apfs'
     if ($LinuxMode -ceq 'helper') {
         if (-not $DryRun) { New-Item -ItemType Directory -Force (In-Work 'install\work') | Out-Null }
@@ -1297,15 +1275,7 @@ function Do-Rootfs {
         Get-IpswMember (IPhone-Source) $AppOsImage (In-Work "iphone\$AppOsImage") $IPhoneFiles[$AppOsImage]
     }
     Need-Space $Space.rootfs
-    $body = @'
-disk_tools
-[ -x $L/sysroot/bin/bash ] || SYSROOT_TAR=$A/downloads/ios_sysroot.tar.gz bash $S/sysroot-check.sh
-fresh root26.qcow2 root26.qcow2.hashes
-# (the helper VM has it as a disk, decrypted by ipsw.exe)
-[ -s os/{SYSOS} ] || [ -b os/{SYSOS} ] || bash $S/sysos.sh
-DROP_SYSOS=1 bash $S/mk-root26.sh
-bash $S/m2-finish.sh $A/root26.qcow2
-'@
+    $body = Step-Body 'rootfs'
     $sysos = In-Work "os\$SysOsImage"
     if ($LinuxMode -ceq 'helper' -and ($DryRun -or -not (Test-Path $sysos))) { Decrypt-Aea (In-Work "iphone\$SysOsImage.aea") (In-Work 'os') }
     $null = Run-Linux 'rootfs' $body.Replace('{SYSOS}', $SysOsImage) `
@@ -1324,11 +1294,7 @@ function Do-TrustCache {
 
 function Do-Partition {
     Need-Space $Space.partition
-    $body = @'
-disk_tools
-fresh root26g.qcow2
-bash $S/mk-root26g.sh $A/root26.qcow2 $A/root26g.qcow2
-'@
+    $body = Step-Body 'partition'
     # the helper VM's new disk: as big as mk-root26g.sh makes it (the root, 16 GiB of Data, 2 MiB)
     $size = '(root26.qcow2 + 16 GiB + 2 MiB)'
     if ($LinuxMode -ceq 'helper' -and -not $DryRun) {
@@ -1345,25 +1311,7 @@ bash $S/mk-root26g.sh $A/root26.qcow2 $A/root26g.qcow2
 }
 
 function Do-Tweaks {
-    $body = @'
-disk_tools
-in_root root26g.qcow2 <<'EOF'
-python3 -I $S/root26-prefs.py $R
-python3 -I $S/root26-sb-undiag.py $R
-python3 -I $S/root26-bbd-fix.py $R
-# the system keybag (4.4.2): a plist with KeyBagKeys = the data "SWEET", root, 0600
-install -d -m 0700 -o 0 -g 0 $R/private/var/keybags
-printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
-	'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-	'<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>' \
-	> $R/private/var/keybags/systembag.kb
-chown 0:0 $R/private/var/keybags/systembag.kb
-chmod 0600 $R/private/var/keybags/systembag.kb
-python3 -I $S/root26-churn.py $R on
-python3 -I $S/root26-dbg-off.py $R
-python3 -I $S/root26-trim.py $R on
-EOF
-'@
+    $body = Step-Body 'tweaks'
     $null = Run-Linux 'tweaks' $body
 }
 
@@ -1397,15 +1345,7 @@ function Do-FirstBoot {
 function Do-Persona {
     # root26-prefs.py again: its activation record needs mobileactivationd's container, which the
     # first boot made (it is idempotent)
-    $body = @'
-disk_tools
-in_root root26g.qcow2 <<'EOF'
-ls -l $R/private/var/keybags
-python3 -I $S/root26-persona.py $R on
-python3 -I $S/root26-mgcache.py $R reset
-python3 -I $S/root26-prefs.py $R
-EOF
-'@
+    $body = Step-Body 'persona'
     $null = Run-Linux 'persona' $body
 }
 
@@ -1414,15 +1354,7 @@ function Do-Activation {
     # constraint category (tc-like.py)
     $orig = In-Work 'install\work\mobileactivationd.orig'
     $new = In-Work 'install\work\mobileactivationd'
-    $body = @'
-disk_tools
-overlay root26g.qcow2 root26-activation.qcow2
-mkdir -p install/work
-in_root root26-activation.qcow2 <<'EOF'
-cp $R/usr/libexec/mobileactivationd $A/install/work/mobileactivationd.orig
-ls -l $R/usr/libexec/mobileactivationd
-EOF
-'@
+    $body = Step-Body 'activation-get'
     $null = Run-Linux 'activation-get' $body -Out @('install/work/mobileactivationd.orig')
     $null = Py 'hact_patch.py' @($orig, $new)
     $out = Py 'reattest.py' @($orig, $new)
@@ -1432,14 +1364,7 @@ EOF
         @("$l".Split(' ')[0], "$l".Split(' ')[1])
     }
     $null = Py 'tc-like.py' @((In-Work 'root26-activation.tc'), (In-Work 'root26.tc'), $h[0], $h[1])
-    $body = @'
-disk_tools
-in_root root26-activation.qcow2 <<'EOF'
-cat $A/install/work/mobileactivationd > $R/usr/libexec/mobileactivationd
-cmp $A/install/work/mobileactivationd $R/usr/libexec/mobileactivationd
-ls -l $R/usr/libexec/mobileactivationd
-EOF
-'@
+    $body = Step-Body 'activation-put'
     $null = Run-Linux 'activation-put' $body -In @('install/work/mobileactivationd')
 }
 
@@ -1449,18 +1374,7 @@ function Do-Apps {
     # patch (.15, with Auto-Lock Never: root26-aod.py), the apps into /Applications, no scene watchdogs
     Need-OsImage
     Need-Space $Space.apps
-    $body = @'
-disk_tools
-overlay root26-activation.qcow2 root26-apps.qcow2
-fresh dsc dscpatch dscpatch-pb dscpatch-lp dscpatch-edge dscpatch-aod
-mkdir -p dsc
-in_root root26-apps.qcow2 <<'EOF'
-bash $S/apply-staged.sh
-C=$R/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld
-cp {DSC} $A/dsc/
-EOF
-ls -l dsc
-'@
+    $body = Step-Body 'apps-get'
     $dsc = ($DscFiles | ForEach-Object { '$C/' + $_ }) -join ' '
     # (apply-staged.sh and apply-apps.sh read the staged apps off the OS image)
     $osDisk = @{ ro = "os/$OsImage" }
@@ -1485,14 +1399,7 @@ ls -l dsc
         Set-Content $list $hashes -Encoding ASCII
     }
     $null = Py 'mktc.py' @('-2', (In-Work 'root26-apps.tc'), (In-Work 'root26-activation.tc'), $list)
-    $body = @'
-disk_tools
-in_root root26-apps.qcow2 <<'EOF'
-bash $S/apply-apps.sh
-python3 -I $S/root26-nowatchdog.py $R
-python3 -I $S/root26-aod.py $R
-EOF
-'@
+    $body = Step-Body 'apps-put'
     $null = Run-Linux 'apps-put' $body -Disks @($osDisk) -In @('dsc', 'dscpatch')
     # the device trees with /arm-io/disp0, for the disks from this one up (Start-iOS26.ps1 takes
     # dtree-smpN-aod when it is there)
@@ -1577,19 +1484,7 @@ function Do-Gpu {
     Show-Cmd "$list = the CDHashes above"
     if (-not $DryRun) { New-Item -ItemType Directory -Force (Split-Path $list) | Out-Null; Set-Content $list $hashes -Encoding ASCII }
     $null = Py 'mktc.py' @('-2', (In-Work 'root26-gpu.tc'), (In-Work 'root26-apps.tc'), $list)
-    $body = @'
-disk_tools
-overlay root26-apps.qcow2 root26-gpu.qcow2
-in_root root26-gpu.qcow2 <<'EOF'
-B=${R:?}/System/Library/Extensions/{BUNDLE}
-rm -rf "${B:?}"
-cp -R $A/install/work/gpu/{BUNDLE} "$B"
-chown -R 0:0 "$B"
-find "$B" -type d -exec chmod 755 {} +
-find "$B" -type f -exec chmod 644 {} +
-ls -l "$B" "$B"/*
-EOF
-'@
+    $body = Step-Body 'gpu'
     $null = Run-Linux 'gpu' $body.Replace('{BUNDLE}', $GpuBundle) -In @('install/work/gpu')
     # kept for the other guests (Install-watchOS.ps1 retargets its own copy): a few MB, which the
     # cleanup leaves, where the 755 MB image it came out of would otherwise be downloaded again
@@ -1640,15 +1535,7 @@ function Do-Collections {
     # on the .42 the disk has now), in an overlay on root.qcow2 with its own trust cache
     Need-Space $Space.collections
     Retire-Top -CollectionsOnly
-    $body = @'
-disk_tools
-overlay root.qcow2 root-collections.qcow2
-fresh dsc-wp dscpatch-wp
-mkdir -p dsc-wp
-in_root root-collections.qcow2 <<'EOF'
-cp $R/System/Cryptexes/OS/System/Library/Caches/com.apple.dyld/{N} $A/dsc-wp/
-EOF
-'@
+    $body = Step-Body 'collections-get'
     $null = Run-Linux 'collections-get' $body.Replace('{N}', $DscFiles[0]) -Out @('dsc-wp')
     $out = Py 'dsc-patch.py' (@((In-Work 'dsc-wp')) + $DscCollections + @(In-Work 'dscpatch-wp'))
     $h = if ($DryRun) { 'NEW_42' } else {
@@ -1660,12 +1547,7 @@ EOF
     Show-Cmd "$list = $h"
     if (-not $DryRun) { New-Item -ItemType Directory -Force (Split-Path $list) | Out-Null; Set-Content $list $h -Encoding ASCII }
     $null = Py 'mktc.py' @('-2', (In-Work 'root-collections.tc'), (In-Work 'root.tc'), $list)
-    $body = @'
-disk_tools
-in_root root-collections.qcow2 <<'EOF'
-bash $S/wp-apply.sh $A/dsc-wp $A/dscpatch-wp
-EOF
-'@
+    $body = Step-Body 'collections-put'
     $null = Run-Linux 'collections-put' $body -In @('dsc-wp', 'dscpatch-wp')
     $g = Start-Guest 'install-collections' @('-Wallpaper', 'collections', '-Disk', 'root-collections.qcow2', '-Tc', 'root-collections.tc')
     try {

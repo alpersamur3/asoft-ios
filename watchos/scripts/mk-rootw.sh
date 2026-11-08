@@ -7,6 +7,9 @@
 # Run by Install-watchOS.ps1's rootfs step (WSL, as root, after disk_tools: nbd and hfsplus loaded).
 # env: OS (the decrypted OS image), OUT (the qcow2 to make), S (the scripts), L (the Linux scratch:
 #      $L/sysroot), NBD (a free nbd device), RSIZE, DSIZE, EXCLUDE
+# OUT may be a block device instead (the helper VM, where QEMU opened the new qcow2, of at least
+# RSIZE + DSIZE + 2 MiB; a link to it keeps $OUT.hashes a file): it is used as it is, without qemu-img
+# and qemu-nbd.
 set -euo pipefail
 OS=${OS:?decrypted OS image}
 OUT=${OUT:?the qcow2 to make}
@@ -16,9 +19,13 @@ NBD=${NBD:-/dev/nbd14}
 SYSROOT=${SYSROOT:-${L:?}/sysroot}
 EXCLUDE=${EXCLUDE:-/System/Library/LinguisticData /System/Library/PreinstalledAssetsV2 /usr/standalone}
 
-case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
-[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
-[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+if [ -b "$OUT" ]; then
+	NBD=$OUT
+else
+	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
+	[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
+	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+fi
 
 work=/tmp/mkrootw
 mkdir -p $work/os $work/root $work/data
@@ -28,7 +35,7 @@ cleanup() {
 		mountpoint -q "$m" && { umount "$m" 2> /dev/null || fusermount -u "$m" 2> /dev/null || true; }
 	done
 	for l in $L1 $L2; do losetup -d $l 2> /dev/null || true; done
-	qemu-nbd -d $NBD > /dev/null 2>&1 || true
+	[ "$NBD" = "$OUT" ] || qemu-nbd -d $NBD > /dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -38,11 +45,15 @@ SRC=$work/os; [ -d $work/os/root ] && SRC=$work/os/root
 
 START=2048
 P1=$(( $(numfmt --from=iec $RSIZE) / 512 )) P2=$(( $(numfmt --from=iec $DSIZE) / 512 ))
-qemu-img create -q -f qcow2 "$OUT" $(( (START + P1 + P2 + 2048) * 512 ))
-modprobe nbd max_part=0 2> /dev/null || true
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null || insmod "${HFSPLUS_KO:?WSL has no hfsplus module: set HFSPLUS_KO}"
-qemu-nbd -f qcow2 --cache=writeback -c $NBD "$OUT"
-sleep 1
+if [ "$NBD" = "$OUT" ]; then
+	[ "$(blockdev --getsize64 "$OUT")" -ge $(( (START + P1 + P2 + 2048) * 512 )) ] || { echo "$OUT is smaller than $(( (START + P1 + P2 + 2048) * 512 )) bytes"; exit 1; }
+else
+	qemu-img create -q -f qcow2 "$OUT" $(( (START + P1 + P2 + 2048) * 512 ))
+	modprobe nbd max_part=0 2> /dev/null || true
+	qemu-nbd -f qcow2 --cache=writeback -c $NBD "$OUT"
+	sleep 1
+fi
 sgdisk -o -n 1:$START:+$P1 -t 1:AF00 -c 1:iOSRoot -n 2:$((START + P1)):+$P2 -t 2:AF00 -c 2:Data $NBD > /dev/null
 L1=$(losetup -f --show -o $((START * 512)) --sizelimit $((P1 * 512)) $NBD)
 L2=$(losetup -f --show -o $(( (START + P1) * 512 )) --sizelimit $((P2 * 512)) $NBD)

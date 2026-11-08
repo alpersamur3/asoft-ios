@@ -166,6 +166,13 @@ overlay() {
 '@
     $p.Replace('{NAME}', $name).Replace('{DISTRO}', $Distro).Replace('{A}', (To-Wsl $Work)).Replace('{L}', $LinuxDir)
 }
+# A Linux step's body: steps\NAME.sh beside this script (the Android app's setup reads the same files),
+# its {PLACEHOLDERS} filled by the caller. Read from this release's own folder, never from a work folder.
+function Step-Body([string]$name) {
+    $f = Join-Path $here "steps\$name.sh"
+    if (-not (Test-Path $f)) { Fail "no $f (this installer comes with its steps folder)" }
+    ([IO.File]::ReadAllText($f) -replace "`r`n", "`n").TrimEnd("`n")
+}
 function Run-Wsl([string]$name, [string]$body) {
     $file = In-Work "install\sh\watch-$name.sh"
     if ($DryRun) {
@@ -440,14 +447,7 @@ function Do-Decrypt {
     # took it away, and go on with one a fetch did not finish (a cut-short fetch leaves a full-size file)
     if (-not $DryRun) { Do-Download }
     Need-Space $Space.decrypt
-    $body = @'
-mkdir -p "$W/os"
-rm -f "$W/os/{OS}" "$W/os/{OS}.ok"
-# (no "| head" here: under pipefail the writer's SIGPIPE, 141, would fail the step at random)
-ipsw fw aea "$W/ipsw/{OS}.aea" -o "$W/os" 2>&1 | tail -3
-ls -l "$W/os/{OS}"
-: > "$W/os/{OS}.ok"
-'@
+    $body = Step-Body 'decrypt'
     $null = Run-Wsl 'decrypt' $body.Replace('{OS}', $OsImage)
     # read decrypted from now on (the .aea goes with its download marker and chunk list)
     if (-not $KeepBuildFiles -and -not $DryRun) {
@@ -461,24 +461,14 @@ function Do-Firmware {
     $in = @($KernelIn | ForEach-Object { In-Work $_ })
     $null = Py 'kc-watch.py' (@('--check') + $in) -NoFail
     if ($script:Code) {
-        $body = @'
-rm -rf "$W/build/kc"; mkdir -p "$W/build/kc"
-ipsw kernel dec "$A/{PACKED}" -o "$W/build/kc" 2>&1 | tail -1
-set -- "$W"/build/kc/kernelcache.research.vphone600*decompressed
-[ -f "$1" ] || { echo "ipsw kernel dec made no kernel out of {PACKED}"; exit 1; }
-mv "$1" "$W/build/kc/kernel"
-ls -l "$W/build/kc/kernel"
-'@
+        $body = Step-Body 'kernel'
         $null = Run-Wsl 'kernel' $body.Replace('{PACKED}', ($KernelPacked -replace '\\', '/'))
         $in += In-Watch 'build\kc\kernel'
     }
     $null = Py 'kc-watch.py' (@((In-Watch 'bootkc-w')) + $in)
     # the device trees: the iOS 26 install's dtree-smp4 (and dtree-smp8) with the Series 9's identity
     if ($DryRun -or (Test-Path (In-Watch 'ipsw\DeviceTree.n207sap.im4p'))) {
-        $body = @'
-ipsw img4 im4p extract "$W/ipsw/DeviceTree.n207sap.im4p" -o "$W/ipsw/DeviceTree.n207sap.raw"
-ls -l "$W/ipsw/DeviceTree.n207sap.raw"
-'@
+        $body = Step-Body 'devicetree'
         $null = Run-Wsl 'devicetree' $body
     }
     $qs = In-Work 'tools\qemu-sptm'
@@ -498,42 +488,13 @@ function Do-Gpu {
         $top = @('root.qcow2', 'root26-gpu.qcow2') | Where-Object { $DryRun -or (Test-Path (In-Work $_)) } | Select-Object -First 1
         if (-not $top) { Fail "no $shared and no iOS 26 disk with the GPU driver (root.qcow2): is iOS 26 GPU-less? Then the watch cannot draw (ClockFace needs Metal)" }
         # (copied under another name and renamed: an interrupted copy never looks like the driver)
-        $body = @'
-disk_tools
-M=$(mktemp -d /tmp/asoft-gpu.XXXXXX) LP=
-trap 'mountpoint -q $M && umount $M; [ -n "$LP" ] && losetup -d $LP; qemu-nbd -d $NBD > /dev/null' EXIT
-qemu-nbd -r -f qcow2 -c $NBD "$A/{TOP}"; sleep 1
-set -- $(sgdisk -i 1 $NBD | awk '/^First sector:/{f=$3} /^Last sector:/{print f, $3}')
-LP=$(losetup -r -f --show -o $(($1 * 512)) --sizelimit $(( ($2 - $1 + 1) * 512 )) $NBD)
-mount -t hfsplus -o ro $LP $M
-B=System/Library/Extensions/{BUNDLE}
-[ -d "$M/$B" ] || { echo "$B is not on {TOP} (a GPU-less iOS 26?)"; exit 1; }
-N=$A/gpu-driver/.new
-rm -rf "$N"; mkdir -p "$N"
-cp -R "$M/$B" "$N/{BUNDLE}"
-rm -rf "$A/gpu-driver/{BUNDLE}"
-mv "$N/{BUNDLE}" "$A/gpu-driver/{BUNDLE}"
-rmdir "$N"
-ls -l "$A/gpu-driver/{BUNDLE}"
-'@
+        $body = Step-Body 'gpu-driver'
         $null = Run-Wsl 'gpu-driver' $body.Replace('{TOP}', $top).Replace('{BUNDLE}', $GpuBundle)
     } else { Say "have gpu-driver\$GpuBundle" }
     # the watch's copy in watchos\gpu (the cleanup keeps it: the patches step copies it onto the disk, the
     # trust cache takes its hashes.txt): both Mach-Os retargeted to watchOS (dyld refuses an iOS one) and
     # ad-hoc signed
-    $body = @'
-N=$W/gpu.new G=$W/gpu.new/{BUNDLE}
-rm -rf "$N"; mkdir -p "$N"
-cp -R "$A/gpu-driver/{BUNDLE}" "$G"
-: > "$N/hashes.txt"
-for f in "$G"/AppleParavirtGPUMetalIOGPUFamily "$G"/libAppleParavirtCompilerPluginIOGPUFamily.dylib; do
-	[ -f "$f" ] || { echo "$f is missing: the GPU driver needs Apple's binary and the compiler plugin"; exit 1; }
-	python3 -I $S/platw.py "$f"
-	id=$(basename "$f" .dylib); [ "$id" = AppleParavirtGPUMetalIOGPUFamily ] && id=com.apple.driver.$id
-	python3 $S/adhoc_sign.py "$f" "$id" | cut -d' ' -f1 | tee -a "$N/hashes.txt"
-done
-rm -rf "$W/gpu"; mv "$N" "$W/gpu"
-'@
+    $body = Step-Body 'gpu'
     $null = Run-Wsl 'gpu' $body.Replace('{BUNDLE}', $GpuBundle)
 }
 # What the gpu step leaves (made again when it is missing: a step after it needs it)
@@ -572,13 +533,7 @@ function Do-Rootfs {
         Do-Decrypt
     }
     Need-Space $Space.rootfs
-    $body = @'
-disk_tools
-[ -x $L/sysroot/bin/bash ] || SYSROOT_TAR=$A/downloads/ios_sysroot.tar.gz bash $S/sysroot-check.sh
-[ -x $L/sysroot/bin/bash ] || { echo "the sysroot did not extract into $L/sysroot (see above)"; exit 1; }
-rm -f "$W/rootw.qcow2" "$W/rootw.qcow2.hashes"
-OS=$W/os/{OS} OUT=$W/rootw.qcow2 bash $S/mk-rootw.sh
-'@
+    $body = Step-Body 'rootfs'
     $null = Run-Wsl 'rootfs' $body.Replace('{OS}', $OsImage)
     # the image is on the disk now
     if (-not $KeepBuildFiles -and -not $DryRun) {
@@ -598,24 +553,7 @@ function Do-Patches {
     Need-Gpu
     Need-Space $Space.patches
     Retire-Watch
-    $body = @'
-disk_tools
-rm -rf "$W/build/dscpatch" "$W/rootw-p.hashes"
-overlay rootw.qcow2 watchos/rootw-p.qcow2
-in_root watchos/rootw-p.qcow2 <<'EOF'
-P=$W/build/dscpatch
-. $S/rootw-patch.sh
-B=$R/System/Library/Extensions/{BUNDLE}
-rm -rf "${B:?}"
-cp -R "$W/gpu/{BUNDLE}" "$B"
-chown -R 0:0 "$B"
-find "$B" -type d -exec chmod 755 {} +
-find "$B" -type f -exec chmod 644 {} +
-ls -l "$B"
-EOF
-# the patched subcaches' CDHashes for the trust cache, kept beside the layer they are on
-cp "$W/build/dscpatch/hashes.txt" "$W/rootw-p.hashes"
-'@
+    $body = Step-Body 'patches'
     $null = Run-Wsl 'patches' $body.Replace('{BUNDLE}', $GpuBundle)
 }
 function Do-TrustCache {
@@ -679,18 +617,7 @@ function Do-Activation {
     Need-Input 'watch.qcow2' 'firstboot'
     # (it mounts watch.qcow2 read-write: never under a running watch)
     Need-NoWatch
-    $body = @'
-disk_tools
-in_root watchos/watch.qcow2 <<'EOF'
-out=$(python3 -I $S/root26-prefs.py $R)
-echo "$out"
-case $'\n'$out in
-*$'\n''data ark /'*) ;;
-*) echo 'no mobileactivationd container on watchos/watch.qcow2: the first boot did not get that far (run -From firstboot)'; exit 1;;
-esac
-find $R/private/var/mobile/Library/Logs/CrashReporter -maxdepth 1 -name '*.ips' -delete 2> /dev/null || true
-EOF
-'@
+    $body = Step-Body 'activation'
     $null = Run-Wsl 'activation' $body
     # the disk is the watch's now: a later redo keeps it (Retire-Watch); the launcher starts only it
     if (-not $DryRun) { Set-Content (In-Watch 'watch.qcow2.ready') (Get-Date -Format s) }
