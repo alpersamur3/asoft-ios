@@ -1559,6 +1559,20 @@ ls -l "$B" "$B"/*
 EOF
 '@
     $null = Run-Linux 'gpu' $body.Replace('{BUNDLE}', $GpuBundle) -In @('install/work/gpu')
+    # kept for the other guests (Install-watchOS.ps1 retargets its own copy): a few MB, which the
+    # cleanup leaves, where the 755 MB image it came out of would otherwise be downloaded again
+    # (copied under another name and renamed: an interrupted copy never looks like the driver)
+    $shared = In-Work "gpu-driver\$GpuBundle"
+    Show-Cmd "copy $copy -> $shared"
+    if (-not $DryRun) {
+        $new = In-Work 'gpu-driver\.new'
+        Remove-Item $new -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force $new | Out-Null
+        Copy-Item $copy (Join-Path $new $GpuBundle) -Recurse -Force
+        Remove-Item $shared -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item (Join-Path $new $GpuBundle) $shared
+        Remove-Item $new -Force
+    }
     # the driver is out of it (a gpu step redone later gets the image again)
     if ($route -ceq 'cloudos') { Drop-Aea $CloudOsGpuImage 'cloudos' }
 }
