@@ -89,6 +89,10 @@ done = set()
 if os.path.exists(done_path):
     done = {int(x) for x in open(done_path).read().split()}
 if not os.path.exists(out) or os.path.getsize(out) != usize:
+    # a new file (or another one): none of the chunks a .done left lists is in it
+    done = set()
+    if os.path.exists(done_path):
+        os.remove(done_path)
     with open(out, 'ab') as f:
         f.truncate(usize)
 nchunks = (usize + CHUNK - 1) // CHUNK
