@@ -1,0 +1,59 @@
+# watchOS 27.2 on ASoftware (research preview)
+
+watchOS 27.2 (24S118) as an Apple Watch Series 9 (Watch7,1, 41 mm) on QEMU's `-M vresearch`, drawn
+by your PC's GPU (reims-vgpu and metal2vulkan, Vulkan), in a drawn watch case that hangs from the
+window and swings when you drag it. It is built on the iOS 26 install of this PC: its research kernel,
+SPTM, TXM, device tree, shell ramdisk, sysroot, GPU driver and WSL distro. Nothing of Apple's is in this
+repository: the installer downloads the watch's OS image from Apple.
+
+## Install
+
+Choose **iOS 26** in `Install-ASoftware.cmd` and answer **yes** to watchOS, or, with iOS 26 installed
+already, run `watchos\Install-watchOS.cmd` (it finds the iOS 26 install through its config):
+
+    watchos\Install-watchOS.cmd [-Work D:\ASoftware\work]
+
+It needs:
+- a finished iOS 26 install whose Linux steps ran in WSL 2, with a GPU driver (GPU-less iOS 26 is not
+  enough: the watch face needs Metal)
+- 5.0 GB from Apple (the IPSW's OS image, its trust cache and the watch's device tree), and
+  about 21 GB free on the install drive while it builds, 14 GB when it is done
+- our QEMU build with the watch's machine options (`qemu-watch\`). It is not published yet: give one with
+  `-QemuFrom <folder>` (`Install-ASoftware.cmd -WatchQemu <folder>`); a folder without the watch's
+  devices (iOS's QEMU) is refused before anything is copied
+
+Like the iOS 26 installer it leaves a marker per step (`work\install\watch-*.done`) and goes on where it
+stopped; `-List` shows the steps, `-DryRun` the commands, `-From STEP` / `-Only STEP` redo steps.
+`-WatchIpsw FILE` reads Apple's files from an IPSW you have, `-WatchDir DIR` takes them as single files
+(several folders: `"D:\a|E:\b"`).
+
+| Step | What it does |
+|---|---|
+| check | the iOS 26 install (its files, WSL distro, GPU driver, plain kernel); copies this version's `ios26\scripts` and `watchos\scripts` into `work\watchos\scripts`, where the steps run them |
+| qemu | the watch QEMU into `qemu-watch\` |
+| download | `141-08453-168.dmg.aea` (5.03 GB), its `.trustcache`, `DeviceTree.n207sap.im4p` |
+| decrypt | the OS image (key from Apple's key service, as for iOS 26); the `.aea` goes |
+| firmware | `kc-watch.py`: iOS 26's plain kernel (`cloud\kernelcache.research.vphone600.decompressed`; its `fw\bootkc` has OpenGL ES's keys) + eight checked patches; `dt-watch.py`: the Series 9's identity on `dtree-smp4` and `dtree-smp8` |
+| gpu | the GPU driver (`work\gpu-driver`, else off the iOS 26 disk), retargeted to watchOS, signed, into `watchos\gpu` (kept) |
+| rootfs | `mk-rootw.sh`: the partitioned HFS+ root (`rootw.qcow2`); the image goes (redone later, it gets the image again) |
+| patches | `rootw-patch.sh` on a new overlay, `rootw-p.qcow2`: launchd jobs, keybag, three shared-cache patches, prefs, Setup skipped, the display kept on, the staged apps built in; the GPU driver |
+| trustcache | `rootw.tc`: Apple's trust cache + the signed sysroot, patched subcache and driver |
+| firstboot | boots once on `watch.qcow2`, an overlay on `rootw-p.qcow2`, which is the disk you use, until mobileactivationd has made its data ark and the watch face is up: DataMigration and the face's first start hold the Apple logo for 14 min here, after which a start takes 6 |
+| activation | seeds the activation record into that container (the step fails if there is none) |
+| cleanup, shortcut | removes the build's leftovers; Start menu "ASoftware watchOS" |
+
+Redoing a disk step (`-From`/`-Only` rootfs, patches or firstboot) after a finished install keeps the
+watch's disk as `watchos\watch.qcow2.old` (what the watch wrote, on the old layers) and starts a new one;
+until the redo is through, `Start-watchOS.cmd` says the install is not finished.
+
+## Use
+
+`Start-watchOS.cmd` (or the Start menu shortcut). The mouse is the touchscreen; the wheel over the watch
+or a drag on the drawn Digital Crown turns it, a click presses it (hold for Siri); the side button opens
+Control Center. iOS 26 can run beside it (the watch uses ports 4471-4473). `-Snapshot` keeps a session's
+writes out of `watch.qcow2`; `-Smp 8` gives it eight CPUs (here the face came no sooner: 7 min, 6 with four).
+
+Works: the watch faces and their gallery, the app grid, Settings, Notification Center, Stopwatch, World
+Clock, Calendar, Maps, Compass, touch, the crown, the side button, the network. Not yet: pairing with an
+iPhone (watchOS's Setup is skipped), the App Store, Weather data, Control Center's controls (it opens
+empty). It runs under TCG on your CPU, so it is slow: the face comes up about 6 minutes after the start.

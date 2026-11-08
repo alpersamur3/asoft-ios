@@ -1,0 +1,155 @@
+0x18bf15dcc:	(__TEXT.__text)	_kern_SwapWait	IOMobileFramebuffer
+0x18bf15e5c:	(__TEXT.__text)	_kern_SwapBegin	IOMobileFramebuffer
+0x18bf16134:	(__TEXT.__text)	_kern_SwapSetEventWait	IOMobileFramebuffer
+0x18bf1619c:	(__TEXT.__text)	_kern_SwapSetEventSignal	IOMobileFramebuffer
+0x18bf16204:	(__TEXT.__text)	_kern_SwapSetLayer	IOMobileFramebuffer
+0x18bf16948:	(__TEXT.__text)	_kern_SwapSetAmbientLux	IOMobileFramebuffer
+0x18bf16998:	(__TEXT.__text)	_kern_SwapSetBrightness	IOMobileFramebuffer
+0x18bf16a54:	(__TEXT.__text)	_kern_SwapDebugInfo	IOMobileFramebuffer
+0x18bf16a7c:	(__TEXT.__text)	_kern_SwapEnd	IOMobileFramebuffer
+0x18bf170ac:	(__TEXT.__text)	_kern_SwapSetBrightnessLimit	IOMobileFramebuffer
+0x18bf173e0:	(__TEXT.__text)	_kern_SwapSetCEStrength	IOMobileFramebuffer
+0x18bf179fc:	(__TEXT.__text)	_kern_SwapCancel	IOMobileFramebuffer
+0x18bf17c80:	(__TEXT.__text)	_kern_SwapCancelAll	IOMobileFramebuffer
+0x18bf436f0:	(__TEXT.__text)	_kern_SwapSecureLayer	IOMobileFramebuffer
+0x18bf43790:	(__TEXT.__text)	_kern_SwapSetPostBlendLayer	IOMobileFramebuffer
+0x18bf43904:	(__TEXT.__text)	_kern_SwapSetEventSignalOnGlass	IOMobileFramebuffer
+0x18bf4393c:	(__TEXT.__text)	_kern_SwapSetPostBlendLayerEventWait	IOMobileFramebuffer
+0x18bf439ac:	(__TEXT.__text)	_kern_SwapSetPostBlendLayerEventSignalOnGlass	IOMobileFramebuffer
+0x18bf439ec:	(__TEXT.__text)	_kern_SwapSetPostBlendLayerEventSignal	IOMobileFramebuffer
+0x18bf43a5c:	(__TEXT.__text)	_kern_SwapSubtitleRegion	IOMobileFramebuffer
+0x18bf43afc:	(__TEXT.__text)	_kern_SwapSetParams	IOMobileFramebuffer
+0x18bf43c60:	(__TEXT.__text)	_kern_SwapSetExternalAppleLook	IOMobileFramebuffer
+0x18bf43cc0:	(__TEXT.__text)	_kern_SwapSetIndicatorBrightness	IOMobileFramebuffer
+0x18bf43d44:	(__TEXT.__text)	_kern_SwapSetSecureAnimation	IOMobileFramebuffer
+0x18bf43d80:	(__TEXT.__text)	_kern_SwapSetIndicatorBrightnessLimit	IOMobileFramebuffer
+0x18bf43dec:	(__TEXT.__text)	_kern_SwapSetDisplayEdr	IOMobileFramebuffer
+0x18bf43e54:	(__TEXT.__text)	_kern_SwapSetDisplayEdrHeadroom	IOMobileFramebuffer
+0x18bf43ebc:	(__TEXT.__text)	_kern_SwapSetUserLuminanceAdjustment	IOMobileFramebuffer
+0x18bf43f44:	(__TEXT.__text)	_kern_SwapSetGCPStrength	IOMobileFramebuffer
+0x18bf43f94:	(__TEXT.__text)	_kern_SwapSetPulseWidthMaximization	IOMobileFramebuffer
+0x18bf43fd8:	(__TEXT.__text)	_kern_SwapSetLayerEDRCompensation	IOMobileFramebuffer
+0x18bf440a8:	(__TEXT.__text)	_kern_SwapSetResTransitionStrength	IOMobileFramebuffer
+0x18bf44150:	(__TEXT.__text)	_kern_SwapSetColorMatrix	IOMobileFramebuffer
+0x18bf44220:	(__TEXT.__text)	_kern_SwapSignal	IOMobileFramebuffer
+0x18bf44290:	(__TEXT.__text)	_kern_SwapWaitWithTimeout	IOMobileFramebuffer
+0x18bf4431c:	(__TEXT.__text)	_kern_SwapGetCurrent	IOMobileFramebuffer
+0x18bf4438c:	(__TEXT.__text)	_kern_SwapCancelAllGetCurrent	IOMobileFramebuffer
+0x18bf44678:	(__TEXT.__text)	_kern_SwapSetBlit	IOMobileFramebuffer
+0x18bf44874:	(__TEXT.__text)	_kern_SwapSetLFCTimestamps	IOMobileFramebuffer
+0x18bf462e8:	(__TEXT.__text)	_kern_SwapWARSettings	IOMobileFramebuffer
+0x18bf4b178:	(__TEXT.__text)	_virt_SwapSetLayer	IOMobileFramebuffer
+0x18bf4b2a8:	(__TEXT.__text)	_virt_SwapSetEventWait	IOMobileFramebuffer
+0x18bf4b2b0:	(__TEXT.__text)	_virt_SwapSetEventSignalOnGlass	IOMobileFramebuffer
+0x18bf4b2b8:	(__TEXT.__text)	_virt_SwapSetEventSignal	IOMobileFramebuffer
+0x18bf4b2c0:	(__TEXT.__text)	_virt_SwapDebugInfo	IOMobileFramebuffer
+0x18bf4b2cc:	(__TEXT.__text)	_virt_SwapBegin	IOMobileFramebuffer
+0x18bf4b35c:	(__TEXT.__text)	_virt_SwapEnd	IOMobileFramebuffer
+0x18bf4b5d8:	(__TEXT.__text)	_virt_SwapSignal	IOMobileFramebuffer
+0x18bf4b5e4:	(__TEXT.__text)	_virt_SwapWait	IOMobileFramebuffer
+0x18bf4b5f8:	(__TEXT.__text)	_virt_SwapWaitWithTimeout	IOMobileFramebuffer
+0x18bf4b608:	(__TEXT.__text)	_virt_SwapCancel	IOMobileFramebuffer
+0x18bf40bd4: (regular) _IOMobileFramebufferSwapActiveRegion
+0x18bf15e40: (regular) _IOMobileFramebufferSwapBegin
+0x18bf17780: (regular) _IOMobileFramebufferSwapCancel
+0x18bf17bb0: (regular) _IOMobileFramebufferSwapCancelAll
+0x18bf40f3c: (regular) _IOMobileFramebufferSwapCancelAllGetCurrent
+0x18bf16a38: (regular) _IOMobileFramebufferSwapDebugInfo
+0x18bf40cb8: (regular) _IOMobileFramebufferSwapDirtyRegion
+0x18bf16a60: (regular) _IOMobileFramebufferSwapEnd
+0x18bf40f20: (regular) _IOMobileFramebufferSwapGetCurrent
+0x18bf40b24: (regular) _IOMobileFramebufferSwapSecureLayer
+0x18bf16910: (regular) _IOMobileFramebufferSwapSetAmbientLux
+0x18bf40d90: (regular) _IOMobileFramebufferSwapSetAppleLook
+0x18bf466a0: (regular) _IOMobileFramebufferSwapSetBackgroundColor
+0x18bf40bcc: (regular) _IOMobileFramebufferSwapSetBlit
+0x18bf1692c: (regular) _IOMobileFramebufferSwapSetBrightness
+0x18bf17090: (regular) _IOMobileFramebufferSwapSetBrightnessLimit
+0x18bf40ea8: (regular) _IOMobileFramebufferSwapSetColorMatrix
+0x18bf41094: (regular) _IOMobileFramebufferSwapSetColorRemapMode
+0x18bf40e38: (regular) _IOMobileFramebufferSwapSetDisplayEdr
+0x18bf40e54: (regular) _IOMobileFramebufferSwapSetDisplayEdrHeadroom
+0x18bf16180: (regular) _IOMobileFramebufferSwapSetEventSignal
+0x18bf40b5c: (regular) _IOMobileFramebufferSwapSetEventSignalOnGlass
+0x18bf16118: (regular) _IOMobileFramebufferSwapSetEventWait
+0x18bf47f4c: (regular) _IOMobileFramebufferSwapSetGainMap
+0x18bf467e4: (regular) _IOMobileFramebufferSwapSetGammaTable
+0x18bf41a60: (regular) _IOMobileFramebufferSwapSetICCCurve
+0x18bf419b8: (regular) _IOMobileFramebufferSwapSetICCMatrix
+0x18bf40de0: (regular) _IOMobileFramebufferSwapSetIndicatorBrightness
+0x18bf40e1c: (regular) _IOMobileFramebufferSwapSetIndicatorBrightnessLimit
+0x18bf40da8: (regular) _IOMobileFramebufferSwapSetLFCTimestamps
+0x18bf48140: (regular) _IOMobileFramebufferSwapSetLPRMetadata
+0x18bf161e8: (regular) _IOMobileFramebufferSwapSetLayer
+0x18bf40ec4: (regular) _IOMobileFramebufferSwapSetLayerEDRCompensation
+0x18bf40d70: (regular) _IOMobileFramebufferSwapSetParams
+0x18bf40b40: (regular) _IOMobileFramebufferSwapSetPostBlendLayer
+0x18bf40bb0: (regular) _IOMobileFramebufferSwapSetPostBlendLayerEventSignal
+0x18bf40b94: (regular) _IOMobileFramebufferSwapSetPostBlendLayerEventSignalOnGlass
+0x18bf40b78: (regular) _IOMobileFramebufferSwapSetPostBlendLayerEventWait
+0x18bf4964c: (regular) _IOMobileFramebufferSwapSetPulseWidthMaximization
+0x18bf49668: (regular) _IOMobileFramebufferSwapSetResTransitionStrength
+0x18bf40e00: (regular) _IOMobileFramebufferSwapSetSecureAnimation
+0x18bf40d38: (regular) _IOMobileFramebufferSwapSetTimestamp
+0x18bf15f28: (regular) _IOMobileFramebufferSwapSetTimestamps
+0x18bf41858: (regular) _IOMobileFramebufferSwapSetToneMapConfig
+0x18bf467c8: (regular) _IOMobileFramebufferSwapSetUISubRegion
+0x18bf467d4: (regular) _IOMobileFramebufferSwapSetVideoDestEdgeAlpha
+0x18bf40ee0: (regular) _IOMobileFramebufferSwapSignal
+0x18bf40d1c: (regular) _IOMobileFramebufferSwapSubtitleRegion
+0x18bf4672c: (regular) _IOMobileFramebufferSwapUIEdgeBlendMode
+0x18bf15db0: (regular) _IOMobileFramebufferSwapWait
+0x18bf40f04: (regular) _IOMobileFramebufferSwapWaitWithTimeout
+0x18bf40dc4: (regular) _IOMobileFramebufferSwapWorkaroundSettings
+0x18bf40bd4: (external|__TEXT.__text)        _IOMobileFramebufferSwapActiveRegion
+0x18bf15e40: (external|__TEXT.__text)        _IOMobileFramebufferSwapBegin
+0x18bf17780: (external|__TEXT.__text)        _IOMobileFramebufferSwapCancel
+0x18bf17bb0: (external|__TEXT.__text)        _IOMobileFramebufferSwapCancelAll
+0x18bf40f3c: (external|__TEXT.__text)        _IOMobileFramebufferSwapCancelAllGetCurrent
+0x18bf16a38: (external|__TEXT.__text)        _IOMobileFramebufferSwapDebugInfo
+0x18bf40cb8: (external|__TEXT.__text)        _IOMobileFramebufferSwapDirtyRegion
+0x18bf16a60: (external|__TEXT.__text)        _IOMobileFramebufferSwapEnd
+0x18bf40f20: (external|__TEXT.__text)        _IOMobileFramebufferSwapGetCurrent
+0x18bf40b24: (external|__TEXT.__text)        _IOMobileFramebufferSwapSecureLayer
+0x18bf16910: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetAmbientLux
+0x18bf40d90: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetAppleLook
+0x18bf466a0: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetBackgroundColor
+0x18bf40bcc: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetBlit
+0x18bf1692c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetBrightness
+0x18bf17090: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetBrightnessLimit
+0x18bf40ea8: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetColorMatrix
+0x18bf41094: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetColorRemapMode
+0x18bf40e38: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetDisplayEdr
+0x18bf40e54: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetDisplayEdrHeadroom
+0x18bf16180: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetEventSignal
+0x18bf40b5c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetEventSignalOnGlass
+0x18bf16118: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetEventWait
+0x18bf47f4c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetGainMap
+0x18bf467e4: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetGammaTable
+0x18bf41a60: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetICCCurve
+0x18bf419b8: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetICCMatrix
+0x18bf40de0: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetIndicatorBrightness
+0x18bf40e1c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetIndicatorBrightnessLimit
+0x18bf40da8: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetLFCTimestamps
+0x18bf48140: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetLPRMetadata
+0x18bf161e8: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetLayer
+0x18bf40ec4: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetLayerEDRCompensation
+0x18bf40d70: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetParams
+0x18bf40b40: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetPostBlendLayer
+0x18bf40bb0: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetPostBlendLayerEventSignal
+0x18bf40b94: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetPostBlendLayerEventSignalOnGlass
+0x18bf40b78: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetPostBlendLayerEventWait
+0x18bf4964c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetPulseWidthMaximization
+0x18bf49668: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetResTransitionStrength
+0x18bf40e00: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetSecureAnimation
+0x18bf40d38: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetTimestamp
+0x18bf15f28: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetTimestamps
+0x18bf41858: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetToneMapConfig
+0x18bf467c8: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetUISubRegion
+0x18bf467d4: (external|__TEXT.__text)        _IOMobileFramebufferSwapSetVideoDestEdgeAlpha
+0x18bf40ee0: (external|__TEXT.__text)        _IOMobileFramebufferSwapSignal
+0x18bf40d1c: (external|__TEXT.__text)        _IOMobileFramebufferSwapSubtitleRegion
+0x18bf4672c: (external|__TEXT.__text)        _IOMobileFramebufferSwapUIEdgeBlendMode
+0x18bf15db0: (external|__TEXT.__text)        _IOMobileFramebufferSwapWait
+0x18bf40f04: (external|__TEXT.__text)        _IOMobileFramebufferSwapWaitWithTimeout
+0x18bf40dc4: (external|__TEXT.__text)        _IOMobileFramebufferSwapWorkaroundSettings
