@@ -264,6 +264,8 @@ namespace ASoftware.Engine
         {
             Task.Run(async () =>
             {
+                // (a guest found running: the quick save it has now is not one made since the launcher looked)
+                if (!run.Ours && run.Disk != "") run.QuickAtStart = Guests.Snapshots(run.Os, run.Disk).FirstOrDefault(s => s.Quick)?.Key ?? "";
                 while (Native.Alive(run.QemuPid)) await Task.Delay(1500);
                 // iOS 16's script ends with it (its ipa server too)
                 if (run.Script != null && run.Script.Running) run.Script.Wait(15000);
@@ -288,11 +290,14 @@ namespace ASoftware.Engine
                 if (Runs.TryGetValue(os, out var r) && r.QemuPid == q.Pid) return;
                 var c = Guests.Cfg(os);
                 var cmd = q.CommandLine;
+                // (the research VM takes its RAM from the device tree: one made for another size is named dtree...-<MiB>m;
+                // a save noted with the wrong size would be resumed into a machine it does not fit)
+                var sized = Regex.Match(cmd, @"dtree[^""\\/]*-(\d+)m""?(\s|$)");
                 var run = new GuestRun
                 {
                     Os = os, QemuPid = q.Pid, Ours = false,
                     Smp = int.TryParse(Regex.Match(cmd, @"-smp\s+(\d+)").Groups[1].Value, out var n) ? n : c.Smp,
-                    RamMiB = Guests.Ram(os),
+                    RamMiB = sized.Success ? int.Parse(sized.Groups[1].Value) : Guests.DefaultRam(os),
                     QuickBoot = cmd.Contains("quick-boot=on"),
                     Disk = Guests.SaveDisk(os),
                 };
