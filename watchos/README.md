@@ -60,7 +60,11 @@ for 5 minutes, and you not using it: its window not in front, or 2 minutes witho
 crash or a power cut then goes on from that save. What it did: `watchos\runs\<run>\autosave.log`. A saved
 state takes about 4 GB on the drive; with less than 5 GB free quick boot is off for that start. Saving takes
 about 7 seconds, resuming about 20.
-`-NoQuickBoot` boots every time (and drops a saved state); `-NoAutoSave` keeps only the save at closing.
+A save is resumed once; then it stays as a way back until the next save replaces it: a start after
+*Turn off* boots the watch from its disk as it was left, and `-LoadState asoft-quick` (ASoftware.exe: *Go
+back*) goes back to the save, undoing what was done since. `watchos\watch.qcow2.quick-used` names the save
+that is the way back. `-NoQuickBoot` boots every time (a save stays as the way back); `-NoAutoSave` keeps
+only the save at closing.
 
 Works: the watch faces and their gallery, the app grid, Settings, Notification Center, Stopwatch, World
 Clock, Calendar, Maps, Compass, touch, the crown, the side button, the network. Not yet: pairing with an

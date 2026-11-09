@@ -53,7 +53,8 @@ param(
     [switch]$Keep,
     # Quick boot (our QEMU's 0009), with -Persist: closing the window saves the machine's state
     # (memory and devices, about 3 GB) in $UserDisk, as its snapshot asoft-quick, and the next
-    # start resumes it in seconds. -NoQuickBoot boots iOS every time.
+    # start resumes it in seconds. -NoQuickBoot boots iOS every time. A save is resumed once; then it
+    # stays as a way back (-LoadState asoft-quick) until the next close saves again.
     [switch]$NoQuickBoot,
     # Drop .ipa files here while iOS runs (or use the side bar's Install .ipa): asoftinstalld (in
     # the v3 disk) fetches them through scripts\ipa-server.py and installs them; results land in
@@ -66,7 +67,8 @@ param(
     [string]$Region = '',
     [ValidateSet('', '12', '24')] [string]$Clock = '',
     # -LoadState NAME: resume that saved state of the user disk (the side bar's Save state makes them,
-    # state-<time>) instead of the quick boot's; -Persist only. A state that does not load is kept.
+    # state-<time>) instead of the quick boot's, or asoft-quick (go back to the quick save); -Persist
+    # only. A state that does not load is kept.
     [string]$LoadState = '',
     # -NoNet: no network card (QEMU's user-mode network is on by default)
     [switch]$NoNet
@@ -111,7 +113,7 @@ $qemuImg = Join-Path (Split-Path $Qemu) 'qemu-img.exe'
 if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
 
 if ($Persist) {
-    if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk }
+    if ($Reset -and (Test-Path $UserDisk)) { Remove-Item $UserDisk; Remove-Item "$UserDisk.quick-used" -ErrorAction SilentlyContinue }
     if (-not (Test-Path $UserDisk)) {
         # Next to the base image the backing path is relative, so WSL tools (qemu-nbd) open it too
         $backing = if ((Split-Path $UserDisk) -eq (Split-Path $Disk)) { Split-Path $Disk -Leaf } else { $Disk }
@@ -123,26 +125,77 @@ if ($Persist) {
     $Keep = $true
 }
 
-# Quick boot: resume the state the window saved when it was closed, if any (QEMU deletes it once
-# the machine runs). It belongs to the disk as it was then, so a start without it (-NoQuickBoot)
-# drops it first, as tools/asoft-disk.sh does before it writes to the disk.
+# Quick boot: resume the state the window saved when it was closed, if no start resumed it yet.
+# Once one has, the disk goes on from there and the state stays as the way back (-LoadState
+# asoft-quick), until the next close saves again: <UserDisk>.quick-used names it by its id and time
+# (no time zone in them). A start without quick boot (-NoQuickBoot) and tools/asoft-disk.sh, which
+# writes to the disk, keep it as the way back too.
 $quickBoot = $Persist -and -not $NoQuickBoot -and (Test-Path $Qemu) -and $Display -like 'gtk*'
 $quickSnapshot = 'asoft-quick'
+# A saved state of the user disk (qemu-img's JSON: id, date-sec, date-nsec), or $null
+function Get-State([string]$name) {
+    if (-not (Test-Path $UserDisk)) { return $null }
+    try {
+        $j = (Invoke-Tool $qemuImg info --output=json -U $UserDisk 2>$null) -join "`n" | ConvertFrom-Json
+        @($j.snapshots) | Where-Object { $_ -and $_.name -ceq $name } | Select-Object -First 1
+    } catch { $null }
+}
+function Quick-Key {
+    $s = Get-State $quickSnapshot
+    if ($s) { "$($s.id) $($s.'date-sec') $($s.'date-nsec')" } else { '' }
+}
+# The quick save's key when no start resumed it yet, else ''
 function Get-QuickState {
-    Invoke-Tool $qemuImg snapshot -l $UserDisk 2>$null | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" }
+    $k = Quick-Key
+    $used = "$(Get-Content "$UserDisk.quick-used" -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
+    if ($k -and $k -cne $used) { $k } else { '' }
+}
+function Keep-WayBack {
+    $k = Quick-Key
+    if ($k) { Set-Content -Path "$UserDisk.quick-used" -Value $k -Encoding ASCII }
 }
 $savedState = if ($Persist -and (Test-Path $UserDisk)) { Get-QuickState }
 if ($LoadState) {
     if (-not $Persist -or -not (Test-Path $UserDisk)) { throw '-LoadState needs -Persist and its user disk' }
-    if (-not (Invoke-Tool $qemuImg snapshot -l -U $UserDisk 2>$null | Where-Object { "$_" -cmatch "^\s*\d+\s+$([regex]::Escape($LoadState))\s" })) {
-        throw "no saved state $LoadState on $UserDisk"
-    }
+    if (-not (Get-State $LoadState)) { throw "no saved state $LoadState on $UserDisk" }
     $savedState = $null
 }
 if ($savedState -and -not $quickBoot) {
-    Invoke-Tool $qemuImg snapshot -d $quickSnapshot $UserDisk
     $savedState = $null
-    Write-Host 'Dropped the saved state (quick boot is off)'
+    Write-Host 'Quick boot is off: iOS boots, and the saved state stays as a way back (-LoadState asoft-quick)'
+}
+# Notes in FILE once QEMU's QMP (127.0.0.1:PORT) says the machine runs (a state it resumes has
+# loaded), from a runspace in the background while qemu-sweet.py waits for QEMU
+function Watch-Running([int]$port, [string]$file) {
+    $ps = [PowerShell]::Create()
+    $null = $ps.AddScript({
+        param($port, $file)
+        $until = (Get-Date).AddMinutes(10)
+        while ((Get-Date) -lt $until) {
+            $c = New-Object Net.Sockets.TcpClient
+            try {
+                if ($c.ConnectAsync('127.0.0.1', $port).Wait(1000)) {
+                    # no greeting while QEMU loads the state: its main loop stands still
+                    $c.ReceiveTimeout = 3000
+                    $r = New-Object IO.StreamReader($c.GetStream())
+                    $w = New-Object IO.StreamWriter($c.GetStream()); $w.AutoFlush = $true
+                    $null = $r.ReadLine()
+                    $w.WriteLine('{"execute":"qmp_capabilities"}'); $null = $r.ReadLine()
+                    $w.WriteLine('{"execute":"query-status"}')
+                    for ($i = 0; $i -lt 5; $i++) {
+                        $l = $r.ReadLine()
+                        if ($l -cmatch '"return"') {
+                            if ($l -cmatch '"running":\s*true') { Set-Content $file 'running'; return }
+                            break
+                        }
+                    }
+                }
+            } catch { } finally { $c.Close() }
+            Start-Sleep -Seconds 2
+        }
+    }).AddArgument($port).AddArgument($file)
+    $null = $ps.BeginInvoke()
+    $ps
 }
 if ($quickBoot) { $Display += ',quick-boot=on' }
 
@@ -207,18 +260,25 @@ try {
         '--name', 'ASoftware iOS')
     if (-not $Keep) { $qemuArgs += '--snapshot' }
     if ($NoNet) { $qemuArgs += '--net', 'none' }
+    # From here on the disk goes on from this start: a quick save, resumed now or not, is the way back
+    if ($Persist) { Keep-WayBack }
     if ($LoadState) {
         Write-Host "Resuming the saved state $LoadState"
         Invoke-Tool $python tools\qemu-sweet.py @qemuArgs --loadvm $LoadState
         if ($LASTEXITCODE) { Write-Host "QEMU ended with $LASTEXITCODE; the saved state $LoadState is kept" }
     } elseif ($savedState) {
         Write-Host 'Resuming the state saved when the window was closed'
+        $ran = "$out\running"
+        $watch = Watch-Running $QmpPort $ran
         Invoke-Tool $python tools\qemu-sweet.py @qemuArgs --loadvm $quickSnapshot
-        # QEMU failed, the state still there as it was: it could not be resumed (another QEMU
-        # build, other options) and the machine never ran. Drop it and boot iOS instead.
-        if ($LASTEXITCODE -and "$(Get-QuickState)" -eq "$savedState") {
+        $code = $LASTEXITCODE
+        $watch.Stop(); $watch.Dispose()
+        # QEMU failed before the machine ran: the state could not be resumed (another QEMU build,
+        # other options). It goes, and iOS boots.
+        if ($code -and -not (Test-Path $ran)) {
             Write-Host 'The saved state could not be resumed; booting iOS'
             Invoke-Tool $qemuImg snapshot -d $quickSnapshot $UserDisk
+            Remove-Item "$UserDisk.quick-used" -ErrorAction SilentlyContinue
             Invoke-Tool $python tools\qemu-sweet.py @qemuArgs
         }
     } else {

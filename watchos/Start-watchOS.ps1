@@ -13,7 +13,9 @@
 # and the next start resumes it in seconds instead of booting (about 6 minutes to the face). After a cold
 # start, Watch-AutoSave.ps1 (hidden) saves the same state once the watch is past its slow first minutes
 # (the face shown for 5 minutes, 15 minutes after the start) and nobody is using it, so a crash or a
-# power cut comes back to a settled watch too. -NoQuickBoot boots every time (and drops a saved state);
+# power cut comes back to a settled watch too. A save is resumed once; then it stays as a way back
+# (-LoadState asoft-quick goes back to it) until the next save replaces it, and a start boots the watch
+# from its disk as it was left. -NoQuickBoot boots every time (a save stays as the way back);
 # -NoAutoSave keeps only the save at closing. [-LoadState NAME] resumes another saved state (the side
 # bar's Save state makes them). A state loads only with its own vCPUs and RAM.
 param(
@@ -93,33 +95,54 @@ $diskPath = In-Work $Disk
 $quickSnapshot = 'asoft-quick'
 # GB a saved state takes on the disk's drive (measured: 3.74 GiB): the first save needs that much free
 $stateGB = 4.0
+# The quick save is resumed by itself once. From that start on (and from any start that does not
+# resume it) it stays as the way back: <disk>.quick-used names it by its id and time (qemu-img's JSON:
+# no time zone in them; Start-iOS26.ps1 writes the same), and only -LoadState asoft-quick goes back to
+# it. The next save (closing the window, or Watch-AutoSave.ps1) replaces it with a new time, which is
+# resumed again.
+function Quick-Key {
+    if (-not $qemuImg -or -not (Test-Path $diskPath)) { return '' }
+    # (-U: QEMU may have the disk open)
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    try {
+        $j = (& $qemuImg info --output=json -U $diskPath 2>$null) -join "`n" | ConvertFrom-Json
+        $s = @($j.snapshots) | Where-Object { $_ -and $_.name -ceq $quickSnapshot } | Select-Object -First 1
+        if ($s) { "$($s.id) $($s.'date-sec') $($s.'date-nsec')" } else { '' }
+    } catch { '' }
+}
+$quickUsed = "$diskPath.quick-used"
+# the quick save's key when no start resumed it yet, else ''
 function Get-QuickState {
-    if (-not $qemuImg) { return $null }
-    # (-U: QEMU may have the disk open, as while a state is being resumed)
-    $ErrorActionPreference = 'Continue'
-    @(& $qemuImg snapshot -l -U $diskPath 2>$null | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" })
+    $k = Quick-Key
+    $used = "$(Get-Content $quickUsed -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
+    if ($k -and $k -cne $used) { $k } else { '' }
+}
+# keeps the quick save as the way back: no start resumes it by itself any more
+function Keep-WayBack {
+    $k = Quick-Key
+    if ($k) { Set-Content -Path $quickUsed -Value $k -Encoding ASCII }
 }
 function Remove-QuickState {
-    if (-not (Get-QuickState)) { return }
-    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-    $null = & $qemuImg snapshot -d $quickSnapshot $diskPath 2>&1
+    if (Quick-Key) {
+        $ErrorActionPreference = 'Continue'
+        $null = & $qemuImg snapshot -d $quickSnapshot $diskPath 2>&1
+    }
+    Remove-Item $quickUsed -ErrorAction SilentlyContinue
 }
 $quickBoot = -not $Snapshot -and -not $NoQuickBoot -and -not $FirstBoot -and [bool]$qemuImg
 $savedState = if (-not $Snapshot) { Get-QuickState }
-if ($quickBoot -and -not $savedState) {
+# (a new save of the same name takes the old one's room: only the first needs it free)
+if ($quickBoot -and -not (Quick-Key)) {
     $free = ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($diskPath))).AvailableFreeSpace / 1e9
     if ($free -lt $stateGB + 1) {
         Write-Host ("{0:N1} GB free on {1}: a saved state needs about {2} GB, so quick boot is off this time" -f $free, [IO.Path]::GetPathRoot($diskPath), $stateGB) -ForegroundColor Yellow
         $quickBoot = $false
     }
 }
-if ($savedState -and -not $quickBoot) {
-    # the disk goes on without it: resuming it later would undo what this run writes
-    Remove-QuickState
-    $savedState = $null
-    Write-Host 'Dropped the saved state (quick boot is off)'
+if ($savedState -and -not $quickBoot -and -not $LoadState) {
+    Write-Host 'Quick boot is off: watchOS boots, and the saved state stays as a way back (-LoadState asoft-quick)'
 }
-$resume = if ($LoadState) { $LoadState } elseif ($savedState) { $quickSnapshot } else { '' }
+$resume = if ($LoadState) { $LoadState } elseif ($savedState -and $quickBoot) { $quickSnapshot } else { '' }
 
 if (-not $Name) { $Name = Get-Date -Format 'yyyyMMdd-HHmmss' }
 $O = In-Work "watchos\runs\$Name"
@@ -189,6 +212,8 @@ function Qemu-Why([string]$log) {
       Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
       ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
 }
+# From here on the disk goes on from this start: a quick save, resumed now or not, is the way back
+if (-not $Snapshot) { Keep-WayBack }
 $resumed = $false
 if ($resume) {
     Write-Host $(if ($LoadState) { "Resuming the saved state $LoadState" } else { 'Resuming the saved state (saved when the window was closed, or by itself after a start)' })

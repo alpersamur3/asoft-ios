@@ -45,10 +45,18 @@ else
     modprobe nbd max_part=8 2>/dev/null || true
     mkdir -p $MNT
     ro=; [ "$cmd" = list ] && ro=--read-only
-    # The quick boot's saved state (our QEMU's 0009) holds the disk as it was then: written
-    # now, the disk would no longer match it
-    if [ -z "$ro" ] && qemu-img snapshot -l "$disk" | grep -qw asoft-quick; then
-        qemu-img snapshot -d asoft-quick "$disk" && echo "dropped the quick boot state"
+    # The quick boot's saved state (our QEMU's 0009) holds the disk as it was then: resumed
+    # after this, it would undo what is written now. It stays as a way back, which a start does
+    # not resume by itself: <disk>.quick-used names it (its id and time, as the start scripts
+    # write it)
+    if [ -z "$ro" ]; then
+        key=$(qemu-img info --output=json -U "$disk" | python3 -c 'import json, sys
+for s in json.load(sys.stdin).get("snapshots", []):
+    if s["name"] == "asoft-quick": print(s["id"], s["date-sec"], s["date-nsec"])' || true)
+        if [ -n "$key" ]; then
+            echo "$key" > "$disk.quick-used"
+            echo "the quick boot state stays as a way back; a start no longer resumes it"
+        fi
     fi
     qemu-nbd $ro --connect=$DEV "$disk"
     trap 'mountpoint -q $MNT && umount $MNT; qemu-nbd --disconnect $DEV >/dev/null' EXIT

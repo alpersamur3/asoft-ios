@@ -63,6 +63,8 @@ param(
     # Quick boot, on a disk that keeps what iOS writes (-Persist, -Keep or an apps overlay): closing
     # the window saves the machine's state (memory and devices, about 3.7 GB) in that disk, as its
     # snapshot asoft-quick, and the next start resumes it in seconds. -NoQuickBoot boots iOS every time.
+    # A save is resumed once; then it stays as a way back (-LoadState asoft-quick) until the next close
+    # saves again, and a start without that save boots iOS from the disk as it was left.
     [switch]$NoQuickBoot,
     # -InstallIpa path.ipa: install this .ipa (direct placement) into the apps overlay and boot it.
     [string]$InstallIpa = '',
@@ -81,8 +83,9 @@ param(
     # <tree>-<N>m next to it). A saved state loads only into the RAM it was made with.
     [int]$RamMiB = 0,
     # -LoadState NAME: resume that saved state of the disk (the side bar's Save state makes them,
-    # state-<time>; ASoftware.exe lists them) instead of the quick boot's; it needs -Persist or -Keep,
-    # and the vCPUs and RAM it was saved with. A state that does not load is kept, not deleted.
+    # state-<time>; ASoftware.exe lists them) instead of the quick boot's, or asoft-quick (go back to
+    # the quick save); it needs -Persist or -Keep, and the vCPUs and RAM it was saved with. A state
+    # that does not load is kept, not deleted.
     [string]$LoadState = '',
     # The PC's GPU iOS 26 draws on (below, "The PC's GPU"): auto, integrated or discrete. auto is
     # the discrete one where there is one, but the integrated one on a PC whose GPUs are all AMD
@@ -134,18 +137,49 @@ $exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
 if (-not (Test-Path $exe)) { $exe = Join-Path $Work 'qemu\qemu-system-aarch64.exe' }
 $userTc = ($Tc -replace '\.tc$', '') + '-user.tc'
 if ($Persist -and $Reset) {
-    foreach ($f in @($UserDisk, $userTc)) { if (Test-Path $f) { Remove-Item $f } }
+    foreach ($f in @($UserDisk, $userTc, "$UserDisk.quick-used")) { if (Test-Path $f) { Remove-Item $f } }
 }
 $qemuImg = Join-Path (Split-Path $exe) 'qemu-img.exe'
 if (-not (Test-Path $qemuImg)) { $qemuImg = 'C:\Program Files\qemu\qemu-img.exe' }
 $quickSnapshot = 'asoft-quick'
+# A saved state of a disk (qemu-img's JSON: id, date-sec, date-nsec, vm-state-size), or $null
+function Get-State([string]$disk, [string]$name) {
+    if (-not ((Test-Path $disk) -and (Test-Path $qemuImg))) { return $null }
+    try {
+        $j = (& $qemuImg info --output=json -U $disk) -join "`n" | ConvertFrom-Json
+        @($j.snapshots) | Where-Object { $_ -and $_.name -ceq $name } | Select-Object -First 1
+    } catch { $null }
+}
+# The quick save is resumed by itself once. From that start on (and from any start that does not
+# resume it) it stays as the way back: <disk>.quick-used names it by its id and time (no time zone
+# in them), and only -LoadState asoft-quick goes back to it. The next Save and close replaces it
+# (a new time), so the new one is resumed again.
+function Quick-Key([string]$disk) {
+    $s = Get-State $disk $quickSnapshot
+    if ($s) { "$($s.id) $($s.'date-sec') $($s.'date-nsec')" } else { '' }
+}
+function Quick-Used([string]$disk) { "$disk.quick-used" }
+# The quick save's key when it was not resumed yet, else ''
 function Get-QuickState([string]$disk) {
-    if ((Test-Path $disk) -and (Test-Path $qemuImg)) {
-        & $qemuImg snapshot -l -U $disk | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" }
-    }
+    $k = Quick-Key $disk
+    $used = "$(Get-Content (Quick-Used $disk) -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
+    if ($k -and $k -cne $used) { $k } else { '' }
+}
+# Keeps the quick save as the way back: no start resumes it by itself any more
+function Keep-WayBack([string]$disk) {
+    $k = Quick-Key $disk
+    if ($k) { Set-Content -Path (Quick-Used $disk) -Value $k -Encoding ASCII }
 }
 function Remove-QuickState([string]$disk) {
-    if (Get-QuickState $disk) { & $qemuImg snapshot -d $quickSnapshot $disk }
+    if (Quick-Key $disk) { & $qemuImg snapshot -d $quickSnapshot $disk }
+    Remove-Item (Quick-Used $disk) -ErrorAction SilentlyContinue
+}
+# QEMU's own reason in a log (another CPU count, RAM size or set of devices than the save's), not
+# its info lines
+function Qemu-Why([string]$log) {
+    @(Get-Content $log -ErrorAction SilentlyContinue |
+      Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
+      ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
 }
 # .ipa installs by direct placement (the live installd path needs an APFS Data volume; this disk is
 # HFS+). ASOFT_IPA_DIR is set so the side bar's "Install .ipa..." is enabled; it copies files into
@@ -169,7 +203,8 @@ if (-not $NoIpa) {
         if (-not (Test-Path $installer)) { throw 'Install-Ipa.ps1 is not next to the launcher' }
         $inbox = (Resolve-Path $IpaDir).Path
         $into = if ($Persist) { @('-AppsDisk', $UserDisk, '-AppsTc', $userTc) } else { @() }
-        Remove-QuickState $(if ($Persist) { $UserDisk } else { $appsDisk })
+        # resumed after this, the quick save would undo the install: it stays as the way back
+        Keep-WayBack $(if ($Persist) { $UserDisk } else { $appsDisk })
         foreach ($ipa in $queue) {
             Write-Host "Installing $($ipa.Name) (direct placement)..."
             & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName -Work $Work -Disk $Disk -Tc $Tc @into
@@ -198,24 +233,22 @@ if ($written) {
     if ($other) { throw "iOS is already running on $written (QEMU process $($other.ProcessId)); close that window first" }
 }
 
-# Quick boot: resume the state the window saved when it was closed, if any (QEMU deletes it once
-# the machine runs). It belongs to the disk as it was then, so a start without quick boot drops it,
-# and so does an .ipa install, above.
+# Quick boot: resume the state the window saved when it was closed, if no start resumed it yet.
+# Once one has, the disk goes on from there and the state stays as the way back (above, Quick-Key);
+# so does it at a start without quick boot, at an .ipa install (above) and at a time zone change.
 $quickBoot = $written -and -not $NoQuickBoot -and (Test-Path $qemuImg)
 $savedState = if ($written) { Get-QuickState $written }
-# -LoadState: that state instead (the quick boot's stays until the machine runs, then goes: the disk
-# goes on from the loaded state)
+# -LoadState: that state instead (-LoadState asoft-quick: go back to the way back); the quick save
+# stays as the way back
 if ($LoadState) {
     if (-not $written) { throw '-LoadState needs a disk that keeps its states (-Persist or -Keep)' }
-    if (-not (& $qemuImg snapshot -l -U $written | Where-Object { "$_" -cmatch "^\s*\d+\s+$([regex]::Escape($LoadState))\s" })) {
-        throw "no saved state $LoadState on $written"
-    }
+    $loading = Get-State $written $LoadState
+    if (-not $loading) { throw "no saved state $LoadState on $written" }
     $savedState = $null
 }
 if ($savedState -and -not $quickBoot) {
-    Remove-QuickState $written
     $savedState = $null
-    Write-Host 'Dropped the saved state (quick boot is off)'
+    Write-Host 'Quick boot is off: iOS boots, and the saved state stays as a way back (-LoadState asoft-quick)'
 }
 
 # The PC's time: its time zone, region format and 12/24-hour clock, found as the iOS 16 launcher
@@ -267,10 +300,15 @@ if ($timeArgs -and $LoadState) {
     Write-Host "The PC's time zone, region or clock is new to iOS: it takes it at the next start that is not a resume"
     $timeArgs = @()
 }
+# A loaded state is the disk as it was then: what was applied to it later went with the rest, so the
+# next cold boot gives iOS the PC's values again
+if ($LoadState -and $written -and (Test-Path (Time-Mark $written)) -and
+    (Get-Item (Time-Mark $written)).LastWriteTimeUtc -gt [DateTimeOffset]::FromUnixTimeSeconds([long]$loading.'date-sec').UtcDateTime) {
+    Remove-Item (Time-Mark $written)
+}
 if ($timeArgs -and $savedState) {
-    Remove-QuickState $written
     $savedState = $null
-    Write-Host "Dropped the saved state: the PC's time zone, region or clock is new to iOS, which takes it on a cold boot"
+    Write-Host "The PC's time zone, region or clock is new to iOS, which takes it on a cold boot: the saved state stays as a way back"
 }
 
 # qemu-img: next to the QEMU, an installed QEMU, or the WSL distro the disk was built in
@@ -392,32 +430,37 @@ function Qmp-Running([int]$port) {
 function Start-Qemu([string[]]$more) {
     Start-Process -FilePath $exe -ArgumentList ($qargs + $more) -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
 }
+# Until the machine runs ($true), or QEMU ends first ($false: the state did not load), at most 5 min
+function Wait-Running($q) {
+    $until = (Get-Date).AddMinutes(5)
+    while ((Get-Date) -lt $until) {
+        if (Qmp-Running 4453) { return $true }
+        if ($q.HasExited) { return $false }
+        Start-Sleep -Seconds 2
+    }
+    -not $q.HasExited
+}
+# From here on the disk goes on from this start: a quick save, resumed now or not, is the way back
+if ($written) { Keep-WayBack $written }
 if ($LoadState) {
     Write-Host "Resuming the saved state $LoadState"
     $q = Start-Qemu @('-loadvm', $LoadState)
     $null = $q.Handle
-    # until the machine runs, or QEMU ends (it is not deleted when it does not load: QEMU says why in
-    # stderr.log)
-    $until = (Get-Date).AddMinutes(5)
-    while (-not $q.HasExited -and (Get-Date) -lt $until -and -not (Qmp-Running 4453)) { Start-Sleep -Seconds 2 }
-    if ($q.HasExited -and $q.ExitCode) {
-        $why = @(Get-Content "$O\stderr.log" -Tail 6 -ErrorAction SilentlyContinue) -join "`n"
-        throw "the saved state $LoadState could not be resumed (QEMU exit $($q.ExitCode)); it is kept. $O\stderr.log:`n$why"
+    # a state that does not load is kept (QEMU says why in stderr.log)
+    if (-not (Wait-Running $q)) {
+        $why = Qemu-Why "$O\stderr.log"
+        throw ("the saved state $LoadState could not be resumed (QEMU exit $($q.ExitCode)" + $(if ($why) { ': ' + ($why -join '; ') } else { '' }) +
+               "); it is kept. $O\stderr.log")
     }
 } elseif ($savedState) {
     Write-Host 'Resuming the state saved when the window was closed'
     $q = Start-Qemu @('-loadvm', $quickSnapshot)
     $null = $q.Handle       # ExitCode, once it has ended, needs the handle taken
-    # QEMU failed, the state still there: it could not be resumed (another QEMU build, other
-    # options) and the machine never ran. Drop it and boot iOS instead.
-    $until = (Get-Date).AddMinutes(5)
-    while (-not $q.HasExited -and (Get-Date) -lt $until -and (Get-QuickState $written)) { Start-Sleep -Seconds 2 }
-    if ($q.HasExited -and (Get-QuickState $written)) {
+    # QEMU ended before the machine ran: the state could not be resumed (another QEMU build, other
+    # options). It goes, and iOS boots.
+    if (-not (Wait-Running $q)) {
         Move-Item "$O\stderr.log" "$O\stderr-resume.log" -Force -ErrorAction SilentlyContinue
-        # QEMU's own reason (another CPU count, RAM size or set of devices than the save's), not its info lines
-        $why = @(Get-Content "$O\stderr-resume.log" -ErrorAction SilentlyContinue |
-                 Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
-                 ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
+        $why = Qemu-Why "$O\stderr-resume.log"
         Write-Host ("The saved state could not be resumed (exit $($q.ExitCode)" + $(if ($why) { ': ' + ($why -join '; ') } else { '' }) +
                     "); booting iOS ($O\stderr-resume.log)") -ForegroundColor Yellow
         Remove-QuickState $written

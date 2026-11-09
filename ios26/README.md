@@ -376,9 +376,11 @@ image is as built again at the next start; `-Persist` keeps what iOS writes (set
 `root26-user.qcow2`, an overlay on the base image, with the `.ipa`s you install, and `-Persist -Reset`
 drops that overlay first; `-Keep` writes the base image itself. On a disk that keeps its changes
 closing the window saves the machine's state there, as its snapshot `asoft-quick`, and the next start
-resumes it (QEMU deletes the state once the machine runs; one it cannot resume, of another build or
-other options, is dropped and iOS boots). `-NoQuickBoot` boots every time, and an `.ipa` install drops
-the state. Two launchers on one disk refuse to start. `-Net` adds a
+resumes it (one it cannot resume, of another build or other options, is dropped and iOS boots). A save
+is resumed once; then it stays as a way back until the next close saves again (`<disk>.quick-used` names
+it): a start boots iOS from its disk as it was left, and `-LoadState asoft-quick` (ASoftware.exe: *Go
+back*) goes back to the save, undoing what was done since. `-NoQuickBoot`, an `.ipa` install and a new
+time zone boot iOS and keep the save as the way back. Two launchers on one disk refuse to start. `-Net` adds a
 virtio-net NIC on QEMU's user-mode network (see *What works*).
 
 ### Start menu and installer (Start-iOS26.cmd, Install-iOS26.cmd)

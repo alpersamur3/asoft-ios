@@ -1,8 +1,15 @@
-# a quick boot state saved on the disk (Start-watchOS.ps1's asoft-quick) holds the guest's view of the disk
-# before this write: resuming it afterwards would undo or corrupt it, so it goes first
-if command -v qemu-img > /dev/null && qemu-img snapshot -l watchos/watch.qcow2 | grep -q ' asoft-quick '; then
-	qemu-img snapshot -d asoft-quick watchos/watch.qcow2
-	echo 'dropped the quick boot state on watchos/watch.qcow2 (the next start boots)'
+# A quick boot state saved on the disk (Start-watchOS.ps1's asoft-quick) holds the disk as it was then:
+# resumed after this, it would undo this write. It stays as a way back, which a start does not resume by
+# itself: watchos/watch.qcow2.quick-used names it (its id and time, as Start-watchOS.ps1 writes them).
+# Going back to it later undoes this step's write too.
+if command -v qemu-img > /dev/null && command -v python3 > /dev/null; then
+	key=$(qemu-img info --output=json -U watchos/watch.qcow2 | python3 -c 'import json, sys
+for s in json.load(sys.stdin).get("snapshots", []):
+    if s["name"] == "asoft-quick": print(s["id"], s["date-sec"], s["date-nsec"])' || true)
+	if [ -n "$key" ]; then
+		echo "$key" > watchos/watch.qcow2.quick-used
+		echo 'the quick boot state on watchos/watch.qcow2 stays as a way back; a start no longer resumes it'
+	fi
 fi
 disk_tools
 in_root watchos/watch.qcow2 <<'EOF'
