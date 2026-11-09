@@ -42,14 +42,28 @@ def main():
     mig = os.path.join(root, 'private/var/mobile/Library/Preferences/com.apple.migration.plist')
     with open(mig, 'rb') as f:
         m = plistlib.load(f)
+    changed = False
     if m.pop('LastSystemVersion', None) is not None:
+        changed = True
+        print('com.apple.migration: LastSystemVersion removed, DataMigration runs on next boot')
+    else:
+        print('com.apple.migration: no LastSystemVersion')
+    # datamigrator (runs as mobile) reboots or panics when a plugin outlives its time limit
+    # (DMRebootTimer: "Plugin %@ hanging. Panicking!" / "Rebooting!"), unless
+    # -[DMEnvironment shouldWatchdogPluginsAfterTimeout] says NO, which it does only when this key
+    # is present and false (no internal-build check, iOS 26.6 23G90). On a slow host SpringBoard.migrator
+    # (SplashBoard's launch images for every app, ~10 min on a 13700HX) outlives the limit: the S25
+    # panicked at 59 min, then rebooted at 50 min and stayed on the logo (2026-11-09).
+    if m.get('DMWatchdogPluginsAfterTimeout') is not False:
+        m['DMWatchdogPluginsAfterTimeout'] = False
+        changed = True
+        print('com.apple.migration: DMWatchdogPluginsAfterTimeout = false (no plugin watchdog, no reboot timer)')
+    if changed:
         st = os.stat(mig)
         with open(mig, 'wb') as f:
             plistlib.dump(m, f, fmt=plistlib.FMT_BINARY)
         os.chown(mig, st.st_uid, st.st_gid)
-        print('com.apple.migration: LastSystemVersion removed, DataMigration runs on next boot')
-    else:
-        print('com.apple.migration: no LastSystemVersion')
+        os.chmod(mig, st.st_mode & 0o7777)
 
 
 if __name__ == '__main__':
