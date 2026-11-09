@@ -53,6 +53,15 @@ or a drag on the drawn Digital Crown turns it, a click presses it (hold for Siri
 Control Center. iOS 26 can run beside it (the watch uses ports 4471-4473). `-Snapshot` keeps a session's
 writes out of `watch.qcow2`; `-Smp 8` gives it eight CPUs (here the face came no sooner: 7 min, 6 with four).
 
+Quick boot, as with iOS 26: closing the window saves the watch (memory and devices) into `watch.qcow2`, and
+the next start goes on from there in seconds instead of booting again. The first minutes after a cold
+start are slow, so the watch is also saved once by itself about 15 minutes after the start (the face shown
+for 5 minutes, and you not using it: its window not in front, or 2 minutes without input); a start after a
+crash or a power cut then goes on from that save. What it did: `watchos\runs\<run>\autosave.log`. A saved
+state takes about 4 GB on the drive; with less than 5 GB free quick boot is off for that start. Saving takes
+about 7 seconds, resuming about 20.
+`-NoQuickBoot` boots every time (and drops a saved state); `-NoAutoSave` keeps only the save at closing.
+
 Works: the watch faces and their gallery, the app grid, Settings, Notification Center, Stopwatch, World
 Clock, Calendar, Maps, Compass, touch, the crown, the side button, the network. Not yet: pairing with an
 iPhone (watchOS's Setup is skipped), the App Store, Weather data, Control Center's controls (it opens

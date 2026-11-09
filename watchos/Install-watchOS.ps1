@@ -679,7 +679,13 @@ function Do-Activation {
     Need-Input 'watch.qcow2' 'firstboot'
     # (it mounts watch.qcow2 read-write: never under a running watch)
     Need-NoWatch
+    # (a quick boot state saved on the disk, Start-watchOS.ps1's asoft-quick, holds the guest's view of the
+    # disk before this write: resuming it afterwards would undo or corrupt it, so it goes first)
     $body = @'
+if qemu-img snapshot -l watchos/watch.qcow2 | grep -q ' asoft-quick '; then
+	qemu-img snapshot -d asoft-quick watchos/watch.qcow2
+	echo 'dropped the quick boot state on watchos/watch.qcow2 (the next start boots)'
+fi
 disk_tools
 in_root watchos/watch.qcow2 <<'EOF'
 out=$(python3 -I $S/root26-prefs.py $R)

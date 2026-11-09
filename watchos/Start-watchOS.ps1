@@ -1,12 +1,19 @@
 # ASoftware watchOS launcher: watchOS 27.2 (Apple Watch Series 9) in a drawn watch case, from the work
 # folder Install-watchOS.ps1 built it in (the iOS 26 install's, with its watchos\ folder).
-#   Start-watchOS.cmd [-Work D:\ios26] [-Snapshot] [-Name RUN] [-NoNet] [-Smp 4|8]
+#   Start-watchOS.cmd [-Work D:\ios26] [-Snapshot] [-Name RUN] [-NoNet] [-Smp 4|8] [-NoQuickBoot] [-NoAutoSave]
 # The mouse is the touchscreen; the wheel over the watch, or a drag on the drawn crown, turns the
 # Digital Crown; a click on the crown presses it (hold: Siri); the side button opens Control Center.
 # Its own ports (serial console 4471, HMP 4472, QMP 4473): iOS 26 (4451-4453) can run beside it.
 # Writes go to watchos\watch.qcow2 (watchos\rootw.qcow2 under it stays as the install made it);
 # -Snapshot keeps them in a temporary file instead. -Smp 8: eight CPUs (the device tree dtree-w8, made
 # from the iOS 26 install's dtree-smp8). Prints "started EXE pid N -> RUN FOLDER".
+# Quick boot, as iOS 26's launcher: closing the window saves the machine (memory and devices) into
+# watch.qcow2 as its snapshot asoft-quick, and the next start resumes it in seconds instead of booting
+# (about 6 minutes to the face); QEMU deletes the state once the machine runs, so it is never resumed
+# twice. After a cold start, Watch-AutoSave.ps1 (hidden) saves the same state once the watch is past
+# its slow first minutes (the face shown for 5 minutes, 15 minutes after the start) and nobody is
+# using it, so a crash or a power cut comes back to a settled watch too.
+# -NoQuickBoot boots every time (and drops a saved state); -NoAutoSave keeps only the save at closing.
 param(
     [string]$Work = '',
     [string]$Config = (Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json'),
@@ -19,6 +26,8 @@ param(
     [switch]$NoNet,
     [switch]$Keep,
     [switch]$FirstBoot,
+    [switch]$NoQuickBoot,
+    [switch]$NoAutoSave,
     [string[]]$Extra = @()
 )
 $ErrorActionPreference = 'Stop'
@@ -51,6 +60,40 @@ if ($Disk -ceq 'watchos\watch.qcow2' -and -not $FirstBoot -and -not (Test-Path (
 $busy = @(Get-NetTCPConnection -State Listen -LocalPort 4471, 4472, 4473 -ErrorAction SilentlyContinue)
 if ($busy) { throw ("ports 4471-4473 are in use (pid {0}): is a watch running already?" -f (($busy | ForEach-Object OwningProcess | Sort-Object -Unique) -join ', ')) }
 
+# Quick boot (above). Not with -Snapshot (the disk is not written: a state on it stays for the next
+# start) nor in Install-watchOS.ps1's first boot.
+$diskPath = In-Work $Disk
+$qemuImg = Join-Path (Split-Path $Exe) 'qemu-img.exe'
+$quickSnapshot = 'asoft-quick'
+# GB a saved state takes on the disk's drive (measured: 3.74 GiB): the first save needs that much free
+$stateGB = 4.0
+function Get-QuickState {
+    if (-not (Test-Path $qemuImg)) { return $null }
+    # (-U: QEMU may have the disk open, as while a state is being resumed)
+    $ErrorActionPreference = 'Continue'
+    @(& $qemuImg snapshot -l -U $diskPath 2>$null | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" })
+}
+function Remove-QuickState {
+    if (-not (Get-QuickState)) { return }
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    $null = & $qemuImg snapshot -d $quickSnapshot $diskPath 2>&1
+}
+$quickBoot = -not $Snapshot -and -not $NoQuickBoot -and -not $FirstBoot -and (Test-Path $qemuImg)
+$savedState = if (-not $Snapshot) { Get-QuickState }
+if ($quickBoot -and -not $savedState) {
+    $free = ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($diskPath))).AvailableFreeSpace / 1e9
+    if ($free -lt $stateGB + 1) {
+        Write-Host ("{0:N1} GB free on {1}: a saved state needs about {2} GB, so quick boot is off this time" -f $free, [IO.Path]::GetPathRoot($diskPath), $stateGB) -ForegroundColor Yellow
+        $quickBoot = $false
+    }
+}
+if ($savedState -and -not $quickBoot) {
+    # the disk goes on without it: resuming it later would undo what this run writes
+    Remove-QuickState
+    $savedState = $null
+    Write-Host 'Dropped the saved state (quick boot is off)'
+}
+
 if (-not $Name) { $Name = Get-Date -Format 'yyyyMMdd-HHmmss' }
 $O = In-Work "watchos\runs\$Name"
 if (-not $Keep -and (Test-Path $O)) { Remove-Item $O -Recurse -Force }
@@ -70,7 +113,7 @@ $qargs = @(
     '-dtree', (Q (In-Work $dtree)), '-tc', (Q (In-Work $Tc)), '-ramdisk', (Q (In-Work 'rd-shell.hfs')),
     '-args', (Q $boot),
     # the GTK side bar with the drawn watch: case, crown and side button, hanging from the window
-    '-display', 'gtk,show-cursor=on,zoom-to-fit=on,gl=on,sidebar=on,show-menubar=off',
+    '-display', ('gtk,show-cursor=on,zoom-to-fit=on,gl=on,sidebar=on,show-menubar=off' + $(if ($quickBoot) { ',quick-boot=on' } else { '' })),
     '-monitor', 'tcp:127.0.0.1:4472,server=on,wait=off',
     '-parallel', 'none',
     '-chardev', (Q "socket,id=con,host=127.0.0.1,port=4471,server=on,wait=off,logfile=$O\serial.log"),
@@ -89,12 +132,44 @@ if (-not $NoNet) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 if ($Snapshot) { $qargs += '-snapshot' }
 $qargs += $Extra
 Set-Content "$O\cmdline.txt" ($qargs -join ' ')
-$q = Start-Process -FilePath $Exe -ArgumentList $qargs -PassThru -WorkingDirectory $Work `
-    -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
-$null = $q.Handle
+function Start-Qemu([string[]]$more) {
+    $p = Start-Process -FilePath $Exe -ArgumentList ($qargs + $more) -PassThru -WorkingDirectory $Work `
+        -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
+    $null = $p.Handle       # (ExitCode, once it has ended, needs the handle taken)
+    $p
+}
+$resumed = $false
+if ($savedState) {
+    Write-Host 'Resuming the saved state (saved when the window was closed, or by itself after a start)'
+    $q = Start-Qemu @('-loadvm', $quickSnapshot)
+    # until the machine runs (QEMU then deletes the state) or QEMU ends: one that cannot load the state
+    # (another QEMU build, other options) ends with the state still there; then drop it and boot
+    $until = (Get-Date).AddMinutes(5)
+    while (-not $q.HasExited -and (Get-Date) -lt $until -and (Get-QuickState)) { Start-Sleep -Seconds 2 }
+    if ($q.HasExited -and (Get-QuickState)) {
+        Write-Host "The saved state could not be resumed (exit $($q.ExitCode), $O\stderr-resume.log); booting watchOS" -ForegroundColor Yellow
+        Move-Item "$O\stderr.log" "$O\stderr-resume.log" -Force -ErrorAction SilentlyContinue
+        Remove-QuickState
+        $q = Start-Qemu @()
+    } else {
+        $resumed = -not $q.HasExited
+    }
+} else {
+    $q = Start-Qemu @()
+}
 # a QEMU that refuses its arguments or a disk ends at once: say why (the .cmd window then stays open)
 if ($q.WaitForExit(3000)) {
     $why = @(Get-Content "$O\stderr.log" -Tail 8 -ErrorAction SilentlyContinue) -join "`n"
     throw "QEMU ended at once (exit $($q.ExitCode)); $O\stderr.log:`n$why"
+}
+if ($quickBoot -and -not $resumed -and -not $NoAutoSave) {
+    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Q (Join-Path $PSScriptRoot 'Watch-AutoSave.ps1')),
+           '-QemuPid', "$($q.Id)", '-Disk', (Q $diskPath), '-Log', (Q "$O\autosave.log"), '-StateGB', "$stateGB")
+    $null = Start-Process powershell.exe -ArgumentList $a -WindowStyle Hidden
+    Write-Host ('After a cold start the watch is slow for its first minutes (the face after about 6 to 9). Its state ' +
+                'is saved about 15 minutes after the start, once you are not using it, and again when you close ' +
+                "the window: the next start goes on from there in seconds ($O\autosave.log).")
+} elseif ($quickBoot) {
+    Write-Host 'Quick boot: closing the window saves the watch; the next start goes on from there.'
 }
 "started $Exe pid $($q.Id) -> $O"
