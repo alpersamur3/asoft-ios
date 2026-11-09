@@ -65,6 +65,8 @@ namespace ASoftware.Engine
         public int RamMiB { get; set; }
         public int Smp { get; set; }
         public string Made { get; set; } = "";
+        /// <summary>The settings it loads with only (Guests.Shape); "" for a save from before it was kept.</summary>
+        public string Shape { get; set; } = "";
     }
 
     public class InstallChoice
@@ -199,11 +201,12 @@ namespace ASoftware.Engine
         public SaveMeta FindSave(string disk, string name) =>
             Saves.FirstOrDefault(s => string.Equals(s.Disk, disk, StringComparison.OrdinalIgnoreCase) && s.Name == name);
 
-        public void SetSave(string disk, string name, int ramMiB, int smp)
+        public void SetSave(string disk, string name, int ramMiB, int smp, string shape = null)
         {
             var s = FindSave(disk, name);
             if (s == null) { s = new SaveMeta { Disk = disk, Name = name }; Saves.Add(s); }
             s.RamMiB = ramMiB; s.Smp = smp; s.Made = DateTime.Now.ToString("s");
+            if (shape != null) s.Shape = shape;
             Save();
         }
 

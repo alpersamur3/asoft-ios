@@ -212,12 +212,45 @@ namespace ASoftware.Views
             catch (Exception ex) { Dialog.Show(this, L.T("Not saved", "Kaydedilmedi"), ex.Message, L.K("OK")); }
         }
 
+        /// <summary>The quick save of this OS's disk, as the home card last looked it up (null when none).</summary>
+        public Guests.Snap QuickOf(string os) => cards.FirstOrDefault(c => c.Os == os)?.Quick;
+
+        /// <summary>Whether the next start does not resume this quick save by itself, so that it is a way back: a start has
+        /// resumed it already, quick boot is off, or it was made with other settings (vCPUs, RAM, network, GPU).</summary>
+        public bool IsWayBack(string os, Guests.Snap s) =>
+            s != null && Guests.Cfg(os).DiskMode != "throwaway" &&
+            (s.WayBack || !Guests.Cfg(os).QuickBoot || !Guests.Fits(os, LauncherConfig.Current.FindSave(Guests.SaveDisk(os), Guests.QuickName), Guests.Shape(os)));
+
+        /// <summary>Starts the OS from its quick save that a start has resumed already (the way back), after asking: what was
+        /// done since is undone. The save stays until the next Save and close.</summary>
+        public async void GoBack(string os)
+        {
+            var disk = Guests.SaveDisk(os);
+            var s = disk == "" ? null : (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(x => x.Quick);
+            if (s == null) { Dialog.Show(this, L.T("No save to go back to", "Geri dönülecek kayıt yok"), L.T("Save and close makes one.", "Kaydet ve kapat bir tane yapar."), L.K("OK")); return; }
+            var when = Guests.When(s.When, true);
+            var hw = Guests.Hardware(os, Guests.SaveShape(os, LauncherConfig.Current.FindSave(disk, Guests.QuickName)));
+            if (Dialog.Show(this, L.T($"Go back to the save of {when}?", $"{when} kaydına geri dönülsün mü?"),
+                    L.T($"{Guests.Name(os)} goes back to how it was at {when}: what you did after that (settings, apps, files) is undone.\n\nIt opens with {hw}, as it was saved ({s.VmSize}). The save stays as the way back until the next Save and close.",
+                        $"{Guests.Name(os)}, {when} anındaki hâline döner: ondan sonra yaptıklarınız (ayarlar, uygulamalar, dosyalar) geri alınır.\n\nKaydedildiği gibi {hw} ile açılır ({s.VmSize}). Kayıt bir sonraki Kaydet ve kapat'a kadar geri dönüş noktası olarak kalır."),
+                    L.K("GoBack"), L.K("Cancel")) != 0) return;
+            StartOs(os, Guests.QuickName);
+        }
+
         public async void TurnOff(string os)
         {
             if (!Machines.Runs.TryGetValue(os, out var run)) return;
-            var why = run.Disk != "" && run.QuickBoot
-                ? L.T("The next start boots it afresh. Save and close instead keeps it where it is.", "Sonraki açılış baştan başlar. Kaydet ve kapat ise olduğu yerde saklar.")
-                : L.T("What it wrote is dropped (a throwaway disk).", "Yazdıkları atılır (atılan disk).");
+            string why;
+            if (run.Disk == "") why = L.T("What it wrote is dropped (a throwaway disk).", "Yazdıkları atılır (atılan disk).");
+            else
+            {
+                why = L.T("The next start boots it afresh.", "Sonraki açılış baştan başlar.");
+                var disk = run.Disk;
+                var q = (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(s => s.Quick);
+                if (q != null) why += " " + L.T($"The last save ({Guests.When(q.When)}) stays as a way back until the next Save and close.",
+                                                $"Son kayıt ({Guests.When(q.When)}) bir sonraki Kaydet ve kapat'a kadar geri dönüş noktası olarak kalır.");
+                if (run.QuickBoot) why += " " + L.T("Save and close instead keeps it where it is.", "Kaydet ve kapat ise olduğu yerde saklar.");
+            }
             if (os != "ios16" && run.Disk != "") why += " " + L.T("Its disk is synced first.", "Önce diski eşitlenir.");
             if (Dialog.Show(this, L.T($"Turn off {Guests.Name(os)}?", $"{Guests.Name(os)} kapatılsın mı?"), why, L.K("TurnOff"), L.K("Cancel")) != 0) return;
             await Machines.TurnOff(os);

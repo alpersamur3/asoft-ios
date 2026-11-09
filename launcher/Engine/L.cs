@@ -68,6 +68,7 @@ namespace ASoftware.Engine
             ["Browse"] = new[] { "Browse…", "Gözat…" },
             ["Refresh"] = new[] { "Refresh", "Yenile" },
             ["Load"] = new[] { "Load", "Yükle" },
+            ["GoBack"] = new[] { "Go back", "Geri dön" },
             ["Delete"] = new[] { "Delete", "Sil" },
             ["Rename"] = new[] { "Rename", "Yeniden adlandır" },
             ["SaveNow"] = new[] { "Save now", "Şimdi kaydet" },

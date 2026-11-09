@@ -97,6 +97,15 @@ namespace ASoftware.Views
             {
                 state.Text = L.T("Ready", "Hazır");
                 actions.Children.Add(Glass(Ui.Btn(L.K("Start"), () => main.StartOs(os), "Btn", "\uE768"), "page-start"));
+                // the quick save a start resumed already: going back to it is asked for (MainWindow.GoBack)
+                var way = main.QuickOf(os);
+                if (main.IsWayBack(os, way))
+                {
+                    var back = Glass(Ui.Btn(L.K("GoBack") + " · " + Guests.When(way.When), () => main.GoBack(os), "Btn", ""), "page-goback");
+                    back.Margin = new Thickness(8, 0, 0, 0);
+                    back.ToolTip = Guests.Hardware(os, Guests.SaveShape(os, LauncherConfig.Current.FindSave(Guests.SaveDisk(os), Guests.QuickName)));
+                    actions.Children.Add(back);
+                }
             }
             else state.Text = L.T("Not installed", "Kurulu değil");
             if (tab == "saves" && savesShownRunning != on) ShowSaves();
@@ -126,11 +135,28 @@ namespace ASoftware.Views
             }
         }
 
+        // the settings a save depends on (Guests.Shape) as they were before the last change
+        string shapeSeen;
+
         void Changed(bool ios26cfg = false)
         {
             LauncherConfig.Current.Save();
             if (os == "ios26" || ios26cfg) LauncherConfig.Current.WriteIos26Config();
+            var before = shapeSeen;
+            shapeSeen = Guests.Shape(os);
             if (Machines.Runs.ContainsKey(os)) main.Snack(L.T("Saved: it applies at the next start.", "Kaydedildi: sonraki açılışta geçerli olur."), "info");
+            else if (before != null && before != shapeSeen) NoteShape(before);
+        }
+
+        /// <summary>A change of a setting the quick save depends on: the next start boots afresh with it, and the save stays as
+        /// the way back with what it was made with (nothing is deleted).</summary>
+        async void NoteShape(string before)
+        {
+            var disk = Guests.SaveDisk(os);
+            if (disk == "") return;
+            var q = (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(s => s.Quick);
+            var note = Machines.ShapeChangeNote(os, q, before);
+            if (note != null) Dialog.Show(main, L.T("Saved", "Kaydedildi"), note, L.K("OK"));
         }
 
         // --- settings -------------------------------------------------------------------------------
@@ -138,6 +164,7 @@ namespace ASoftware.Views
         {
             var p = new StackPanel { MaxWidth = 980, HorizontalAlignment = HorizontalAlignment.Left };
             var c = C;
+            shapeSeen = Guests.Shape(os);
             if (!Guests.Installed(os))
                 p.Children.Add(Note("Warn", L.T("Not installed here yet: install it, or point the folders below at an existing install.", "Burada henüz kurulu değil: kurun ya da aşağıdaki klasörleri var olan bir kuruluma yöneltin.")));
 
@@ -389,25 +416,37 @@ namespace ASoftware.Views
         {
             var meta = LauncherConfig.Current.FindSave(disk, s.Name);
             var g = Machines.SaveGuest(os, disk, s.Name);
-            string label = !string.IsNullOrEmpty(meta?.Label) ? meta.Label : s.Quick ? L.T("Quick save: where you left it", "Hızlı kayıt: bıraktığınız yer") : s.Name;
-            var when = s.When.ToString(L.Tr ? "d MMMM yyyy, HH:mm" : "MMMM d, yyyy, HH:mm", L.Tr ? new System.Globalization.CultureInfo("tr-TR") : System.Globalization.CultureInfo.InvariantCulture);
-            string guest = g.known ? $"{g.smp} vCPU · {g.ram / 1024.0:0.#} GB" : L.T($"made before the launcher: {g.smp} vCPU · {g.ram / 1024.0:0.#} GB assumed", $"başlatıcıdan önce alındı: {g.smp} vCPU · {g.ram / 1024.0:0.#} GB varsayıldı");
+            // (while it runs, the quick save is the one it resumed or none: a way back)
+            bool wayBack = s.Quick && (on || main.IsWayBack(os, s));
+            string label = !string.IsNullOrEmpty(meta?.Label) ? meta.Label
+                         : wayBack ? L.T("Way back: the last quick save", "Geri dönüş noktası: son hızlı kayıt")
+                         : s.Quick ? L.T("Quick save: where you left it", "Hızlı kayıt: bıraktığınız yer") : s.Name;
+            var when = Guests.When(s.When, true);
+            // the hardware it opens with: what it was made with
+            var hw = Guests.Hardware(os, Guests.SaveShape(os, meta));
+            string guest = L.T("opens with ", "açılışı: ") + hw + (g.known ? "" : L.T(" (made before the launcher: assumed)", " (başlatıcıdan önce alındı: varsayıldı)"));
             var left = new StackPanel();
             var t = new StackPanel { Orientation = Orientation.Horizontal };
             t.Children.Add(Ui.Icon(s.Quick ? "\uE945" : "\uE74E", 15, s.Quick ? "Accent" : "Text2"));
             t.Children.Add(new TextBlock { Text = label, Style = Ui.S("H3"), Margin = new Thickness(10, 0, 0, 0) });
             left.Children.Add(t);
             left.Children.Add(Ui.Text($"{when} · {s.VmSize} · {guest}", "Faint", 3));
-            var load = Ui.Btn(L.K("Load"), async () =>
+            var load = Ui.Btn(wayBack && !on ? L.K("GoBack") : L.K("Load"), async () =>
             {
                 try
                 {
                     if (on) { await Machines.LoadRunning(os, s.Name); main.Snack(L.T("Loaded.", "Yüklendi."), "good"); }
+                    else if (wayBack) main.GoBack(os);
+                    else if (s.Quick) main.StartOs(os);
                     else
                     {
-                        if (!s.Quick && Guests.Snapshots(os, disk).Any(x => x.Quick) &&
-                            Dialog.Show(main, L.T("Load this save?", "Bu kayıt yüklensin mi?"), L.T("The quick save (where you left it) goes once it runs: the disk goes on from this one.", "Hızlı kayıt (bıraktığınız yer) çalışınca silinir: disk bundan devam eder."), L.K("Load"), L.K("Cancel")) != 0) return;
-                        main.StartOs(os, s.Quick ? null : s.Name);
+                        // the disk goes back with the save; a quick save stays (as the way back)
+                        var quick = (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(x => x.Quick);
+                        var text = L.T($"{Guests.Name(os)} goes back to how it was at {when}: what you did after that (settings, apps, files) is undone. It opens with {hw}, as it was saved.",
+                                       $"{Guests.Name(os)}, {when} anındaki hâline döner: ondan sonra yaptıklarınız (ayarlar, uygulamalar, dosyalar) geri alınır. Kaydedildiği gibi {hw} ile açılır.");
+                        if (quick != null) text += " " + L.T($"The quick save of {Guests.When(quick.When)} stays as a way back.", $"{Guests.When(quick.When)} hızlı kaydı geri dönüş noktası olarak kalır.");
+                        if (Dialog.Show(main, L.T("Load this save?", "Bu kayıt yüklensin mi?"), text, L.K("Load"), L.K("Cancel")) != 0) return;
+                        main.StartOs(os, s.Name);
                     }
                 }
                 catch (Exception e) { Dialog.Show(main, L.T("Not loaded", "Yüklenmedi"), e.Message, L.K("OK")); }

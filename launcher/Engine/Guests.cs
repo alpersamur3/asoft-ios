@@ -145,35 +145,115 @@ namespace ASoftware.Engine
 
         public static int Ram(string os) => Cfg(os).RamMiB > 0 && HasRamSetting(os) ? Cfg(os).RamMiB : DefaultRam(os);
 
+        /// <summary>The settings a save depends on besides its disk (QEMU loads a state only into the machine it was made on):
+        /// vCPUs, RAM, the network card, and for iOS 26 the PC's GPU. Its own RAM and vCPUs when given.</summary>
+        public static string Shape(string os, int ram = 0, int smp = 0)
+        {
+            var c = Cfg(os);
+            var s = $"smp={(smp > 0 ? smp : c.Smp)};ram={(os == "ios16" ? 0 : ram > 0 ? ram : Ram(os))};net={(c.Net ? 1 : 0)}";
+            if (os == "ios26") s += ";gpu=" + (c.HostGpu == "integrated" || c.HostGpu == "discrete" ? c.HostGpu : "auto");
+            return s;
+        }
+
+        /// <summary>Whether a save loads with these settings (Shape): from what it was made with, or for a save from before
+        /// the launcher kept that, its vCPUs and RAM; true when nothing is known.</summary>
+        public static bool Fits(string os, SaveMeta m, string shape)
+        {
+            if (m == null) return true;
+            if (!string.IsNullOrEmpty(m.Shape)) return m.Shape == shape;
+            if (m.Smp <= 0) return true;
+            return Shape(os, m.RamMiB > 0 ? m.RamMiB : Ram(os), m.Smp).Split(';').Take(2).SequenceEqual(shape.Split(';').Take(2));
+        }
+
+        /// <summary>A Shape's parts (smp, ram, net, gpu).</summary>
+        public static Dictionary<string, string> ShapeParts(string shape) =>
+            (shape ?? "").Split(';').Select(p => p.Split(new[] { '=' }, 2)).Where(p => p.Length == 2).ToDictionary(p => p[0], p => p[1]);
+
+        /// <summary>The shape a save loads with: what the launcher noted when it was made, else its vCPUs and RAM as known
+        /// (SaveGuest) and nothing about its network ("" parts are not shown).</summary>
+        public static string SaveShape(string os, SaveMeta m)
+        {
+            if (m != null && !string.IsNullOrEmpty(m.Shape)) return m.Shape;
+            var c = Cfg(os);
+            int smp = m != null && m.Smp > 0 ? m.Smp : c.Smp;
+            int ram = os == "ios16" ? 0 : m != null && m.RamMiB > 0 ? m.RamMiB : DefaultRam(os);
+            return $"smp={smp};ram={ram}";
+        }
+
+        /// <summary>The hardware a save opens with, for people: "4 GB RAM · 4 vCPU · network on".</summary>
+        public static string Hardware(string os, string shape)
+        {
+            var p = ShapeParts(shape);
+            var parts = new List<string>();
+            int ram = p.TryGetValue("ram", out var r) && int.TryParse(r, out var n) ? n : 0;
+            if (os == "ios16") ram = DefaultRam(os);
+            if (ram > 0) parts.Add($"{ram / 1024.0:0.#} GB RAM");
+            if (p.TryGetValue("smp", out var s)) parts.Add(s + " vCPU");
+            if (p.TryGetValue("net", out var net)) parts.Add(net == "1" ? L.T("network on", "ağ açık") : L.T("network off", "ağ kapalı"));
+            if (p.TryGetValue("gpu", out var g) && g != "auto") parts.Add(g == "integrated" ? L.T("integrated GPU", "tümleşik GPU") : L.T("graphics card", "ekran kartı"));
+            return string.Join(" · ", parts);
+        }
+
+        /// <summary>Keeps the disk's quick save as the way back: no start resumes it by itself (the start scripts' Keep-WayBack).</summary>
+        public static void MarkWayBack(string os, string disk)
+        {
+            var q = Snapshots(os, disk).FirstOrDefault(s => s.Quick);
+            if (q == null || q.WayBack) return;
+            try { File.WriteAllText(QuickUsedFile(disk), q.Key + "\r\n", Encoding.ASCII); Log.Write(os + ": the quick save " + q.Key + " is the way back now"); }
+            catch (Exception e) { Log.Write(os + ": cannot mark the way back: " + e.Message); }
+        }
+
         // --- saves ---------------------------------------------------------------------------------
         public class Snap
         {
-            public string Id, Name, VmSize, Date, Clock;
+            public string Id, Name;
+            public long DateSec, DateNsec, Bytes;
             public DateTime When;
-            public bool Quick => Name == "asoft-quick";
+            public string VmSize => L.Size(Bytes);
+            public bool Quick => Name == QuickName;
+            /// <summary>The quick save a start has resumed (or passed over) already: no start resumes it by itself
+            /// again; it stays as the way back until the next Save and close replaces it.</summary>
+            public bool WayBack;
+            /// <summary>Its id and time, as the start scripts write them to &lt;disk&gt;.quick-used (no time zone in them).</summary>
+            public string Key => Id + " " + DateSec + " " + DateNsec;
         }
 
-        static readonly Regex SnapRow = new Regex(@"^\s*(\d+)\s+(\S+)\s+([\d.]+\s*[KMGT]?i?B|\d+)\s+(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\s+(\S+)");
+        public const string QuickName = "asoft-quick";
 
-        /// <summary>The internal snapshots of a disk (qemu-img snapshot -l -U: it also reads a disk in use).</summary>
+        /// <summary>Names the quick save that is the way back (written by the start scripts, Start-iOS26.ps1 Quick-Key).</summary>
+        public static string QuickUsedFile(string disk) => disk + ".quick-used";
+
+        /// <summary>The internal snapshots of a disk (qemu-img info --output=json -U: it also reads a disk in use).</summary>
         public static List<Snap> Snapshots(string os, string disk)
         {
             var r = new List<Snap>();
             var img = QemuImg(os);
             if (disk == "" || !File.Exists(disk) || img == "") return r;
-            var res = Run(img, "snapshot -l -U \"" + disk + "\"", 20000);
-            foreach (var l in res.Item2.Split('\n'))
+            var res = Run(img, "info --output=json -U \"" + disk + "\"", 20000);
+            if (res.Item1 != 0) { Log.Write(os + ": qemu-img info: " + res.Item2.Trim()); return r; }
+            Dictionary<string, object> o;
+            try { o = Json.Parse(res.Item2) as Dictionary<string, object>; } catch (Exception e) { Log.Write(os + ": qemu-img info: " + e.Message); return r; }
+            if (o == null || !o.TryGetValue("snapshots", out var list) || !(list is object[] snaps)) return r;
+            string used = "";
+            try { var f = QuickUsedFile(disk); if (File.Exists(f)) used = (File.ReadAllLines(f).FirstOrDefault() ?? "").Trim(); } catch { }
+            long N(Dictionary<string, object> d, string k) => d.TryGetValue(k, out var v) && v != null ? Convert.ToInt64(v, CultureInfo.InvariantCulture) : 0;
+            foreach (var d in snaps.OfType<Dictionary<string, object>>())
             {
-                var m = SnapRow.Match(l);
-                if (!m.Success) continue;
-                DateTime.TryParseExact(m.Groups[4].Value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var when);
-                r.Add(new Snap { Id = m.Groups[1].Value, Name = m.Groups[2].Value, VmSize = m.Groups[3].Value, Date = m.Groups[4].Value, Clock = m.Groups[5].Value, When = when });
+                var s = new Snap { Id = Json.Str(d, "id") ?? "", Name = Json.Str(d, "name") ?? "", DateSec = N(d, "date-sec"), DateNsec = N(d, "date-nsec"), Bytes = N(d, "vm-state-size") };
+                s.When = DateTimeOffset.FromUnixTimeSeconds(s.DateSec).LocalDateTime;
+                s.WayBack = s.Quick && used == s.Key;
+                r.Add(s);
             }
             return r;
         }
 
         public static (int, string) DeleteSnapshot(string os, string disk, string name) =>
             Run(QemuImg(os), "snapshot -d \"" + name + "\" \"" + disk + "\"", 300000);
+
+        /// <summary>A short date and time for a save, in the launcher's language.</summary>
+        public static string When(DateTime t, bool longForm = false) =>
+            t.ToString(longForm ? (L.Tr ? "d MMMM yyyy, HH:mm" : "MMMM d, yyyy, HH:mm") : (L.Tr ? "d MMM HH:mm" : "MMM d, HH:mm"),
+                       L.Tr ? new CultureInfo("tr-TR") : CultureInfo.InvariantCulture);
 
         /// <summary>A tool's exit code and its output (stdout and stderr), without a window.</summary>
         public static (int, string) Run(string exe, string args, int timeoutMs)

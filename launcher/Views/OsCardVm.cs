@@ -170,16 +170,20 @@ namespace ASoftware.Views
             // ready
             bool keep = c.DiskMode != "throwaway";
             Line1 = $"{c.Smp} vCPU · {Guests.Ram(Os) / 1024.0:0.#} GB · " + (keep ? L.T("keeps changes", "değişiklikleri saklar") : L.T("throwaway disk", "atılan disk"));
-            if (keep && c.QuickBoot && Quick != null)
+            // a save no start has resumed yet, made with the settings it has now (else the start boots afresh with them,
+            // and the save becomes the way back: Machines.Start)
+            if (keep && c.QuickBoot && Quick != null && !Quick.WayBack && Guests.Fits(Os, LauncherConfig.Current.FindSave(Guests.SaveDisk(Os), Guests.QuickName), Guests.Shape(Os)))
             {
                 StateText = L.T("Saved", "Kaydedildi"); Tone("Accent");
-                Line2 = L.T("Resumes where you left it · ", "Bıraktığınız yerden açılır · ") + Quick.When.ToString(L.Tr ? "d MMM HH:mm" : "MMM d, HH:mm", L.Tr ? new System.Globalization.CultureInfo("tr-TR") : System.Globalization.CultureInfo.InvariantCulture);
+                Line2 = L.T("Resumes where you left it · ", "Bıraktığınız yerden açılır · ") + Guests.When(Quick.When);
                 Primary = L.K("Resume"); PrimaryIcon = "\uE768"; Action = "start";
             }
             else
             {
                 StateText = L.T("Ready", "Hazır"); Tone("Good");
                 Primary = L.K("Start"); PrimaryIcon = "\uE768"; Action = "start";
+                // a start boots it afresh from its disk; the last quick save stays, to go back to (the Saves tab)
+                if (keep && Quick != null) Line2 = L.T("Way back: ", "Geri d\u00F6n\u00FC\u015F noktas\u0131: ") + Guests.When(Quick.When);
             }
         }
     }

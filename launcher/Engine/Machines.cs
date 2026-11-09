@@ -18,6 +18,8 @@ namespace ASoftware.Engine
         public int RamMiB, Smp;
         public string Disk = "";       // the disk that keeps its saves ("" when throwaway)
         public bool QuickBoot;
+        public string Shape = "";      // the settings it runs with (Guests.Shape); "" when adopted (not known)
+        public string QuickAtStart = ""; // the quick save's key when it started: another at the end was made in this run
         public string RunFolder = "";
         public DateTime Started = DateTime.Now;
         public string Busy = "";       // "saving", "stopping": a request is on its way
@@ -75,11 +77,15 @@ namespace ASoftware.Engine
         }
 
         // --- start -------------------------------------------------------------------------------
-        public static string StartArgs(string os, int ram, int smp, string loadState)
+        public static string StartArgs(string os, int ram, int smp, string loadState, string shape = null)
         {
             var c = Guests.Cfg(os);
             var a = new List<string> { "-Work", Runner.Q(Guests.Work(os)) };
             bool keep = c.DiskMode != "throwaway";
+            // the network and GPU a save was made with (a save loads only into the machine it was made on), else the settings
+            var sp = Guests.ShapeParts(shape);
+            bool netOn = sp.TryGetValue("net", out var n) ? n == "1" : c.Net;
+            string hostGpu = sp.TryGetValue("gpu", out var g) ? g : c.HostGpu;
             void Time()
             {
                 if (c.TimeZone != "") a.AddRange(new[] { "-TimeZone", Runner.Q(c.TimeZone) });
@@ -92,26 +98,27 @@ namespace ASoftware.Engine
                     a.AddRange(new[] { "-Cpus", smp.ToString() });
                     if (keep) a.Add("-Persist");
                     if (keep && !c.QuickBoot) a.Add("-NoQuickBoot");
-                    if (!c.Net) a.Add("-NoNet");
+                    if (!netOn) a.Add("-NoNet");
                     Time();
                     break;
                 case "ios26":
                     a.AddRange(new[] { "-Name", "launcher", "-Smp", smp.ToString() });
                     if (keep) a.Add("-Persist");
                     if (!c.QuickBoot) a.Add("-NoQuickBoot");
-                    if (c.Net) a.Add("-Net");
+                    if (netOn) a.Add("-Net");
                     if (c.Wallpaper == "collections") a.AddRange(new[] { "-Wallpaper", "collections" });
                     if (!c.Aod) a.Add("-NoAod");
                     if (ram != Guests.DefaultRam(os)) a.AddRange(new[] { "-RamMiB", ram.ToString() });
-                    if (c.HostGpu == "integrated" || c.HostGpu == "discrete") a.AddRange(new[] { "-HostGpu", c.HostGpu });
+                    if (hostGpu == "integrated" || hostGpu == "discrete") a.AddRange(new[] { "-HostGpu", hostGpu });
                     if (c.NoGeneratedCommands) a.Add("-NoGeneratedCommands");
                     Time();
                     break;
                 default:
+                    // (Start-watchOS.ps1: quick boot is on unless -NoQuickBoot)
                     a.AddRange(new[] { "-Smp", smp.ToString() });
                     if (!keep) a.Add("-Snapshot");
-                    else if (c.QuickBoot) a.Add("-QuickBoot");
-                    if (!c.Net) a.Add("-NoNet");
+                    else if (!c.QuickBoot) a.Add("-NoQuickBoot");
+                    if (!netOn) a.Add("-NoNet");
                     if (ram != Guests.DefaultRam(os)) a.AddRange(new[] { "-RamMiB", ram.ToString() });
                     break;
             }
@@ -133,27 +140,50 @@ namespace ASoftware.Engine
             var disk = Guests.SaveDisk(os);
             int ram = Guests.Ram(os), smp = c.Smp;
             bool quick = c.DiskMode != "throwaway" && c.QuickBoot;
-            // a save loads only into the machine it was made on: its own RAM and vCPUs
+            string shape = Guests.Shape(os);
+            var snaps = disk == "" ? new List<Guests.Snap>() : await Task.Run(() => Guests.Snapshots(os, disk));
+            string quickAtStart = snaps.FirstOrDefault(s => s.Quick)?.Key ?? "";
+            // The quick save is resumed by itself once; then it is the way back, which only loads when asked (loadState
+            // asoft-quick, MainWindow.GoBack). It loads only into the machine it was made on: made with other settings than
+            // these (a setting changed since), this start boots afresh with them, and the save stays as the way back.
             string resumes = loadState;
-            if (resumes == null && quick && disk != "" && (await Task.Run(() => Guests.Snapshots(os, disk))).Any(s => s.Quick)) resumes = "asoft-quick";
-            if (resumes != null)
+            if (resumes == null && quick)
             {
-                var g = SaveGuest(os, disk, resumes);
+                var q = snaps.FirstOrDefault(s => s.Quick && !s.WayBack);
+                if (q != null)
+                {
+                    var meta = LauncherConfig.Current.FindSave(disk, Guests.QuickName);
+                    if (Guests.Fits(os, meta, shape)) resumes = Guests.QuickName;
+                    else
+                    {
+                        await Task.Run(() => Guests.MarkWayBack(os, disk));
+                        Say(os, L.T($"Starts afresh with the new settings. The save of {Guests.When(q.When)} stays as a way back; it opens with {Guests.Hardware(os, Guests.SaveShape(os, meta))}.",
+                                    $"Yeni ayarlarla baştan açılıyor. {Guests.When(q.When)} kaydı geri dönüş noktası olarak kalır; {Guests.Hardware(os, Guests.SaveShape(os, meta))} ile açılır."));
+                    }
+                }
+            }
+            // a save asked for (the Saves tab, the way back) loads with what it was made with: its RAM, vCPUs, network and
+            // GPU, for this run only (the settings stay for later starts)
+            if (loadState != null)
+            {
+                var g = SaveGuest(os, disk, loadState);
                 if (g.smp > 0) smp = g.smp;
                 if (os != "ios16") ram = g.ram;
-                if (ram != Guests.Ram(os) || smp != c.Smp)
-                    Say(os, L.T($"Resuming a save made with {smp} vCPUs and {ram / 1024.0:0.#} GB: the new settings apply at the next full start.",
-                                $"{smp} vCPU ve {ram / 1024.0:0.#} GB ile alınmış bir kayıt açılıyor: yeni ayarlar bir sonraki tam açılışta geçerli olur."));
+                var m = LauncherConfig.Current.FindSave(disk, loadState);
+                shape = m != null && m.Shape != "" ? m.Shape : Guests.Shape(os, ram, smp);
+                if (shape != Guests.Shape(os))
+                    Say(os, L.T($"Opens the save with {Guests.Hardware(os, shape)}, as it was made; the settings apply at the next start without a save.",
+                                $"Kayıt alındığı gibi {Guests.Hardware(os, shape)} ile açılıyor; ayarlar kayıtsız bir sonraki açılışta geçerli olur."));
             }
             var qemus = await Task.Run(() => Native.Processes("qemu-system%"));
             var mem = RamProblem(os, ram, qemus);
             if (mem.block != null) throw new InvalidOperationException(mem.block);
             if (mem.warn != null && !ignoreRamWarning) throw new RamWarning(mem.warn);
 
-            var run = new GuestRun { Os = os, RamMiB = ram, Smp = smp, Disk = disk, QuickBoot = quick, Ours = true };
+            var run = new GuestRun { Os = os, RamMiB = ram, Smp = smp, Disk = disk, QuickBoot = quick, Ours = true, Shape = shape, QuickAtStart = quickAtStart };
             var env = new Dictionary<string, string> { ["ASOFT_SHARP"] = c.Sharp ? "1" : "0" };
             var log = Path.Combine(AppPaths.LocalData, "logs", os + "-start.log");
-            var r = new Runner(script, StartArgs(os, ram, smp, loadState), log);
+            var r = new Runner(script, StartArgs(os, ram, smp, loadState, shape), log);
             run.Script = r;
             var got = new TaskCompletionSource<bool>();
             r.Line += l =>
@@ -197,7 +227,11 @@ namespace ASoftware.Engine
                     throw new InvalidOperationException(StartFailure(r, r.ExitCode ?? -1));
                 }
             }
-            if (resumes != null && disk != "") LauncherConfig.Current.SetSave(disk, resumes, ram, smp);
+            // quick boot as the script set it (Start-watchOS.ps1 turns it off with too little room for a save): without it
+            // closing the window does not save
+            var qp = await Task.Run(() => Native.Processes("qemu-system%").FirstOrDefault(x => x.Pid == run.QemuPid));
+            if (qp != null && qp.CommandLine != "") run.QuickBoot = quick && qp.CommandLine.Contains("quick-boot=on");
+            if (resumes != null && disk != "") LauncherConfig.Current.SetSave(disk, resumes, ram, smp, shape);
             Log.Write($"{os}: started pid {run.QemuPid} ({smp} vCPUs, {ram} MiB, disk {(disk == "" ? "throwaway" : disk)}{(resumes != null ? ", resumes " + resumes : "")})");
             Changed?.Invoke(os);
             Watch(run);
@@ -212,6 +246,19 @@ namespace ASoftware.Engine
 
         public class RamWarning : Exception { public RamWarning(string m) : base(m) { } }
 
+        /// <summary>A note for a settings change that a save depends on (Guests.Shape): the next start boots afresh with it,
+        /// and the quick save stays as the way back with what it was made with. null when the change does not touch it.</summary>
+        public static string ShapeChangeNote(string os, Guests.Snap quick, string shapeBefore)
+        {
+            if (quick == null || Guests.SaveDisk(os) == "") return null;
+            var meta = LauncherConfig.Current.FindSave(Guests.SaveDisk(os), Guests.QuickName);
+            // only a change that makes it no longer fit (one back to its settings, or a second change, says nothing)
+            if (Guests.Fits(os, meta, Guests.Shape(os)) || !Guests.Fits(os, meta, shapeBefore)) return null;
+            var hw = Guests.Hardware(os, Guests.SaveShape(os, meta));
+            return L.T($"This applies from the next start, a cold boot. Your save of {Guests.When(quick.When, true)} stays as a way back; it opens with {hw}.",
+                       $"Bu bir sonraki açılıştan, soğuk başlatmadan geçerli olur. {Guests.When(quick.When, true)} kaydınız geri dönüş noktası olarak kalır; {hw} ile açılır.");
+        }
+
         /// <summary>Waits for the guest's QEMU to end, then notes what it left (a quick save).</summary>
         static void Watch(GuestRun run)
         {
@@ -220,10 +267,11 @@ namespace ASoftware.Engine
                 while (Native.Alive(run.QemuPid)) await Task.Delay(1500);
                 // iOS 16's script ends with it (its ipa server too)
                 if (run.Script != null && run.Script.Running) run.Script.Wait(15000);
-                if (run.Disk != "" && run.QuickBoot)
+                if (run.Disk != "")
                 {
+                    // a quick save made in this run (Save and close, the watch's automatic save): what it was made with
                     var quick = Guests.Snapshots(run.Os, run.Disk).FirstOrDefault(s => s.Quick);
-                    if (quick != null) LauncherConfig.Current.SetSave(run.Disk, "asoft-quick", run.RamMiB, run.Smp);
+                    if (quick != null && quick.Key != run.QuickAtStart) LauncherConfig.Current.SetSave(run.Disk, Guests.QuickName, run.RamMiB, run.Smp, run.Ours ? run.Shape : "");
                 }
                 lock (Runs) { if (Runs.TryGetValue(run.Os, out var r) && r == run) Runs.Remove(run.Os); }
                 Log.Write($"{run.Os}: QEMU pid {run.QemuPid} ended");
@@ -261,7 +309,9 @@ namespace ASoftware.Engine
         {
             if (!Runs.TryGetValue(os, out var run)) return;
             if (run.Disk == "" || !run.QuickBoot) throw new InvalidOperationException(L.T("This start keeps nothing (throwaway disk or quick boot off): turn it off instead.", "Bu açılış hiçbir şey saklamıyor (atılan disk ya da hızlı açılış kapalı): onun yerine kapatın."));
-            var free = Native.FreeBytes(run.Disk);
+            // (QEMU deletes the quick save it replaces first: the new one reuses its room)
+            var old = (await Task.Run(() => Guests.Snapshots(os, run.Disk))).FirstOrDefault(s => s.Quick);
+            var free = Native.FreeBytes(run.Disk) + (old?.Bytes ?? 0);
             if (free < run.RamMiB * 1048576L + 1_000_000_000L)
                 throw new InvalidOperationException(L.T($"Only {L.Size(free)} is free on {Path.GetPathRoot(run.Disk)}: a save of {Guests.Name(os)} takes up to {L.Size(run.RamMiB * 1048576.0)}. Free some space first.",
                                                         $"{Path.GetPathRoot(run.Disk)} üzerinde yalnız {L.Size(free)} boş: {Guests.Name(os)} kaydı {L.Size(run.RamMiB * 1048576.0)} kadar yer tutar. Önce yer açın."));
@@ -303,11 +353,15 @@ namespace ASoftware.Engine
                 }
                 catch (Exception e) { Log.Write(os + ": turn off: " + e.Message); }
             });
-            if (!await WaitEnd(run, os == "ios16" ? 90 : 60) && os == "ios16")
+            bool ended = await WaitEnd(run, os == "ios16" ? 90 : 60);
+            if (!ended && os == "ios16")
             {
                 try { Qmp.Run(Guests.QmpPort(os), 5000, Qmp.Cmd("quit")); } catch { }
-                await WaitEnd(run, 30);
+                ended = await WaitEnd(run, 30);
             }
+            // the next start boots afresh: a quick save made while it ran (the watch's automatic one) is the way back now,
+            // as the one it resumed is (the start scripts mark that)
+            if (ended && run.Disk != "") await Task.Run(() => Guests.MarkWayBack(os, run.Disk));
         }
 
         /// <summary>Ends a guest the launcher started, by its process ids (what QEMU had not written is lost).</summary>
@@ -345,7 +399,7 @@ namespace ASoftware.Engine
             {
                 var said = await Task.Run(() => Qmp.HmpRun(Guests.QmpPort(os), "savevm " + name));
                 if (said != "") throw new IOException(said);
-                LauncherConfig.Current.SetSave(run.Disk, name, run.RamMiB, run.Smp);
+                LauncherConfig.Current.SetSave(run.Disk, name, run.RamMiB, run.Smp, run.Ours ? run.Shape : "");
                 return name;
             }
             finally { run.Busy = ""; Changed?.Invoke(os); }
@@ -355,9 +409,11 @@ namespace ASoftware.Engine
         {
             var run = Runs[os];
             var g = SaveGuest(os, run.Disk, name);
-            if (g.known && (g.smp != run.Smp || (os != "ios16" && g.ram != run.RamMiB)))
-                throw new InvalidOperationException(L.T($"This save was made with {g.smp} vCPUs and {g.ram / 1024.0:0.#} GB, the running guest has {run.Smp} and {run.RamMiB / 1024.0:0.#} GB: turn it off, then load the save.",
-                                                        $"Bu kayıt {g.smp} vCPU ve {g.ram / 1024.0:0.#} GB ile alındı, çalışan konukta {run.Smp} ve {run.RamMiB / 1024.0:0.#} GB var: kapatıp sonra kaydı yükleyin."));
+            var meta = LauncherConfig.Current.FindSave(run.Disk, name);
+            bool fits = run.Shape != "" ? Guests.Fits(os, meta, run.Shape) : !g.known || g.smp == run.Smp && (os == "ios16" || g.ram == run.RamMiB);
+            if (!fits)
+                throw new InvalidOperationException(L.T($"This save opens with {Guests.Hardware(os, Guests.SaveShape(os, meta))}; the running guest has other settings. Turn it off, then load the save: it starts with its own.",
+                                                        $"Bu kayıt {Guests.Hardware(os, Guests.SaveShape(os, meta))} ile açılır; çalışan konuğun ayarları başka. Kapatıp sonra kaydı yükleyin: kendi ayarlarıyla açılır."));
             run.Busy = "loading";
             Changed?.Invoke(os);
             try
@@ -380,6 +436,7 @@ namespace ASoftware.Engine
                 var r = await Task.Run(() => Guests.DeleteSnapshot(os, disk, name));
                 if (r.Item1 != 0) throw new IOException(r.Item2.Trim());
             }
+            if (name == Guests.QuickName) try { File.Delete(Guests.QuickUsedFile(disk)); } catch { }
             LauncherConfig.Current.DropSave(disk, name);
         }
     }
