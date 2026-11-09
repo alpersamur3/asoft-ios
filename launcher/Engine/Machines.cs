@@ -54,7 +54,7 @@ namespace ASoftware.Engine
         public static (string block, string warn) RamProblem(string os, int ramMiB, List<Native.Proc> qemus)
         {
             var m = Native.Memory();
-            double need = ramMiB * 1048576.0 + (os == "ios16" ? 1.0e9 : 2.0e9);   // + QEMU, GTK, the GPU library
+            double need = ramMiB * 1048576.0 + Guests.QemuOverhead(os);
             var running = string.Join(", ", qemus.Select(q => $"pid {q.Pid} {L.Size(q.WorkingSet)}"));
             string ctx = qemus.Count > 0 ? L.T(" Guests running now: ", " Şu an çalışan konuklar: ") + running + "." : "";
             if (need > m.commitFree - 2e9)
@@ -311,10 +311,11 @@ namespace ASoftware.Engine
             if (run.Disk == "" || !run.QuickBoot) throw new InvalidOperationException(L.T("This start keeps nothing (throwaway disk or quick boot off): turn it off instead.", "Bu açılış hiçbir şey saklamıyor (atılan disk ya da hızlı açılış kapalı): onun yerine kapatın."));
             // (QEMU deletes the quick save it replaces first: the new one reuses its room)
             var old = (await Task.Run(() => Guests.Snapshots(os, run.Disk))).FirstOrDefault(s => s.Quick);
-            var free = Native.FreeBytes(run.Disk) + (old?.Bytes ?? 0);
-            if (free < run.RamMiB * 1048576L + 1_000_000_000L)
-                throw new InvalidOperationException(L.T($"Only {L.Size(free)} is free on {Path.GetPathRoot(run.Disk)}: a save of {Guests.Name(os)} takes up to {L.Size(run.RamMiB * 1048576.0)}. Free some space first.",
-                                                        $"{Path.GetPathRoot(run.Disk)} üzerinde yalnız {L.Size(free)} boş: {Guests.Name(os)} kaydı {L.Size(run.RamMiB * 1048576.0)} kadar yer tutar. Önce yer açın."));
+            long drive = Native.FreeBytes(run.Disk), back = old?.Bytes ?? 0;
+            double need = run.RamMiB * 1048576.0 + 1e9;    // the state at most its RAM, and room to spare
+            if (drive + back < need)
+                throw new InvalidOperationException(L.T($"A save of {Guests.Name(os)} needs about {L.Size(need)} of room. {Path.GetPathRoot(run.Disk)} has {L.Size(drive)} free" + (back > 0 ? $", and the save it replaces gives back {L.Size(back)}" : "") + ". Free some space first.",
+                                                        $"{Guests.Name(os)} kaydı yaklaşık {L.Size(need)} yer ister. {Path.GetPathRoot(run.Disk)} üzerinde {L.Size(drive)} boş" + (back > 0 ? $", yerine geçtiği kayıt da {L.Size(back)} geri verir" : "") + ". Önce yer açın."));
             run.Busy = "saving";
             Changed?.Invoke(os);
             bool asked = await Task.Run(() => Native.CloseWindow(run.QemuPid, null));

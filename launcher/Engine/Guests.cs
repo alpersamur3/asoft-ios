@@ -145,6 +145,11 @@ namespace ASoftware.Engine
 
         public static int Ram(string os) => Cfg(os).RamMiB > 0 && HasRamSetting(os) ? Cfg(os).RamMiB : DefaultRam(os);
 
+        /// <summary>The commit charge a guest's QEMU takes beyond its RAM, bytes: the code buffer (tb-size 2 GB on the research
+        /// VM), GTK, and the GPU library. Measured: a 6 GB iOS 26 guest about 9.3 GB in all. When commit runs short Windows
+        /// grows the page file on C:.</summary>
+        public static double QemuOverhead(string os) => os == "ios16" ? 1.0e9 : 3.5e9;
+
         /// <summary>The settings a save depends on besides its disk (QEMU loads a state only into the machine it was made on):
         /// vCPUs, RAM, the network card, and for iOS 26 the PC's GPU. Its own RAM and vCPUs when given.</summary>
         public static string Shape(string os, int ram = 0, int smp = 0)
