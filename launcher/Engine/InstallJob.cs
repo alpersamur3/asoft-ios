@@ -120,12 +120,20 @@ namespace ASoftware.Engine
             }
         }
 
+        /// <summary>A made-up install for the screenshots (-shot -page wizard -tab run): never Current, never run.</summary>
+        public static InstallJob Test(InstallChoice c, List<PlanStep> plan, string result, string message) =>
+            new InstallJob(c) { Plan = plan, Started = DateTime.Now.AddMinutes(-47), Result = result, Message = message };
+
         /// <summary>Starts (or resumes: the installers go on from their markers) the install of a choice.</summary>
         public static InstallJob Start(InstallChoice c, List<PlanStep> plan)
         {
             if (Current != null && Current.Runner != null && Current.Runner.Running) throw new InvalidOperationException(L.T("An install is running already.", "Zaten bir kurulum çalışıyor."));
             var j = new InstallJob(c) { Plan = plan ?? new List<PlanStep>(), Started = DateTime.Now };
             try { if (File.Exists(AppPaths.PauseFile)) File.Delete(AppPaths.PauseFile); } catch { }
+            // a system installed afresh gets a new disk: the last screen of one before it goes
+            if (c.Ios16 && !Guests.Installed("ios16")) Thumbs.Drop("ios16");
+            if (c.Ios26 && !Guests.Installed("ios26")) Thumbs.Drop("ios26");
+            if (c.Watch && !Guests.Installed("watch")) Thumbs.Drop("watch");
             // iOS 26's setup asks where its GPU driver comes from: the wizard's answer, in its config
             var conf = LauncherConfig.Current;
             if (c.Ios26 || c.Watch)

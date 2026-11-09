@@ -93,10 +93,44 @@ namespace ASoftware.Engine
                 var dir = Path.Combine(w, "install");
                 if (!Directory.Exists(dir)) return (0, 0);
                 var marks = Directory.GetFiles(dir, "*.done").Select(Path.GetFileName).ToList();
-                if (os == "ios26") return (marks.Count(f => !f.StartsWith("watch-")), 25 - 4);   // its every-run steps leave none
-                return (marks.Count(f => f.StartsWith("watch-")), 13 - 3);
+                var asked = LauncherConfig.Current.Install;
+                int watch = marks.Count(f => f.StartsWith("watch-"));
+                // Install-iOS26.ps1: 26 steps, of which setup, prereq, cleanup and shortcut run every time and leave none
+                if (os == "ios26")
+                {
+                    var own = marks.Where(f => !f.StartsWith("watch-")).ToList();
+                    // a watch-only install leaves the base's markers here and nothing else of iOS 26: that is no iOS 26
+                    // install that stopped, unless iOS 26 was asked for too
+                    bool onlyBase = own.All(f => BaseOnce.Contains(Path.GetFileNameWithoutExtension(f)));
+                    bool forWatch = watch > 0 || asked != null && asked.Watch;
+                    if (onlyBase && forWatch && !(asked != null && asked.Ios26)) return (0, 0);
+                    return (own.Count, 26 - 4);
+                }
+                // Install-watchOS.ps1: 13 steps, of which check, cleanup and shortcut run every time
+                // a watch-only install makes the base first, in this folder and before any watch-* marker (its check step
+                // runs Install-iOS26.ps1 -Base): its steps are this install's too, unless a finished iOS 26 here made them,
+                // or nothing says the watch was ever asked for (then they are an iOS 26 install's that stopped)
+                bool ios26Here = Installed("ios26") && SameFolder(Work("ios26"), w);
+                if (ios26Here || watch == 0 && !(asked != null && asked.Watch)) return (watch, 13 - 3);
+                return (watch + marks.Count(f => BaseOnce.Contains(Path.GetFileNameWithoutExtension(f))), 13 - 3 + BaseOnce.Length);
             }
             catch { return (0, 0); }
+        }
+
+        // the base watchOS shares with iOS 26 (Install-iOS26.ps1's $BaseSteps), its steps that leave a marker
+        // (install\<id>.done; setup and prereq run every time)
+        static readonly string[] BaseOnce = { "python", "qemu", "linux", "sysroot", "cloudos", "firmware", "devicetree", "ramdisk", "gpudriver" };
+
+        static bool SameFolder(string a, string b) =>
+            string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>A watchOS install has its base already: iOS 26 is installed (the wizard puts the watch in its folder),
+        /// or the watch's work folder has every marker of the base's steps.</summary>
+        public static bool HasWatchBase()
+        {
+            if (Installed("ios26")) return true;
+            var w = Work("watch");
+            return w != "" && BaseOnce.All(id => File.Exists(Path.Combine(w, "install", id + ".done")));
         }
 
         // --- disks, trees, tools -----------------------------------------------------------------

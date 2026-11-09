@@ -27,7 +27,7 @@ namespace ASoftware.Views
         string gpuResult = "";          // ok, fail, none, error, ""
         List<string[]> gpuLines = new List<string[]>();
         string wslState = "";           // ok, missing, novirt
-        bool estimating, checking;
+        bool checking;
         TextBox logBox;
         bool showLog;
 
@@ -44,7 +44,47 @@ namespace ASoftware.Views
             choice.Watch = false;
             if (InstallJob.Current != null && (InstallJob.Current.Running || InstallJob.Current.Result != "")) page = 3;
             Build();
-            Task.Run(() => DetectWsl());
+            // (the screenshots run nothing: WSL is taken as ready)
+            if (Program.Arg("-shot") == null) Task.Run(() => DetectWsl());
+            else wslState = "ok";
+        }
+
+        // the install the run step shows: the one running, or the screenshots' made-up one
+        InstallJob test;
+        InstallJob Job => test ?? InstallJob.Current;
+
+        /// <summary>-shot -page wizard -tab how|check|run: a later step with made-up answers, so that it can be drawn
+        /// without the GPU check, Setup's estimate or an install running.</summary>
+        public void TestStep(string step)
+        {
+            choice.Ios16 = false; choice.Ios26 = true; choice.Watch = true; choice.Linux = "wsl"; choice.GpuMode = "cloudos";
+            if (step == "how") page = 1;
+            else if (step == "check")
+            {
+                page = 2;
+                gpuResult = "ok";
+                gpuLines = new List<string[]> { new[] { "gpu", "used", "NVIDIA GeForce RTX 4080 Laptop GPU", "discrete", "32.0.15.6614", "1.4.303", "", "", "ok" },
+                                                new[] { "gpu", "other", "Intel(R) UHD Graphics", "integrated", "31.0.101.5186", "1.3.289", "", "", "ok" } };
+                estimate = new Estimate { Download = 16e9, Seconds = 9000, Peak = 71e9, After = 32e9, Free = 54.6e9, Bandwidth = L.T("Apple's CDN at about 38 MB/s", "Apple'ın CDN'i yaklaşık 38 MB/sn") };
+                estimate.Plan.Add(new PlanStep { Os = "ios26", Id = "base", Seconds = 6600, Download = 11_000_000_000 });
+                estimate.Plan.Add(new PlanStep { Os = "watch", Id = "watch", Seconds = 2400, Download = 5_000_000_000 });
+                estimate.Options["ios26-wsl"] = new double[] { 11e9, 6600, 50e9, 23e9 };
+                estimate.Options["watch"] = new double[] { 5e9, 2400, 21e9, 14e9 };
+                estimate.Warnings.Add(L.T("C: has 9 GB free: Windows may slow down while the disk is built on D:.", "C: üzerinde 9 GB boş: disk D: üzerinde kurulurken Windows yavaşlayabilir."));
+            }
+            else if (step == "run")
+            {
+                page = 3;
+                var plan = new List<PlanStep>();
+                string[] titles = { "Downloading from Apple", "Unpacking the restore image", "Building the disk", "The GPU driver", "The first start" };
+                string[] trTitles = { "Apple'dan indiriliyor", "Geri yükleme kalıbı açılıyor", "Disk kuruluyor", "GPU sürücüsü", "İlk açılış" };
+                for (int i = 0; i < 5; i++)
+                    plan.Add(new PlanStep { Os = "ios26", Id = "step" + i, Title = L.T(titles[i], trTitles[i]), Seconds = 900, State = i < 2 ? "done" : i == 2 ? "fail" : "pending" });
+                plan.Add(new PlanStep { Os = "watch", Id = "watch", Title = L.T("watchOS's disk", "watchOS diski"), Seconds = 2400 });
+                test = InstallJob.Test(new InstallChoice { Ios26 = true, Watch = true, Linux = "wsl" }, plan, "failed",
+                    L.T("qemu-img convert ended with code 1.", "qemu-img convert 1 koduyla bitti."));
+            }
+            Build();
         }
 
         public void Retext() => Build();
@@ -152,21 +192,23 @@ namespace ASoftware.Views
             var g = new Grid { Margin = new Thickness(0, 0, 0, 6) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
-            var dot = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(2) };
-            dot.SetResourceReference(Border.BorderBrushProperty, now || done ? "Accent" : "LineStrong");
-            dot.SetResourceReference(Border.BackgroundProperty, done ? "Accent" : now ? "AccentSoft" : "Surface");
-            var t = new TextBlock { Text = done ? "\uE73E" : (i + 1).ToString(), FontFamily = done ? Ui.F("Icons") : Ui.F("UiFont"), FontSize = done ? 12 : 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            t.SetResourceReference(TextBlock.ForegroundProperty, done ? "AccentText" : now ? "Accent" : "Text3");
+            // the step it is on: a filled light circle with a dark number; one done: a tick
+            var dot = new Border { Width = 26, Height = 26, CornerRadius = new CornerRadius(13), BorderThickness = new Thickness(now ? 0 : 1.5) };
+            dot.SetResourceReference(Border.BorderBrushProperty, done ? "Text3" : "LineStrong");
+            if (now) dot.SetResourceReference(Border.BackgroundProperty, "Text");
+            var t = new TextBlock { Text = done ? "\uE73E" : (i + 1).ToString(), FontFamily = done ? Ui.F("Icons") : Ui.F("UiFont"), FontSize = done ? 11 : 12.5, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            t.SetResourceReference(TextBlock.ForegroundProperty, now ? "Bg" : done ? "Text2" : "Text3");
             dot.Child = t;
             g.Children.Add(dot);
             var n = new TextBlock { Text = name, FontSize = 14, FontWeight = now ? FontWeights.SemiBold : FontWeights.Normal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
             n.SetResourceReference(TextBlock.ForegroundProperty, now ? "Text" : "Text2");
             Grid.SetColumn(n, 1);
             g.Children.Add(n);
-            var b = new Border { Child = g, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(12) };
-            if (now) b.SetResourceReference(Border.BackgroundProperty, "Surface");
-            return b;
+            return new Border { Child = g, Padding = new Thickness(6, 7, 6, 7) };
         }
+
+        // the choice cards' width at most: the page's column on a wide window
+        const double CardsMax = 760;
 
         StackPanel Page(string title, string sub)
         {
@@ -188,14 +230,18 @@ namespace ASoftware.Views
         void What()
         {
             var p = Page(L.K("WhatToInstall"), L.T("Each comes from Apple's servers and is built on this PC. You can add the others later.", "Her biri Apple'ın sunucularından gelir ve bu PC'de kurulur. Diğerlerini sonra ekleyebilirsiniz."));
-            var cards = new WrapPanel { Margin = new Thickness(0, 18, 0, 0) };
+            // (one width for the three: the page's column, at most 760)
+            var cards = new StackPanel { Margin = new Thickness(0, 18, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+            AtMost.Bind(cards, body, CardsMax);
             CheckBox c16 = null, c26 = null, cw = null;
             c16 = OsChoice("ios16", choice.Ios16, L.T("Ready to use: Safari and .ipa apps. No WSL, no administrator.", "Kullanıma hazır: Safari ve .ipa uygulamaları. WSL ve yönetici izni gerekmez."),
                 L.T("about 40 min · 6.4 GB download", "yaklaşık 40 dk · 6,4 GB indirme"), v => choice.Ios16 = v);
             c26 = OsChoice("ios26", choice.Ios26, L.T("A research preview drawn by your PC's GPU (Vulkan), Liquid Glass included.", "PC'nizin GPU'suyla (Vulkan) çizilen bir araştırma önizlemesi, Liquid Glass dahil."),
                 L.T("1.5–2.5 h · 11 GB download · ~50 GB at its peak", "1,5–2,5 sa · 11 GB indirme · en çok ~50 GB"), v => choice.Ios26 = v);
             cw = OsChoice("watch", choice.Watch, L.T("Apple Watch Series 9 in a drawn case; the crown, the side button. Needs only the base it shares with iOS 26.", "Çizilmiş kasada Apple Watch Series 9; kuron, yan düğme. iOS 26'nın yalnız ortak tabanını ister."),
-                L.T("about 35 min · 6.5 GB download · WSL", "yaklaşık 35 dk · 6,5 GB indirme · WSL"), v =>
+                // (as the home page's card: the base it shares with iOS 26 is made first when neither is there)
+                Guests.HasWatchBase() ? L.T("about 40 min · 5 GB download · WSL", "yaklaşık 40 dk · 5 GB indirme · WSL")
+                                      : L.T("about 1 h · 6 GB download · WSL", "yaklaşık 1 sa · 6 GB indirme · WSL"), v =>
                 {
                     choice.Watch = v;
                     if (v && Guests.Installed("ios26")) FromIos26Install();
@@ -210,18 +256,21 @@ namespace ASoftware.Views
 
         CheckBox OsChoice(string os, bool on, string text, string cost, Action<bool> changed)
         {
-            var g = new StackPanel { Width = 250 };
-            var head = new Border { Height = 92, CornerRadius = new CornerRadius(12), Background = Theme.OsGradient(os), Margin = new Thickness(0, 0, 0, 12), ClipToBounds = true };
-            var hg = new Grid();
-            hg.Children.Add(new DeviceGlyph { Os = os, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 8, 0), RenderTransform = new ScaleTransform(0.52, 0.52) });
-            hg.Children.Add(new TextBlock { Text = Guests.Name(os), Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = Ui.F("DisplayFont"), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(14, 0, 0, 10) });
-            head.Child = hg;
-            g.Children.Add(head);
-            g.Children.Add(new TextBlock { Text = Guests.Detail(os), Style = Ui.S("H3") });
-            g.Children.Add(Ui.Text(text, "Sub", 4));
-            g.Children.Add(Ui.Text(cost, "Faint", 6));
-            if (Guests.Installed(os)) { var t = Ui.Text(L.T("Installed", "Kurulu"), "Faint", 6); t.SetResourceReference(TextBlock.ForegroundProperty, "Good"); g.Children.Add(t); }
-            var c = new CheckBox { Style = Ui.S("CheckCard"), Content = g, IsChecked = on, Margin = new Thickness(0, 0, 14, 14) };
+            // the system's device beside what it is (a product picture: lit, its home screen)
+            var g = new Grid();
+            // (one column width for the phones and the wider watch: the three cards' texts start on one line)
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.Children.Add(new DeviceArt { Os = os, Height = 84, Present = true, Awake = true, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 18, 0) });
+            var sp = new StackPanel { Margin = new Thickness(0, 0, 30, 0) };
+            sp.Children.Add(new TextBlock { Text = Guests.Name(os), Style = Ui.S("H2") });
+            sp.Children.Add(Ui.Text(Guests.Detail(os), "Faint", 1));
+            sp.Children.Add(Ui.Text(text, "Sub", 8));
+            sp.Children.Add(Ui.Text(cost, "Faint", 5));
+            if (Guests.Installed(os)) { var st = Ui.State(L.T("Installed", "Kurulu"), "Good", 12); st.HorizontalAlignment = HorizontalAlignment.Left; st.Margin = new Thickness(0, 8, 0, 0); sp.Children.Add(st); }
+            Grid.SetColumn(sp, 1);
+            g.Children.Add(sp);
+            var c = new CheckBox { Style = Ui.S("CheckCard"), Content = g, IsChecked = on, Margin = new Thickness(0, 0, 0, 10) };
             c.Checked += (s, e) => changed(true);
             c.Unchecked += (s, e) => changed(false);
             return c;
@@ -242,7 +291,7 @@ namespace ASoftware.Views
                 var r2 = Radio("linux", L.T("Without WSL", "WSL'siz"), HelperThere ? L.T("A small Linux VM in our QEMU: no administrator, no restart; about an hour slower.", "QEMU'da küçük bir Linux VM: yönetici ve yeniden başlatma gerekmez; yaklaşık bir saat daha yavaş.")
                                                                          : L.T("Not in this copy (installer\\helper\\out: the release package has it).", "Bu kopyada yok (installer\\helper\\out: sürüm paketinde var)."),
                     choice.Linux == "helper", () => choice.Linux = "helper", HelperThere && !choice.Watch);
-                if (choice.Watch) p.Children.Add(Ui.Text(L.T("watchOS's installer needs WSL.", "watchOS kurucusu WSL ister."), "Faint", 0));
+                if (choice.Watch) { var needs = Ui.Text(L.T("watchOS's installer needs WSL.", "watchOS kurucusu WSL ister."), "Faint", -4); needs.Margin = new Thickness(0, -4, 0, 10); p.Children.Add(needs); }
                 p.Children.Add(r1); p.Children.Add(r2);
 
                 p.Children.Add(new TextBlock { Text = L.K("GpuDriver"), Style = Ui.S("H3"), Margin = new Thickness(0, 20, 0, 8) });
@@ -294,7 +343,8 @@ namespace ASoftware.Views
             var sp = new StackPanel();
             sp.Children.Add(new TextBlock { Text = title, Style = Ui.S("H3") });
             sp.Children.Add(Ui.Text(text, "Sub", 3));
-            var r = new RadioButton { Style = Ui.S("RadioCard"), Content = sp, IsChecked = on, IsEnabled = enabled, Margin = new Thickness(0, 0, 0, 8), GroupName = group, MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Left };
+            var r = new RadioButton { Style = Ui.S("RadioCard"), Content = sp, IsChecked = on, IsEnabled = enabled, Margin = new Thickness(0, 0, 0, 8), GroupName = group, HorizontalAlignment = HorizontalAlignment.Left };
+            AtMost.Bind(r, body, CardsMax);
             r.Checked += (s, e) => pick();
             return r;
         }
@@ -309,13 +359,12 @@ namespace ASoftware.Views
             try
             {
                 var gpu = (choice.Ios26 || choice.Watch) ? GpuCheck() : Task.FromResult(0);
-                estimating = true;
                 var est = InstallJob.Estimate(choice);
                 await gpu;
                 estimate = await est;
             }
             catch (Exception e) { Log.Write("check: " + e); }
-            finally { estimating = false; checking = false; }
+            finally { checking = false; }
             if (page == 2) Build();
         }
 
@@ -362,7 +411,7 @@ namespace ASoftware.Views
                                "iOS 26 Vulkan ile çizer ve bu PC'de Vulkan sürücüsü ya da aygıtı yok: GPU üreticinizin sürücüsünü (NVIDIA, AMD, Intel) kurup yeniden denetleyin. iOS 16 istemez."); break;
                 default: tone = "Warn"; head = L.T("The GPU check did not finish", "GPU denetimi bitmedi"); text = L.T("It may have crashed in the driver. The log says how far it got.", "Sürücüde çökmüş olabilir. Log ne kadar ilerlediğini söyler."); break;
             }
-            sp.Children.Add(StatusHead(tone, gpuResult == "ok" ? "\uE73E" : gpuResult == "" ? "\uE9D9" : "\uE7BA", head));
+            sp.Children.Add(StatusHead(tone, head));
             sp.Children.Add(Ui.Text(text, "Sub", 6));
             foreach (var l in gpuLines.Where(l => l[0] == "gpu" && l.Length >= 9))
             {
@@ -384,12 +433,12 @@ namespace ASoftware.Views
             var sp = new StackPanel();
             if (estimate == null)
             {
-                sp.Children.Add(StatusHead("Info", "\uE9D9", L.T("Working out what it takes… (it measures Apple's CDN with 10 MB)", "Ne gerektirdiği hesaplanıyor… (Apple'ın CDN'ini 10 MB ile ölçer)")));
+                sp.Children.Add(StatusHead("Info", L.T("Working out what it takes… (it measures Apple's CDN with 10 MB)", "Ne gerektirdiği hesaplanıyor… (Apple'ın CDN'ini 10 MB ile ölçer)")));
                 return Box("Info", sp);
             }
             if (estimate.Plan.Count == 0)
             {
-                sp.Children.Add(StatusHead("Bad", "\uEA39", L.T("Setup gave no estimate", "Setup tahmin vermedi")));
+                sp.Children.Add(StatusHead("Bad", L.T("Setup gave no estimate", "Setup tahmin vermedi")));
                 sp.Children.Add(Ui.Text(string.Join("\n", estimate.Output.Where(l => l.Trim() != "").Reverse().Take(8).Reverse()), "Faint", 6));
                 return Box("Bad", sp);
             }
@@ -425,39 +474,42 @@ namespace ASoftware.Views
             Cell(L.T("All", "Hepsi"), 0, false, true); Cell(L.Size(estimate.Download), 1, false, true); Cell(L.Size(estimate.Peak), 2, false, true); Cell(L.Size(estimate.After), 3, false, true); Cell("~" + L.Duration(estimate.Seconds), 4, false, true);
             sp.Children.Add(grid);
             sp.Children.Add(Ui.Text(L.T($"{L.Size(estimate.Free)} free on {Path.GetPathRoot(choice.Dir)}; {estimate.Bandwidth}.", $"{Path.GetPathRoot(choice.Dir)} üzerinde {L.Size(estimate.Free)} boş; {estimate.Bandwidth}."), "Faint", 8));
-            foreach (var w in estimate.Warnings) sp.Children.Add(Line("Warn", "\uE7BA", w));
-            foreach (var s in estimate.Stops) sp.Children.Add(Line("Bad", "\uEA39", s));
+            foreach (var w in estimate.Warnings) sp.Children.Add(Line("Warn", w));
+            foreach (var s in estimate.Stops) sp.Children.Add(Line("Bad", s));
             return Box(estimate.Stops.Count > 0 ? "Bad" : estimate.Warnings.Count > 0 ? "Warn" : "Line", sp);
         }
 
         // watchOS without iOS 26: its "ios26" steps are the base they share
         string Head(string os) => os == "ios26" && !choice.Ios26 ? L.T("The base watchOS shares with iOS 26", "watchOS'un iOS 26 ile paylaştığı taban") : Guests.Name(os);
 
-        static UIElement Line(string tone, string icon, string text)
+        // a warning or a stop: its tone's dot and its text
+        static UIElement Line(string tone, string text)
         {
             var g = new Grid { Margin = new Thickness(0, 8, 0, 0) };
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
-            var ic = Ui.Icon(icon, 13, tone); ic.VerticalAlignment = VerticalAlignment.Top; ic.Margin = new Thickness(0, 2, 10, 0);
-            g.Children.Add(ic);
+            var d = Ui.Dot(tone); d.VerticalAlignment = VerticalAlignment.Top; d.Margin = new Thickness(0, 6, 11, 0);
+            g.Children.Add(d);
             var t = Ui.Text(text, "Sub"); Grid.SetColumn(t, 1);
             g.Children.Add(t);
             return g;
         }
 
-        static UIElement StatusHead(string tone, string icon, string text)
+        static UIElement StatusHead(string tone, string text)
         {
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
-            sp.Children.Add(Ui.Icon(icon, 16, tone));
-            sp.Children.Add(new TextBlock { Text = text, Style = Ui.S("H3"), Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+            var d = Ui.Dot(tone); d.Margin = new Thickness(0, 1, 10, 0);
+            sp.Children.Add(d);
+            sp.Children.Add(new TextBlock { Text = text, Style = Ui.S("H3"), VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap });
             return sp;
         }
 
+        /// <summary>A hairline surface (the tone is in its dots, not its edge).</summary>
         static Border Box(string tone, UIElement child)
         {
-            var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(0, 16, 0, 0), BorderThickness = new Thickness(1), Child = child };
+            var b = new Border { CornerRadius = new CornerRadius(16), Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(0, 16, 0, 0), BorderThickness = new Thickness(1), Child = child };
             b.SetResourceReference(Border.BackgroundProperty, "Surface");
-            b.SetResourceReference(Border.BorderBrushProperty, tone);
+            b.SetResourceReference(Border.BorderBrushProperty, "Line");
             return b;
         }
 
@@ -480,12 +532,12 @@ namespace ASoftware.Views
 
         void Run()
         {
-            var j = InstallJob.Current;
+            var j = Job;
             var p = Page(L.K("Installing"), null);
             if (j == null) { p.Children.Add(Ui.Text(L.T("No install runs.", "Çalışan kurulum yok."), "Sub")); return; }
             runHead = new TextBlock { Style = Ui.S("H3"), FontSize = 15, Margin = new Thickness(0, 14, 0, 0) };
             runSub = Ui.Text("", "Sub", 2);
-            runBar = new ProgressBar { Style = Ui.S("Bar"), Height = 8, Maximum = 1000, Margin = new Thickness(0, 12, 0, 0) };
+            runBar = new ProgressBar { Style = Ui.S("Bar"), Height = 4, Maximum = 1000, Margin = new Thickness(0, 12, 0, 0) };
             runNow = Ui.Text("", "Faint", 8);
             p.Children.Add(runHead); p.Children.Add(runSub); p.Children.Add(runBar); p.Children.Add(runNow);
             var buttons = new List<UIElement>();
@@ -507,9 +559,9 @@ namespace ASoftware.Views
                     buttons.Add(Ui.Btn(L.K("Resume"), () => { Resume(j.Choice); }, "BtnPrimary", "\uE768"));
                 buttons.Add(Ui.Btn(L.T("Back to home", "Ana sayfaya dön"), () => main.GoHome(), j.Result == "done" ? "BtnPrimary" : "Btn", "\uE80F"));
                 if (j.Result == "failed")
-                    buttons.Add(Ui.Btn(L.T("Report this", "Bunu bildir"), () => main.OpenReport("install", L.T("The install stopped", "Kurulum durdu"), j.Message), "BtnGhost", "\uEBE8"));
+                    buttons.Add(Ui.Btn(L.T("Report this", "Bunu bildir"), () => main.OpenReport("install", L.T("The install stopped", "Kurulum durdu"), j.Message), "BtnLink", "\uEBE8"));
             }
-            buttons.Add(Ui.Btn(L.K("ShowLog"), () => { showLog = !showLog; Build(); }, "BtnGhost", "\uE9F9"));
+            buttons.Add(Ui.Btn(L.K("ShowLog"), () => { showLog = !showLog; Build(); }, "BtnLink", "\uE9F9"));
             p.Children.Add(Nav(buttons.ToArray()));
             runSteps = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
             p.Children.Add(runSteps);
@@ -517,7 +569,7 @@ namespace ASoftware.Views
             {
                 logBox = new TextBox { Style = Ui.S("Field"), IsReadOnly = true, FontFamily = Ui.F("Mono"), FontSize = 11.5, Height = 320, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalContentAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 14, 0, 0) };
                 p.Children.Insert(p.Children.IndexOf(runSteps), logBox);
-                var open = Ui.Btn(L.T("Open the log file", "Log dosyasını aç"), () => MainWindow.Open(j.Runner.LogFile), "BtnGhost", "\uE8A5");
+                var open = Ui.Btn(L.T("Open the log file", "Log dosyasını aç"), () => MainWindow.Open(j.Runner.LogFile), "BtnLink", "\uE8A5");
                 open.HorizontalAlignment = HorizontalAlignment.Left;
                 p.Children.Insert(p.Children.IndexOf(runSteps), open);
             }
@@ -528,7 +580,7 @@ namespace ASoftware.Views
         public void Tick()
         {
             if (page != 3 || runHead == null) return;
-            var j = InstallJob.Current;
+            var j = Job;
             if (j == null) return;
             var left = j.SecondsLeft();
             var el = DateTime.Now - j.Started;
@@ -571,14 +623,14 @@ namespace ASoftware.Views
 
         UIElement StepRow(PlanStep s)
         {
-            string icon = s.State == "done" ? "\uE73E" : s.State == "skip" ? "\uE73E" : s.State == "running" ? "\uE768" : s.State == "fail" ? "\uEA39" : "\uE739";
-            string tone = s.State == "done" ? "Good" : s.State == "skip" ? "Text3" : s.State == "running" ? "Accent" : s.State == "fail" ? "Bad" : "Text3";
+            // a step's state: its tone's dot, as everywhere else
+            string tone = s.State == "done" ? "Good" : s.State == "running" ? "Accent" : s.State == "fail" ? "Bad" : "Idle";
             var g = new Grid();
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            g.Children.Add(Ui.Icon(icon, 13, tone));
-            var t = new TextBlock { Text = s.Title, Margin = new Thickness(12, 0, 0, 0), FontWeight = s.State == "running" ? FontWeights.SemiBold : FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis };
+            g.Children.Add(Ui.Dot(tone));
+            var t = new TextBlock { Text = s.Title, Margin = new Thickness(14, 0, 0, 0), FontWeight = s.State == "running" ? FontWeights.SemiBold : FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             t.SetResourceReference(TextBlock.ForegroundProperty, s.State == "skip" || s.State == "pending" ? "Text2" : "Text");
             Grid.SetColumn(t, 1);
             g.Children.Add(t);

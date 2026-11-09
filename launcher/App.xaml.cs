@@ -15,7 +15,8 @@ namespace ASoftware
     public static class Program
     {
         /// <summary>Test switches: -config FILE (another launcher.json), -shot FILE.png -page home|ios26|ios16|watch|wizard|settings
-        /// [-tab saves] [-theme dark|light] [-lang en|tr] (draws the window into a PNG and quits).</summary>
+        /// [-tab saves] [-theme dark|light] [-lang en|tr] [-size WxH] [-state os=kind,...] (draws the window into a PNG and quits;
+        /// -state makes up a state the test bed does not have: running, saving, stopping, starting, saved, ready, none, install:NN).</summary>
         public static string Arg(string name)
         {
             var a = Environment.GetCommandLineArgs();

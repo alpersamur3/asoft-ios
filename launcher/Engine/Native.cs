@@ -164,6 +164,13 @@ namespace ASoftware.Engine
             if (DwmSetWindowAttribute(hwnd, 20, ref v, 4) != 0) DwmSetWindowAttribute(hwnd, 19, ref v, 4);
         }
 
+        /// <summary>Windows 11: the title bar's colour (DWMWA_CAPTION_COLOR); Windows 10 refuses it and keeps the dark or light one.</summary>
+        public static void CaptionColor(IntPtr hwnd, System.Windows.Media.Color c)
+        {
+            int colorref = c.R | (c.G << 8) | (c.B << 16);
+            DwmSetWindowAttribute(hwnd, 35, ref colorref, 4);
+        }
+
         /// <summary>Windows 11 rounds the window's corners and gives it the Mica backdrop under the title bar.</summary>
         public static void Win11Look(IntPtr hwnd)
         {

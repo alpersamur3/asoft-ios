@@ -127,14 +127,8 @@ namespace ASoftware.Views
             UpdateJob();
         }
 
-        static Border Status(string text, string tone)
-        {
-            var t = new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold };
-            t.SetResourceReference(TextBlock.ForegroundProperty, tone);
-            var b = new Border { Style = Ui.S("Pill"), Child = t };
-            b.SetResourceReference(Border.BackgroundProperty, tone + "Soft");
-            return b;
-        }
+        /// <summary>A state: its tone's dot and the text.</summary>
+        static StackPanel Status(string text, string tone) => Ui.State(text, tone);
 
         IEnumerable<UIElement> PhoneRows()
         {
@@ -147,7 +141,7 @@ namespace ASoftware.Views
                 var get = Ui.Btn(gettingTools ? L.T("Downloading…", "İndiriliyor…") : L.T("Download", "İndir"), GetTools, "BtnPrimary", "");
                 get.IsEnabled = !gettingTools;
                 AutomationProperties.SetAutomationId(get, "phone-get-tools");
-                stack.Children.Add(Ui.Btn(L.T("Terms", "Koşullar"), () => MainWindow.Open(Phone.ToolsPage), "BtnGhost"));
+                stack.Children.Add(Ui.Btn(L.T("Terms", "Koşullar"), () => MainWindow.Open(Phone.ToolsPage), "BtnLink"));
                 stack.Children.Add(Spaced(get));
                 yield return Ui.Row(L.T("Android's tools are not on this PC", "Android araçları bu PC'de yok"), note, stack);
                 yield break;
@@ -164,7 +158,7 @@ namespace ASoftware.Views
             {
                 var name = d.Model != "" ? d.Model : d.Serial;
                 string desc;
-                Border state;
+                StackPanel state;
                 if (d.Ready)
                 {
                     desc = d.Filled ? $"Android {d.Android} · RAM {d.Ram / 1073741824.0:0} GB · " + L.Size(d.Free) + " " + L.T("free", "boş") : L.T("Reading its details…", "Bilgileri okunuyor…");
@@ -207,7 +201,8 @@ namespace ASoftware.Views
                 right = Status(L.T("Installed", "Kurulu"), "Good");
             else
             {
-                var b = Ui.Btn(d != null && d.App != "" ? L.T("Update", "Güncelle") : L.K("Install"), InstallApp, "BtnPrimary", "");
+                // (filled only while it is the step to take: a page of dimmed light capsules reads as three main acts)
+                var b = Ui.Btn(d != null && d.App != "" ? L.T("Update", "Güncelle") : L.K("Install"), InstallApp, canInstall ? "BtnPrimary" : "Btn","");
                 b.IsEnabled = canInstall;
                 AutomationProperties.SetAutomationId(b, "phone-install-app");
                 right = b;
@@ -272,14 +267,14 @@ namespace ASoftware.Views
             var sp = new StackPanel();
             jobHead = new TextBlock { Style = Ui.S("H3"), FontSize = 15 };
             jobSub = Ui.Text("", "Sub", 2);
-            jobBar = new ProgressBar { Style = Ui.S("Bar"), Height = 8, Maximum = 1000, Margin = new Thickness(0, 10, 0, 0) };
+            jobBar = new ProgressBar { Style = Ui.S("Bar"), Height = 4, Maximum = 1000, Margin = new Thickness(0, 10, 0, 0) };
             AutomationProperties.SetAutomationId(jobHead, "phone-job");
             sp.Children.Add(jobHead); sp.Children.Add(jobSub); sp.Children.Add(jobBar);
             var items = new List<UIElement>();
             if (j.Running) items.Add(Ui.Btn(L.K("StopNow"), () => j.Stop(), "BtnDanger", "\uE71A"));
-            items.Add(Ui.Btn(L.K("ShowLog"), () => { showLog = !showLog; Build(); }, "BtnGhost", "\uE9F9"));
+            items.Add(Ui.Btn(L.K("ShowLog"), () => { showLog = !showLog; Build(); }, "BtnLink", "\uE9F9"));
             if (j.Result == "failed")
-                items.Add(Ui.Btn(L.T("Report this", "Bunu bildir"), () => main.OpenReport("phone", L.T("Sending to the phone failed: ", "Telefona gönderim başarısız: ") + Guests.Name(j.Os), j.Message), "BtnGhost", "\uEBE8"));
+                items.Add(Ui.Btn(L.T("Report this", "Bunu bildir"), () => main.OpenReport("phone", L.T("Sending to the phone failed: ", "Telefona gönderim başarısız: ") + Guests.Name(j.Os), j.Message), "BtnLink", "\uEBE8"));
             if (j.Result == "done" && !j.Send)
                 items.Add(Ui.Btn(L.T("Show the file", "Dosyayı göster"), () => System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + j.Out + "\""), "Btn", "\uE838"));
             var row = Ui.Hstack(items.ToArray());
@@ -301,8 +296,11 @@ namespace ASoftware.Views
         {
             var d = Selected;
             bool haveTarget = fileOnly || (d != null && d.Ready);
-            var go = Ui.Btn(fileOnly ? L.T("Make the file", "Dosyayı yap") : L.T("Send to the phone", "Telefona gönder"), Send, "BtnPrimary", fileOnly ? "\uE74E" : "\uE8EA");
-            go.IsEnabled = os != null && Guests.Installed(os) && haveTarget;
+            bool can = os != null && Guests.Installed(os) && haveTarget;
+            // (an install of the app comes first when one is offered: then this one waits as an outline)
+            bool appFirst = !fileOnly && d != null && d.Ready && d.Filled && apk != null && (d.App == "" || Updates.IsNewer(apk.Tag, d.App));
+            var go = Ui.Btn(fileOnly ? L.T("Make the file", "Dosyayı yap") : L.T("Send to the phone", "Telefona gönder"), Send, can && !appFirst ? "BtnPrimary" : "Btn", fileOnly ? "\uE74E" : "\uE8EA");
+            go.IsEnabled = can;
             go.HorizontalAlignment = HorizontalAlignment.Left;
             AutomationProperties.SetAutomationId(go, "phone-send");
             return go;

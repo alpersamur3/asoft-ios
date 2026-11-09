@@ -21,8 +21,10 @@ namespace ASoftware.Views
         string tab;
         // (new at each Build: an element has one parent, and the old layout keeps these as its children)
         ContentControl body;
-        TextBlock state;
-        StackPanel actions;
+        DeviceArt device;
+        System.Windows.Shapes.Ellipse stateDot;
+        TextBlock stateText;
+        WrapPanel actions;
         OsConfig C => Guests.Cfg(os);
 
         public OsPage(string os, MainWindow main, string tab)
@@ -36,39 +38,54 @@ namespace ASoftware.Views
         void Build()
         {
             body = new ContentControl();
-            state = new TextBlock { Foreground = Brushes.White, FontSize = 13, Opacity = 0.9 };
-            actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Bottom };
-            var root = new Grid { Margin = new Thickness(30, 4, 30, 0) };
+            device = new DeviceArt { Os = os, Height = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 24, 0) };
+            stateDot = Ui.Dot("Idle");
+            stateDot.Margin = new Thickness(0, 1, 8, 0);
+            stateText = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
+            stateText.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            actions = new WrapPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+            var root = new Grid { Margin = new Thickness(30, 2, 30, 0) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition());
 
-            // the header, in the card's colours
-            var head = new Border { CornerRadius = new CornerRadius(20), Background = Theme.OsGradient(os), Height = 150, ClipToBounds = true };
+            // the header: a hairline surface with the device, its name and state, and what to do
+            var head = new Border { CornerRadius = new CornerRadius(22), BorderThickness = new Thickness(1), Padding = new Thickness(14, 16, 22, 16) };
+            head.SetResourceReference(Border.BackgroundProperty, "Surface");
+            head.SetResourceReference(Border.BorderBrushProperty, "Line");
             var hg = new Grid();
-            hg.Children.Add(new System.Windows.Shapes.Ellipse { Width = 300, Height = 300, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -140, -60, 0), Fill = new SolidColorBrush(Color.FromArgb(0x18, 255, 255, 255)) });
-            hg.Children.Add(new DeviceGlyph { Os = os, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 40, 0), RenderTransform = new ScaleTransform(0.78, 0.78) });
-            var back = new Button { Style = Ui.S("BtnIcon"), Content = "\uE72B", Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 12, 0, 0), ToolTip = L.K("Back") };
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140 });
+            hg.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var back = new Button { Style = Ui.S("BtnIcon"), Content = "", VerticalAlignment = VerticalAlignment.Top, ToolTip = L.K("Back") };
             AutomationProperties.SetName(back, L.K("Back"));
             back.Click += (s, e) => main.GoHome();
             hg.Children.Add(back);
-            var title = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(24, 0, 0, 18) };
-            title.Children.Add(new TextBlock { Text = Guests.Name(os), FontFamily = Ui.F("DisplayFont"), FontSize = 30, FontWeight = FontWeights.SemiBold, Foreground = Brushes.White });
-            title.Children.Add(new TextBlock { Text = Guests.Detail(os), Foreground = Brushes.White, Opacity = 0.85, FontSize = 12.5 });
-            title.Children.Add(state);
-            state.Margin = new Thickness(0, 6, 0, 0);
+            Grid.SetColumn(device, 1);
+            hg.Children.Add(device);
+            var title = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            title.Children.Add(new TextBlock { Text = Guests.Name(os), Style = Ui.S("H1"), FontSize = 28 });
+            title.Children.Add(Ui.Dyn(new TextBlock { Text = Guests.Detail(os), FontSize = 12.5, Margin = new Thickness(1, 1, 0, 0) }, TextBlock.ForegroundProperty, "Text3"));
+            var st = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(1, 12, 0, 0) };
+            st.Children.Add(stateDot);
+            st.Children.Add(stateText);
+            title.Children.Add(st);
+            Grid.SetColumn(title, 2);
             hg.Children.Add(title);
-            actions.HorizontalAlignment = HorizontalAlignment.Right;
-            actions.Margin = new Thickness(0, 0, 200, 18);
+            actions.Margin = new Thickness(16, 0, 0, 0);
+            Grid.SetColumn(actions, 3);
             hg.Children.Add(actions);
             head.Child = hg;
-            // (the circle behind the device must not show past the header's round corners)
-            hg.SizeChanged += (s, e) => hg.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), 20, 20);
-            root.Children.Add(head);
+            // (as wide as the settings under it, at most: its buttons stand over their right edge)
+            var headRow = new Grid();
+            headRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 980 });
+            headRow.Children.Add(head);
+            root.Children.Add(headRow);
 
             // the tabs
             var tabs = Ui.Seg(new[] { ("settings", L.K("Settings")), ("saves", L.K("Saves")), ("apps", L.K("Apps")), ("logs", L.K("Logs")) }, tab, t => { tab = t; Show(); });
-            tabs.Margin = new Thickness(0, 18, 0, 14);
+            tabs.Margin = new Thickness(0, 18, 0, 16);
             Grid.SetRow(tabs, 1);
             root.Children.Add(tabs);
 
@@ -80,48 +97,59 @@ namespace ASoftware.Views
             Show();
         }
 
-        /// <summary>The header's state and actions (also from the main window's poll).</summary>
+        /// <summary>The header's device, state and actions (also from the main window's poll).</summary>
         public void Refresh()
         {
             actions.Children.Clear();
             Machines.Runs.TryGetValue(os, out var run);
             bool on = run != null && run.QemuPid != 0 && Native.Alive(run.QemuPid);
+            device.Present = Guests.Installed(os) || on;
+            device.Awake = on;
+            device.Shot = Thumbs.Get(os);
+            string tone;
             if (on)
             {
-                state.Text = (run.Busy == "saving" ? L.T("Saving…", "Kaydediliyor…") : run.Busy == "stopping" ? L.T("Turning off…", "Kapatılıyor…") : L.T("Running", "Çalışıyor")) + $" · {run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB";
-                if (run.Disk != "" && run.QuickBoot) actions.Children.Add(Glass(Ui.Btn(L.K("SaveClose"), () => main.SaveClose(os), "Btn", "\uE74E"), "page-saveclose"));
-                var off = Glass(Ui.Btn(L.K("TurnOff"), () => main.TurnOff(os), "Btn", "\uE7E8"), "page-turnoff"); off.Margin = new Thickness(8, 0, 0, 0);
-                actions.Children.Add(off);
+                bool busy = run.Busy == "saving" || run.Busy == "stopping";
+                stateText.Text = (run.Busy == "saving" ? L.T("Saving…", "Kaydediliyor…") : run.Busy == "stopping" ? L.T("Turning off…", "Kapatılıyor…") : L.T("Running", "Çalışıyor")) + $" · {run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB";
+                tone = busy ? "Warn" : "Good";
+                if (run.Disk != "" && run.QuickBoot) AddAction(Ui.Btn(L.K("SaveClose"), () => main.SaveClose(os), "BtnPrimary"), "page-saveclose");
+                AddAction(Ui.Btn(L.K("TurnOff"), () => main.TurnOff(os), actions.Children.Count == 0 ? "BtnPrimary" : "Btn"), "page-turnoff");
             }
             else if (Guests.Installed(os))
             {
-                state.Text = L.T("Ready", "Hazır");
-                actions.Children.Add(Glass(Ui.Btn(L.K("Start"), () => main.StartOs(os), "Btn", "\uE768"), "page-start"));
+                stateText.Text = L.T("Ready", "Hazır");
+                tone = "Idle";
+                AddAction(Ui.Btn(L.K("Start"), () => main.StartOs(os), "BtnPrimary"), "page-start");
                 // the quick save a start resumed already: going back to it is asked for (MainWindow.GoBack)
                 var way = main.QuickOf(os);
                 if (main.IsWayBack(os, way))
                 {
-                    var back = Glass(Ui.Btn(L.K("GoBack") + " · " + Guests.When(way.When), () => main.GoBack(os), "Btn", ""), "page-goback");
-                    back.Margin = new Thickness(8, 0, 0, 0);
+                    var back = AddAction(Ui.Btn(L.K("GoBack") + " · " + Guests.When(way.When), () => main.GoBack(os), "Btn"), "page-goback");
                     back.ToolTip = Guests.Hardware(os, Guests.SaveShape(os, LauncherConfig.Current.FindSave(Guests.SaveDisk(os), Guests.QuickName)));
-                    actions.Children.Add(back);
                 }
             }
-            else state.Text = L.T("Not installed", "Kurulu değil");
+            else { stateText.Text = L.T("Not installed", "Kurulu değil"); tone = "Idle"; }
+            stateDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, tone);
             if (tab == "saves" && savesShownRunning != on) ShowSaves();
         }
 
         public void Tick() { }
 
-        /// <summary>A button on the coloured header: white glass.</summary>
-        static Button Glass(Button b, string id)
+        /// <summary>A capsule in the header, after the ones before it.</summary>
+        Button AddAction(Button b, string id)
         {
-            b.Background = new SolidColorBrush(Color.FromArgb(0x38, 255, 255, 255));
-            b.BorderBrush = new SolidColorBrush(Color.FromArgb(0x60, 255, 255, 255));
-            b.Foreground = Brushes.White;
-            if (b.Content is StackPanel sp) foreach (var t in sp.Children.OfType<TextBlock>()) t.Foreground = Brushes.White;
-            System.Windows.Automation.AutomationProperties.SetAutomationId(b, id);
+            AutomationProperties.SetAutomationId(b, id);
+            b.Margin = new Thickness(actions.Children.Count == 0 ? 0 : 10, 4, 0, 4);
+            actions.Children.Add(b);
             return b;
+        }
+
+        /// <summary>A tab's column: as wide as the header over it (both stop at 980), whatever its rows ask for.</summary>
+        StackPanel Column()
+        {
+            var p = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left };
+            AtMost.Bind(p, body, 980);
+            return p;
         }
 
         void Show()
@@ -162,11 +190,11 @@ namespace ASoftware.Views
         // --- settings -------------------------------------------------------------------------------
         void ShowSettings()
         {
-            var p = new StackPanel { MaxWidth = 980, HorizontalAlignment = HorizontalAlignment.Left };
+            var p = Column();
             var c = C;
             shapeSeen = Guests.Shape(os);
             if (!Guests.Installed(os))
-                p.Children.Add(Note("Warn", L.T("Not installed here yet: install it, or point the folders below at an existing install.", "Burada henüz kurulu değil: kurun ya da aşağıdaki klasörleri var olan bir kuruluma yöneltin.")));
+                p.Children.Add(Ui.Note("Warn", L.T("Not installed here yet: install it, or point the folders below at an existing install.", "Burada henüz kurulu değil: kurun ya da aşağıdaki klasörleri var olan bir kuruluma yöneltin.")));
 
             // the guest
             var cpus = Ui.Seg(new[] { (4, "4"), (8, "8") }, c.Smp, v => { c.Smp = v; Changed(); });
@@ -269,7 +297,7 @@ namespace ASoftware.Views
         {
             string mode = c.GpuMode == "" ? "cloudos" : c.GpuMode;
             var built = BuiltGpu();
-            var rebuild = Ui.Btn(L.K("ApplyReinstall"), () => RebuildGpu(), "BtnPrimary", "\uE72C");
+            var rebuild = Ui.Btn(L.K("ApplyReinstall"), () => RebuildGpu());
             void Upd() => rebuild.Visibility = built != null && built != Sig(c) ? Visibility.Visible : Visibility.Collapsed;
             var seg = Ui.Seg(new[] { ("cloudos", L.T("Apple's (cloudOS)", "Apple'ınki (cloudOS)")), ("gpu", L.T("A bundle I have", "Elimdeki paket")), ("gpuless", L.T("None", "Yok")) }, mode, v =>
             {
@@ -334,6 +362,8 @@ namespace ASoftware.Views
                     L.T("Rebuild", "Yeniden kur"), L.K("Cancel")) != 0) return;
             var ch = new InstallChoice { Ios26 = true, Dir = dir, Linux = LauncherConfig.Current.Install.Linux ?? "wsl", GpuMode = C.GpuMode == "" ? "cloudos" : C.GpuMode, GpuDriver = C.GpuDriver };
             InstallJob.Start(ch, null);
+            // a new user disk starts: the old one's screen is not this one's
+            Thumbs.Drop(os);
             main.OpenWizard(null);
         }
 
@@ -350,7 +380,10 @@ namespace ASoftware.Views
                     c.Work = f;
                     if (!Guests.Installed(os) && Dialog.Show(main, L.T("No install there", "Orada kurulum yok"), L.T($"{f} has no finished {Guests.Name(os)} install. Use it anyway?", $"{f} içinde bitmiş bir {Guests.Name(os)} kurulumu yok. Yine de kullanılsın mı?"), L.T("Use it", "Kullan"), L.K("Cancel")) != 0)
                     { c.Work = was; return; }
-                    if (os == "ios26" && LauncherConfig.Current.Watch.Work == "") LauncherConfig.Current.Watch.Work = f;
+                    // (the watch follows iOS 26's folder when it had none: its picture was of another disk too)
+                    if (os == "ios26" && LauncherConfig.Current.Watch.Work == "") { LauncherConfig.Current.Watch.Work = f; Thumbs.Drop("watch"); }
+                    // another install's disk: the screen of the one before does not stand for it
+                    if (!string.Equals(was, f, StringComparison.OrdinalIgnoreCase)) Thumbs.Drop(os);
                     Changed(); ShowSettings();
                 }))),
                 Ui.Row(L.K("AppFolder"), L.T("Where its start script is (an install's folder); the launcher's own when empty.", "Başlatma betiğinin olduğu yer (bir kurulumun klasörü); boşsa başlatıcınınki."), Ui.Hstack(app, Ui.Btn(L.K("Browse"), () =>
@@ -362,20 +395,11 @@ namespace ASoftware.Views
                 }))));
         }
 
-        static Border Note(string tone, string text)
-        {
-            var b = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 10, 14, 10), Margin = new Thickness(0, 0, 0, 16), BorderThickness = new Thickness(1) };
-            b.SetResourceReference(Border.BackgroundProperty, tone + "Soft");
-            b.SetResourceReference(Border.BorderBrushProperty, tone);
-            b.Child = Ui.Text(text, "Sub");
-            return b;
-        }
-
         // --- saves ------------------------------------------------------------------------------------
         bool savesShownRunning;
         async void ShowSaves()
         {
-            var p = new StackPanel { MaxWidth = 980, HorizontalAlignment = HorizontalAlignment.Left };
+            var p = Column();
             body.Content = p;
             var disk = Guests.SaveDisk(os);
             Machines.Runs.TryGetValue(os, out var run);
@@ -384,13 +408,13 @@ namespace ASoftware.Views
             if (on && run.Disk != "") disk = run.Disk;
             if (disk == "" || (!on && C.DiskMode == "throwaway"))
             {
-                p.Children.Add(Note("Info", L.T("Saves live in a disk that keeps its changes: set Disk to Keep changes.", "Kayıtlar değişiklikleri saklayan bir diskte durur: Disk'i Değişiklikleri sakla yapın.")));
+                p.Children.Add(Ui.Note("Info", L.T("Saves live in a disk that keeps its changes: set Disk to Keep changes.", "Kayıtlar değişiklikleri saklayan bir diskte durur: Disk'i Değişiklikleri sakla yapın.")));
                 return;
             }
             var top = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             top.Children.Add(Ui.Text(L.T("States of ", "Durumlar: ") + disk + L.T(". A save holds the whole machine (memory and disk) and loads only with the vCPUs and RAM it was made with.", ". Bir kayıt tüm makineyi (bellek ve disk) tutar ve yalnız alındığı vCPU ve RAM ile açılır."), "Faint"));
-            var tb = Ui.Hstack(on ? Ui.Btn(L.K("SaveNow"), async () => { try { var n = await Machines.SaveNow(os); main.Snack(L.T("Saved: ", "Kaydedildi: ") + n, "good"); ShowSaves(); } catch (Exception e) { Dialog.Show(main, L.T("Not saved", "Kaydedilmedi"), e.Message, L.K("OK")); } }, "BtnPrimary", "\uE74E") : null,
-                                Ui.Btn(L.K("Refresh"), ShowSaves, "Btn", "\uE72C"));
+            var tb = Ui.Hstack(on ? Ui.Btn(L.K("SaveNow"), async () => { try { var n = await Machines.SaveNow(os); main.Snack(L.T("Saved: ", "Kaydedildi: ") + n, "good"); ShowSaves(); } catch (Exception e) { Dialog.Show(main, L.T("Not saved", "Kaydedilmedi"), e.Message, L.K("OK")); } }) : null,
+                                Ui.Btn(L.K("Refresh"), ShowSaves));
             tb.HorizontalAlignment = HorizontalAlignment.Right;
             tb.Margin = new Thickness(24, 0, 0, 0);
             top.ColumnDefinitions.Add(new ColumnDefinition());
@@ -398,10 +422,11 @@ namespace ASoftware.Views
             Grid.SetColumn(tb, 1);
             top.Children.Add(tb);
             p.Children.Add(top);
-            var list = await Task.Run(() => Guests.Snapshots(os, disk));
+            // (-state saves=yes: made-up saves for the screenshots; the test bed's disks have none)
+            var list = OsCardVm.TestState("saves") == "yes" ? TestSaves() : await Task.Run(() => Guests.Snapshots(os, disk));
             if (list.Count == 0)
             {
-                p.Children.Add(Note("Info", on ? L.T("No saves yet: Save now makes one, Save and close makes the quick one.", "Henüz kayıt yok: Şimdi kaydet bir tane yapar, Kaydet ve kapat hızlı olanı.")
+                p.Children.Add(Ui.Note("Info", on ? L.T("No saves yet: Save now makes one, Save and close makes the quick one.", "Henüz kayıt yok: Şimdi kaydet bir tane yapar, Kaydet ve kapat hızlı olanı.")
                                                : L.T("No saves yet. While it runs: Save now, or Save and close.", "Henüz kayıt yok. Çalışırken: Şimdi kaydet ya da Kaydet ve kapat.")));
                 return;
             }
@@ -410,6 +435,12 @@ namespace ASoftware.Views
                 rows.Add(SaveRow(disk, s, on, run));
             p.Children.Add(Ui.Group(null, rows.ToArray()));
         }
+
+        static List<Guests.Snap> TestSaves() => new List<Guests.Snap>
+        {
+            new Guests.Snap { Id = "1", Name = Guests.QuickName, When = DateTime.Now.AddHours(-3), Bytes = 4_400_000_000 },
+            new Guests.Snap { Id = "2", Name = "asoft-2026-11-08-2140", When = DateTime.Now.AddDays(-2), Bytes = 4_100_000_000 },
+        };
 
         UIElement SaveRow(string disk, Guests.Snap s, bool on, GuestRun run)
         {
@@ -426,7 +457,8 @@ namespace ASoftware.Views
             string guest = L.T("opens with ", "açılışı: ") + hw + (g.known ? "" : L.T(" (made before the launcher: assumed)", " (başlatıcıdan önce alındı: varsayıldı)"));
             var left = new StackPanel();
             var t = new StackPanel { Orientation = Orientation.Horizontal };
-            t.Children.Add(Ui.Icon(s.Quick ? "\uE945" : "\uE74E", 15, s.Quick ? "Accent" : "Text2"));
+            // (the quick save is the one a start resumes: it alone gets a colour)
+            t.Children.Add(Ui.Dot(s.Quick ? "Accent" : "Idle"));
             t.Children.Add(new TextBlock { Text = label, Style = Ui.S("H3"), Margin = new Thickness(10, 0, 0, 0) });
             left.Children.Add(t);
             left.Children.Add(Ui.Text($"{when} · {s.VmSize} · {guest}", "Faint", 3));
@@ -449,7 +481,7 @@ namespace ASoftware.Views
                     }
                 }
                 catch (Exception e) { Dialog.Show(main, L.T("Not loaded", "Yüklenmedi"), e.Message, L.K("OK")); }
-            }, "BtnPrimary", "\uE768");
+            });
             var ren = Ui.Btn(L.K("Rename"), () =>
             {
                 var n = Dialog.Ask(main, L.K("Rename"), L.T("A name for this save (the launcher keeps it; the disk keeps its own id).", "Bu kayıt için bir ad (başlatıcı saklar; disk kendi kimliğini tutar)."), label);
@@ -459,7 +491,7 @@ namespace ASoftware.Views
                 m.Label = n.Trim();
                 LauncherConfig.Current.Save();
                 ShowSaves();
-            });
+            }, "BtnLink");
             var del = Ui.Btn(L.K("Delete"), async () =>
             {
                 if (Dialog.Show(main, L.T("Delete this save?", "Bu kayıt silinsin mi?"), label + " · " + when + "\n" + L.T("It cannot be undone. (A qcow2 file does not shrink on Windows: the room is reused by the next save.)", "Geri alınamaz. (Windows'ta qcow2 dosyası küçülmez: yer bir sonraki kayıtta yeniden kullanılır.)"), L.K("Delete"), L.K("Cancel")) != 0) return;
@@ -488,15 +520,15 @@ namespace ASoftware.Views
         // --- apps (.ipa) ------------------------------------------------------------------------------
         void ShowApps()
         {
-            var p = new StackPanel { MaxWidth = 980, HorizontalAlignment = HorizontalAlignment.Left };
+            var p = Column();
             body.Content = p;
-            if (os == "watch") { p.Children.Add(Note("Info", L.T(".ipa installs are for iOS; watchOS's come later.", ".ipa kurulumu iOS içindir; watchOS'unki sonra gelecek."))); return; }
+            if (os == "watch") { p.Children.Add(Ui.Note("Info", L.T(".ipa installs are for iOS; watchOS's come later.", ".ipa kurulumu iOS içindir; watchOS'unki sonra gelecek."))); return; }
             var dir = Guests.IpaFolder(os);
-            if (dir == "") { p.Children.Add(Note("Warn", L.T("Not installed here.", "Burada kurulu değil."))); return; }
-            p.Children.Add(Note("Info", os == "ios16"
+            if (dir == "") { p.Children.Add(Ui.Note("Warn", L.T("Not installed here.", "Burada kurulu değil."))); return; }
+            p.Children.Add(Ui.Note("Info", os == "ios16"
                 ? L.T("iOS 16 installs an .ipa while it runs (asoftinstalld fetches it from the .ipa folder); results land in Installed and Failed.", "iOS 16 bir .ipa'yı çalışırken kurar (asoftinstalld onu .ipa klasöründen alır); sonuçlar Installed ve Failed klasörlerine düşer.")
                 : L.T("iOS 26 installs an .ipa at its next start (direct placement into its disk): add it, then turn iOS 26 off (or Save and close) and start it.", "iOS 26 bir .ipa'yı bir sonraki açılışta kurar (diske doğrudan yerleştirir): ekleyin, sonra iOS 26'yı kapatıp (ya da Kaydet ve kapat) başlatın.")));
-            p.Children.Add(Ui.Hstack(Ui.Btn(L.K("InstallIpa"), () => AddIpa(dir), "BtnPrimary", "\uE710"), Ui.Btn(L.K("OpenIpaFolder"), () => { Directory.CreateDirectory(dir); MainWindow.Open(dir); }, "Btn", "\uE838")));
+            p.Children.Add(Ui.Hstack(Ui.Btn(L.K("InstallIpa"), () => AddIpa(dir)), Ui.Btn(L.K("OpenIpaFolder"), () => { Directory.CreateDirectory(dir); MainWindow.Open(dir); }, "BtnLink")));
             var rows = new List<UIElement>();
             void Add(string sub, string tone, string what)
             {
@@ -505,13 +537,14 @@ namespace ASoftware.Views
                 foreach (var f in new DirectoryInfo(d).GetFiles("*.ipa").OrderByDescending(f => f.LastWriteTime).Take(30))
                 {
                     var left = new StackPanel { Orientation = Orientation.Horizontal };
-                    left.Children.Add(Ui.Icon(sub == "Installed" ? "\uE73E" : sub == "Failed" ? "\uEA39" : "\uE823", 14, tone));
+                    var dot = Ui.Dot(tone); dot.VerticalAlignment = VerticalAlignment.Top; dot.Margin = new Thickness(0, 7, 0, 0);
+                    left.Children.Add(dot);
                     var tx = new StackPanel { Margin = new Thickness(10, 0, 0, 0) };
                     tx.Children.Add(new TextBlock { Text = f.Name, Style = Ui.S("H3") });
                     tx.Children.Add(Ui.Text(what + " · " + f.LastWriteTime.ToString("g") + " · " + L.Size(f.Length), "Faint", 2));
                     left.Children.Add(tx);
                     var log = Path.Combine(d, Path.GetFileNameWithoutExtension(f.Name) + ".log");
-                    rows.Add(Ui.Row(null, null, Wrap(left, File.Exists(log) ? Ui.Btn(L.T("Log", "Log"), () => MainWindow.Open(log)) : (UIElement)new TextBlock())));
+                    rows.Add(Ui.Row(null, null, Wrap(left, File.Exists(log) ? Ui.Btn(L.T("Log", "Log"), () => MainWindow.Open(log), "BtnLink") : (UIElement)new TextBlock())));
                 }
             }
             Add("", "Info", L.T("waiting", "bekliyor"));
@@ -544,15 +577,16 @@ namespace ASoftware.Views
         // --- logs ---------------------------------------------------------------------------------------
         void ShowLogs()
         {
-            var p = new StackPanel { MaxWidth = 1100, HorizontalAlignment = HorizontalAlignment.Left };
+            var p = Column();
             body.Content = p;
             var run = Guests.LastRunFolder(os);
             var inst = Path.Combine(Guests.Work(os), "install", "logs");
+            // (the header keeps the page's one filled capsule: here the pack is an outline one, the folders links)
             p.Children.Add(Ui.Hstack(
-                Ui.Btn(L.K("OpenRunFolder"), () => MainWindow.Open(run), "Btn", "\uE838"),
-                Ui.Btn(L.K("OpenInstallLogs"), () => MainWindow.Open(Directory.Exists(inst) ? inst : Guests.Work(os)), "Btn", "\uE838"),
-                Ui.Btn(L.K("PackLogs"), Pack, "BtnPrimary", "\uE7B8"),
-                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(os), "BtnGhost", "\uEBE8")));
+                Ui.Btn(L.K("PackLogs"), Pack),
+                Ui.Btn(L.K("OpenRunFolder"), () => MainWindow.Open(run), "BtnLink"),
+                Ui.Btn(L.K("OpenInstallLogs"), () => MainWindow.Open(Directory.Exists(inst) ? inst : Guests.Work(os)), "BtnLink"),
+                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(os), "BtnLink")));
             p.Children.Add(Ui.Text(run == "" ? L.T("No run yet.", "Henüz çalışma yok.") : L.T("The last run: ", "Son çalışma: ") + run, "Faint", 12));
             var logView = new TextBox { Style = Ui.S("Field"), FontFamily = Ui.F("Mono"), IsReadOnly = true, TextWrapping = TextWrapping.NoWrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Height = 360, FontSize = 11.5, AcceptsReturn = true, Margin = new Thickness(0, 10, 0, 0), VerticalContentAlignment = VerticalAlignment.Top };
             var serial = run == "" ? "" : new[] { "serial.log", Path.Combine("run", "serial.txt"), "stderr.log" }.Select(x => Path.Combine(run, x)).FirstOrDefault(File.Exists) ?? "";

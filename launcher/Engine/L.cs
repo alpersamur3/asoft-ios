@@ -50,7 +50,7 @@ namespace ASoftware.Engine
         {
             ["Tagline"] = new[] { "iOS and watchOS on your PC, drawn by its GPU", "iOS ve watchOS bilgisayarınızda, GPU'suyla çizilir" },
             ["Install"] = new[] { "Install", "Kur" },
-            ["InstallDots"] = new[] { "Install", "Kurulum" },
+            ["InstallDots"] = new[] { "Add a system", "Sistem ekle" },
             ["Start"] = new[] { "Start", "Başlat" },
             ["Resume"] = new[] { "Resume", "Devam et" },
             ["SaveClose"] = new[] { "Save and close", "Kaydet ve kapat" },

@@ -106,7 +106,8 @@ namespace ASoftware.Engine
     public static class Log
     {
         static readonly object gate = new object();
-        public static string File => Path.Combine(AppPaths.LocalData, "launcher.log");
+        // next to launcher.json: a test run on its own config (-config) keeps its lines out of the user's log
+        public static string File => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(AppPaths.ConfigFile)), "launcher.log");
 
         public static void Write(string line)
         {

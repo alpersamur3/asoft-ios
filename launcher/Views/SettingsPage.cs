@@ -40,17 +40,19 @@ namespace ASoftware.Views
             about.Children.Add(Ui.Text(L.T("App folder: ", "Uygulama klasörü: ") + AppPaths.Root, "Faint", 6));
             about.Children.Add(Ui.Text(L.T("Settings: ", "Ayarlar: ") + AppPaths.ConfigFile, "Faint", 2));
             about.Children.Add(Ui.Text(L.T("Imported: ", "İçe aktarılan: ") + c.Imported, "Faint", 2));
+            // (four ways out of the launcher, none of them the page's main act: links, not capsules)
             var links = Ui.Hstack(
-                Ui.Btn("GitHub", () => MainWindow.Open("https://github.com/" + Updates.Repo), "Btn", "\uE774"),
-                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(), "Btn", "\uEBE8"),
-                Ui.Btn(L.T("Open the settings folder", "Ayar klasörünü aç"), () => MainWindow.Open(AppPaths.LocalData), "Btn", "\uE838"),
-                Ui.Btn(L.T("Launcher log", "Başlatıcı logu"), () => MainWindow.Open(Log.File), "Btn", "\uE9F9"));
-            links.Margin = new Thickness(0, 12, 0, 0);
+                Ui.Btn("GitHub", () => MainWindow.Open("https://github.com/" + Updates.Repo), "BtnLink"),
+                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(), "BtnLink"),
+                Ui.Btn(L.T("Open the settings folder", "Ayar klasörünü aç"), () => MainWindow.Open(AppPaths.LocalData), "BtnLink"),
+                Ui.Btn(L.T("Launcher log", "Başlatıcı logu"), () => MainWindow.Open(Log.File), "BtnLink"));
+            links.Margin = new Thickness(-2, 8, 0, -4);
             about.Children.Add(links);
-            var box = new Border { Child = about, Padding = new Thickness(18, 16, 18, 16), CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1) };
+            var box = new Border { Child = about, Padding = new Thickness(18, 16, 18, 16), CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(1) };
             box.SetResourceReference(Border.BackgroundProperty, "Surface");
             box.SetResourceReference(Border.BorderBrushProperty, "Line");
-            p.Children.Add(new TextBlock { Text = L.K("About"), Style = Ui.S("H3"), FontSize = 12.5, Margin = new Thickness(4, 0, 0, 8) });
+            // (headed like the groups above it)
+            p.Children.Add(Ui.Dyn(new TextBlock { Text = L.K("About"), Style = Ui.S("H3"), FontSize = 12.5, Margin = new Thickness(4, 0, 0, 8) }, TextBlock.ForegroundProperty, "Text2"));
             p.Children.Add(box);
             Content = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = p };
         }

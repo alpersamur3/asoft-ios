@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Shapes;
 
 namespace ASoftware.Views
 {
@@ -31,20 +34,57 @@ namespace ASoftware.Views
             return t;
         }
 
+        /// <summary>A button. Capsules and links carry only their text; the quiet text button (Back) keeps its icon.</summary>
         public static Button Btn(string text, Action click, string style = "Btn", string icon = null)
         {
             object content = text;
-            if (icon != null)
+            if (!string.IsNullOrEmpty(icon) && style == "BtnGhost")
             {
                 var sp = new StackPanel { Orientation = Orientation.Horizontal };
-                var ic = Icon(icon, 13, null); ic.Margin = new Thickness(0, 1, 8, 0);
-                ic.SetResourceReference(TextBlock.ForegroundProperty, style == "BtnPrimary" ? "AccentText" : style == "BtnDanger" ? "Bad" : "Text");
+                // (the icon takes the button's own colour: it is inherited)
+                var ic = Icon(icon, 12, null); ic.Margin = new Thickness(0, 1, 8, 0);
                 sp.Children.Add(ic);
                 sp.Children.Add(new TextBlock { Text = text });
                 content = sp;
             }
             var b = new Button { Content = content, Style = S(style) };
             b.Click += (s, e) => click();
+            return b;
+        }
+
+        /// <summary>A state's dot: its tone (Good, Warn, Bad, Accent, Idle) is the only colour it has.</summary>
+        public static Ellipse Dot(string tone, double size = 7)
+        {
+            var e = new Ellipse { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
+            e.SetResourceReference(Shape.FillProperty, tone);
+            return e;
+        }
+
+        /// <summary>A state: a dot and its text.</summary>
+        public static StackPanel State(string text, string tone, double size = 13)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var d = Dot(tone); d.Margin = new Thickness(0, 1, 8, 0);
+            sp.Children.Add(d);
+            var t = new TextBlock { Text = text, FontSize = size, VerticalAlignment = VerticalAlignment.Center };
+            t.SetResourceReference(TextBlock.ForegroundProperty, "Text2");
+            sp.Children.Add(t);
+            return sp;
+        }
+
+        /// <summary>A note on a page: a hairline surface, a tone dot and the text.</summary>
+        public static Border Note(string tone, string text)
+        {
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            var d = Dot(tone); d.VerticalAlignment = VerticalAlignment.Top; d.Margin = new Thickness(0, 6, 12, 0);
+            g.Children.Add(d);
+            var t = Text(text, "Sub"); Grid.SetColumn(t, 1);
+            g.Children.Add(t);
+            var b = new Border { CornerRadius = new CornerRadius(14), Padding = new Thickness(16, 11, 16, 12), Margin = new Thickness(0, 0, 0, 16), BorderThickness = new Thickness(1), Child = g };
+            b.SetResourceReference(Border.BackgroundProperty, "Surface");
+            b.SetResourceReference(Border.BorderBrushProperty, "Line");
             return b;
         }
 
@@ -72,7 +112,7 @@ namespace ASoftware.Views
             var inner = new StackPanel();
             foreach (var r in rows) if (r != null) inner.Children.Add(r);
             if (inner.Children.Count > 0 && inner.Children[inner.Children.Count - 1] is Border last) last.BorderThickness = new Thickness(0);
-            var box = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Child = inner };
+            var box = new Border { BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Child = inner };
             box.SetResourceReference(Border.BackgroundProperty, "Surface");
             box.SetResourceReference(Border.BorderBrushProperty, "Line");
             outer.Children.Add(box);
@@ -111,8 +151,27 @@ namespace ASoftware.Views
         public static StackPanel Hstack(params UIElement[] items)
         {
             var sp = new StackPanel { Orientation = Orientation.Horizontal };
-            foreach (var i in items) if (i != null) { if (i is FrameworkElement fe && sp.Children.Count > 0) fe.Margin = new Thickness(8, 0, 0, 0); sp.Children.Add(i); }
+            foreach (var i in items)
+                if (i != null)
+                {
+                    // (a text link stands further off: two links 8 px apart read as one)
+                    bool link = i is Button b && (b.Style == S("BtnLink") || b.Style == S("BtnDanger"));
+                    if (i is FrameworkElement fe && sp.Children.Count > 0) fe.Margin = new Thickness(link ? 18 : 8, 0, 0, 0);
+                    sp.Children.Add(i);
+                }
             return sp;
+        }
+
+        // a number and its unit, an OS's name and its number, and a range's two ends
+        static readonly System.Text.RegularExpressions.Regex UnitGap = new System.Text.RegularExpressions.Regex(@"(\d) (GB|MB|KB|TB|min|dk|sa|h|vCPU|%)(?!\p{L})|(iOS|watchOS|visionOS) (\d)");
+        static readonly System.Text.RegularExpressions.Regex RangeDash = new System.Text.RegularExpressions.Regex(@"(\d)–(\d)");
+
+        /// <summary>The text with no-break spaces where a line must not break: "5 GB", "40 dk", "iOS 26", "1,5–2,5".</summary>
+        public static string KeepUnits(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s ?? "";
+            s = UnitGap.Replace(s, m => m.Groups[1].Success ? m.Groups[1].Value + "\u00a0" + m.Groups[2].Value : m.Groups[3].Value + "\u00a0" + m.Groups[4].Value);
+            return RangeDash.Replace(s, "$1\u2060–\u2060$2");
         }
 
         public static string Pick(string description, string start)
@@ -123,5 +182,29 @@ namespace ASoftware.Views
                 return d.ShowDialog() == System.Windows.Forms.DialogResult.OK ? d.SelectedPath : null;
             }
         }
+    }
+
+    /// <summary>A width that follows another element's, up to a most: one column of cards, all as wide as it.</summary>
+    public sealed class AtMost : IValueConverter
+    {
+        readonly double most;
+        public AtMost(double most) { this.most = most; }
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            value is double w && w > 0 && !double.IsInfinity(w) ? Math.Min(most, w) : double.NaN;
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
+
+        /// <summary>@e as wide as @column's width, up to @max.</summary>
+        public static void Bind(FrameworkElement e, FrameworkElement column, double max) =>
+            e.SetBinding(FrameworkElement.WidthProperty, new Binding(nameof(FrameworkElement.ActualWidth)) { Source = column, Converter = new AtMost(max) });
+    }
+
+    /// <summary>Half an element's height as its corner radius (capsules, round focus rings), at whatever size it gets.</summary>
+    public sealed class CapsuleRadius : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            new CornerRadius(value is double h && h > 0 && !double.IsInfinity(h) ? h / 2 : 0);
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
     }
 }
