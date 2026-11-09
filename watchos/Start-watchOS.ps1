@@ -147,8 +147,13 @@ if ($savedState) {
     $until = (Get-Date).AddMinutes(5)
     while (-not $q.HasExited -and (Get-Date) -lt $until -and (Get-QuickState)) { Start-Sleep -Seconds 2 }
     if ($q.HasExited -and (Get-QuickState)) {
-        Write-Host "The saved state could not be resumed (exit $($q.ExitCode), $O\stderr-resume.log); booting watchOS" -ForegroundColor Yellow
         Move-Item "$O\stderr.log" "$O\stderr-resume.log" -Force -ErrorAction SilentlyContinue
+        # QEMU's own reason (another CPU count, RAM size or set of devices than the save's), not its info lines
+        $why = @(Get-Content "$O\stderr-resume.log" -ErrorAction SilentlyContinue |
+                 Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
+                 ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
+        Write-Host ("The saved state could not be resumed (exit $($q.ExitCode)" + $(if ($why) { ': ' + ($why -join '; ') } else { '' }) +
+                    "); booting watchOS ($O\stderr-resume.log)") -ForegroundColor Yellow
         Remove-QuickState
         $q = Start-Qemu @()
     } else {
