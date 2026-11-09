@@ -55,12 +55,13 @@ writes out of `watch.qcow2`; `-Smp 8` gives it eight CPUs (here the face came no
 
 Quick boot, as with iOS 26: closing the window saves the watch (memory and devices) into `watch.qcow2`, and
 the next start goes on from there in seconds instead of booting again. The first minutes after a cold
-start are slow, so the watch is also saved once by itself about 15 minutes after the start (the face shown
-for 5 minutes, and you not using it: its window not in front, or 2 minutes without input); a start after a
-crash or a power cut then goes on from that save. What it did: `watchos\runs\<run>\autosave.log`. A saved
+start are slow, so a disk with no save yet is also saved once by itself about 15 minutes after the start (the
+face shown for 5 minutes, and you not using it: its window not in front, or 2 minutes without input); a start
+after a crash or a power cut then goes on from that save. A disk that has a save already keeps it: the automatic
+save does not run. What it did: `watchos\runs\<run>\autosave.log`. A saved
 state takes about 4 GB on the drive; with less than 5 GB free quick boot is off for that start. Saving takes
 about 7 seconds, resuming about 20.
-A save is resumed once; then it stays as a way back until the next save replaces it: a start after
+A save is resumed once; then it stays as a way back until closing the window saves again: a start after
 *Turn off* boots the watch from its disk as it was left, and `-LoadState asoft-quick` (ASoftware.exe: *Go
 back*) goes back to the save, undoing what was done since. `watchos\watch.qcow2.quick-used` names the save
 that is the way back. `-NoQuickBoot` boots every time (a save stays as the way back); `-NoAutoSave` keeps

@@ -11,9 +11,9 @@
 # Quick boot, as iOS 26's launcher (on unless -NoQuickBoot; -QuickBoot is accepted and does nothing):
 # closing the window saves the machine (memory and devices) into watch.qcow2 as its snapshot asoft-quick,
 # and the next start resumes it in seconds instead of booting (about 6 minutes to the face). After a cold
-# start, Watch-AutoSave.ps1 (hidden) saves the same state once the watch is past its slow first minutes
-# (the face shown for 5 minutes, 15 minutes after the start) and nobody is using it, so a crash or a
-# power cut comes back to a settled watch too. A save is resumed once; then it stays as a way back
+# start on a disk with no save yet, Watch-AutoSave.ps1 (hidden) saves the same state once the watch is past
+# its slow first minutes (the face shown for 5 minutes, 15 minutes after the start) and nobody is using it,
+# so a crash or a power cut comes back to a settled watch too. A save is resumed once; then it stays as a way back
 # (-LoadState asoft-quick goes back to it) until the next save replaces it, and a start boots the watch
 # from its disk as it was left. -NoQuickBoot boots every time (a save stays as the way back);
 # -NoAutoSave keeps only the save at closing. [-LoadState NAME] resumes another saved state (the side
@@ -98,8 +98,7 @@ $stateGB = 4.0
 # The quick save is resumed by itself once. From that start on (and from any start that does not
 # resume it) it stays as the way back: <disk>.quick-used names it by its id and time (qemu-img's JSON:
 # no time zone in them; Start-iOS26.ps1 writes the same), and only -LoadState asoft-quick goes back to
-# it. The next save (closing the window, or Watch-AutoSave.ps1) replaces it with a new time, which is
-# resumed again.
+# it. The next save (closing the window) replaces it with a new time, which is resumed again.
 function Quick-Key {
     if (-not $qemuImg -or -not (Test-Path $diskPath)) { return '' }
     # (-U: QEMU may have the disk open)
@@ -243,7 +242,9 @@ if ($q.WaitForExit(3000)) {
     $why = @(Get-Content "$O\stderr.log" -Tail 8 -ErrorAction SilentlyContinue) -join "`n"
     throw "QEMU ended at once (exit $($q.ExitCode)); $O\stderr.log:`n$why"
 }
-if ($quickBoot -and -not $resumed -and -not $NoAutoSave) {
+# The automatic save is for a disk with no save yet. A save already there stays as the way back, and only
+# closing the window replaces it. (A save that failed to load above is gone by now: that start gets one.)
+if ($quickBoot -and -not $resumed -and -not $NoAutoSave -and -not (Quick-Key)) {
     $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Q (Join-Path $PSScriptRoot 'Watch-AutoSave.ps1')),
            '-QemuPid', "$($q.Id)", '-Disk', (Q $diskPath), '-Log', (Q "$O\autosave.log"), '-StateGB', "$stateGB")
     $null = Start-Process powershell.exe -ArgumentList $a -WindowStyle Hidden

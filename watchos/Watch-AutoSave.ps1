@@ -1,5 +1,6 @@
 # ASoftware watchOS: the automatic quick save, as the Android app's for iOS 26 (AutoSave.java).
-# Start-watchOS.ps1 starts it, hidden, after a cold start with quick boot on. After a start the watch
+# Start-watchOS.ps1 starts it, hidden, after a cold start with quick boot on, on a disk with no save yet
+# (a save already there is the way back, and only closing the window replaces it). After a start the watch
 # works through its own start-up (the face after about 6 to 9 minutes, longer the first time), and its
 # slow first minutes are not worth booting through again. Once the face is on the screen (a QMP
 # screendump bigger than -FaceBytes: the Apple logo is 3.4 KB, a face 22-30 KB) for -FaceSeconds, at
