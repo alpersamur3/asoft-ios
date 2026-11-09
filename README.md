@@ -37,6 +37,13 @@ English · [Türkçe](#turkce)
 
 Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gpu).
 
+**watchOS 27.2** (research preview) builds on an iOS 26 install: an Apple Watch Series 9 in a drawn
+case, on the same GPU path. See [`watchos/`](watchos/README.md).
+
+**`ASoftware.exe`** is the launcher: it installs, starts and closes each system, holds its settings and
+saves, sends iOS to an Android phone ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
+and packs a problem report. The `.cmd` scripts below still work without it.
+
 The rest of this page is about iOS 16; iOS 26 has [its own page](ios26/README.md).
 
 ASoftware iOS boots the real, unmodified iOS 16.7.16 of the iPhone X on QEMU, on an ordinary
@@ -58,7 +65,7 @@ first brought this userland up on a Redmi Note 10 Pro, plus our own for QEMU's v
 | **Apps** | Install `.ipa` files from Windows while iOS runs: the side bar's *Install .ipa…* or a folder |
 | **Input** | Mouse as the touchscreen, the wheel to scroll, the PC keyboard as a hardware keyboard, text pasted from the PC |
 | **Window** | Phone-shaped, with a side bar in iOS's own dark style: Home, Lock, App switcher, volume, screenshots |
-| **Quick boot** | Closing the window saves iOS as it is; the next start goes on from there in seconds |
+| **Quick boot** | Closing the window saves iOS as it is; the next start goes on from there in seconds. The save stays as a way back: after a *Shut down*, `ASoftware.exe`'s *Go back* returns to it until the next save replaces it |
 | **States** | Pause and resume, save the whole machine and go back to it later; the clock catches up after either |
 | **Clock** | Your PC's time zone, region format and 12/24-hour clock |
 | **Disk** | What iOS writes is kept between starts; *Shut down* turns iOS off cleanly |
@@ -72,7 +79,8 @@ Not yet: audio, GPU acceleration, the App Store and Apple ID services.
 - A 4-core CPU or better and 16 GB of RAM (iOS gets 7 GB)
 - About **27 GB** free while installing and **14 GB** once installed (see [Disk space](#disk-space))
 - iOS 26 also wants a GPU with a Vulkan driver, 8 or more logical processors and about 57 GB free
-  while installing; the installer checks these first
+  while installing; the installer checks these first. It gets 4 GB of RAM unless you choose 3, 6 or
+  8 GB in `ASoftware.exe`, which checks for that much plus about 3.5 GB of free memory before it starts
 
 ## Install
 
@@ -249,7 +257,16 @@ refresh was measured against (2026-10-21).
 | **Hızlı açılış** | Var: iOS saniyeler içinde kaldığı yerden devam eder | Var: iOS saniyeler içinde kaldığı yerden devam eder |
 | **Başlangıç** | [Kurulum](#kurulum) | [Kurulum](#kurulum), sonra [`ios26/`](ios26/README.md#turkce) |
 
-Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu). Aşağısı iOS 16 hakkında.
+Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu).
+
+**watchOS 27.2** (araştırma önizlemesi) bir iOS 26 kurulumunun üzerine kurulur: çizilmiş bir kasa
+içinde Apple Watch Series 9, aynı GPU yolunda. Bkz. [`watchos/`](watchos/README.md).
+
+**`ASoftware.exe`** başlatıcıdır: her sistemi kurar, açar ve kapatır, ayarlarını ve kayıtlarını tutar,
+iOS'u Android telefona gönderir ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
+ve sorun raporu hazırlar. Aşağıdaki `.cmd` betikleri onsuz da çalışır.
+
+Aşağısı iOS 16 hakkında.
 
 ASoftware iOS, iPhone X'in gerçek ve değiştirilmemiş iOS 16.7.16'sını sıradan bir Windows
 PC'de, QEMU'da açar: SpringBoard, Ayarlar, Safari ve kurduğunuz uygulamalar. Çekirdek, Apple'ın
@@ -270,7 +287,7 @@ bizim yamalarımız var.
 | **Uygulamalar** | iOS açıkken Windows'tan `.ipa` kurma: kenar çubuğundaki *Install .ipa…* ya da bir klasör |
 | **Giriş** | Fare dokunmatik ekran, tekerlek kaydırma, PC klavyesi donanım klavyesi, PC'den metin yapıştırma |
 | **Pencere** | Telefon biçiminde, iOS'un kendi koyu tarzında kenar çubuğu: Home, kilit, uygulama değiştirici, ses, ekran görüntüsü |
-| **Hızlı açılış** | Pencereyi kapatmak iOS'u olduğu gibi kaydeder; sonraki açılış saniyeler içinde oradan devam eder |
+| **Hızlı açılış** | Pencereyi kapatmak iOS'u olduğu gibi kaydeder; sonraki açılış saniyeler içinde oradan devam eder. Kayıt geri dönüş olarak kalır: *Shut down* sonrası `ASoftware.exe`'deki *Go back*, sonraki kayıt yerini alana kadar ona döner |
 | **Durumlar** | Duraklatma ve devam, tüm makineyi kaydedip sonra ona dönme; ikisinden sonra da saat kendini düzeltir |
 | **Saat** | PC'nizin saat dilimi, bölge biçimi ve 12/24 saat ayarı |
 | **Disk** | iOS'un yazdıkları açılışlar arasında saklanır; *Shut down* iOS'u düzgünce kapatır |
@@ -284,7 +301,8 @@ Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
 - 4 çekirdekli ya da daha iyi bir işlemci ve 16 GB RAM (iOS 7 GB kullanır)
 - Kurulum sırasında yaklaşık **27 GB**, kurulumdan sonra **14 GB** boş alan ([Disk alanı](#disk-alanı))
 - iOS 26 ayrıca Vulkan sürücülü bir ekran kartı, 8 ya da daha fazla mantıksal işlemci ve kurulum
-  sırasında yaklaşık 57 GB boş alan ister; kurucu bunlara önce bakar
+  sırasında yaklaşık 57 GB boş alan ister; kurucu bunlara önce bakar. `ASoftware.exe`'de 3, 6 ya da
+  8 GB seçilmezse 4 GB RAM kullanır; açmadan önce bu kadarına ek yaklaşık 3,5 GB boş bellek arar
 
 ### Kurulum
 

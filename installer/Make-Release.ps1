@@ -40,9 +40,9 @@ $qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUIL
 @"
 # Where the binaries in this package come from
 
-- ``qemu\bin``: QEMU 11.1 (GPL v2) of https://github.com/alpersamur3/qemu-sptm, branch asoft
-  ($qemuBuild), with reims-vgpu (https://github.com/alpersamur3/reims-vgpu, branch windows) and
-  metal2vulkan (https://github.com/alpersamur3/metal2vulkan, branch windows) in it, built by
+- ``qemu\bin``: QEMU 11.1 (GPL v2) of https://github.com/alpersamur3/qemu-sptm, branch asoft-release
+  ($qemuBuild), with reims-vgpu (https://github.com/alpersamur3/reims-vgpu, branch asoft/release-win) and
+  metal2vulkan (https://github.com/alpersamur3/metal2vulkan, branch asoft/release-win) in it, built by
   ios26/scripts/win-build.sh; the DLLs next to it are MSYS2's UCRT64 packages (GTK, GLib, ANGLE,
   libslirp and others, under their own licenses; sources at https://packages.msys2.org).
 - ``xnu\$($kernel.Directory.Name)``: Apple's XNU (APSL 2.0) with xnu/patches, built by
