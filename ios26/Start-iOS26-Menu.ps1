@@ -34,6 +34,7 @@ $default = [ordered]@{
     QuickBoot = $true       # closing the window saves the state, the next start resumes it
     Net       = $true
     Smp       = 4
+    HostGpu   = 'auto'      # the PC's GPU iOS draws on: 'auto' | 'integrated' | 'discrete'
 }
 function Load-Config {
     $cfg = [ordered]@{}
@@ -153,11 +154,12 @@ function Show-Menu($cfg) {
         Write-Host ('  Quick boot: {0}' -f $(if ($cfg.DiskMode -eq 'throwaway') { 'off (needs a disk that keeps its changes)' } elseif ($cfg.QuickBoot) { 'on (about 3.7 GB on the disk)' } else { 'off' }))
         Write-Host ('  Network   : {0}  (.ipa installs need it)' -f $(if ($cfg.Net) { 'on' } else { 'off' }))
         Write-Host ('  vCPUs     : {0}' -f $cfg.Smp)
+        Write-Host ('  PC GPU    : {0}' -f $(switch ($cfg.HostGpu) { 'integrated' { 'integrated (the CPU''s)' } 'discrete' { 'discrete (the graphics card)' } default { 'auto (the graphics card; the integrated one on a PC with only AMD GPUs)' } }))
         Write-Host ''
         if ($script:InstallIpa) { Write-Host ('  .ipa to install: {0}' -f [IO.Path]::GetFileName($script:InstallIpa)) -ForegroundColor Green }
         Write-Host '  [S] Start      [W] Wallpaper   [D] Disk mode   [N] Network'
         Write-Host '  [G] GPU driver [C] vCPUs       [B] Quick boot     [I] Install .ipa'
-        Write-Host '  [R] Reset state   [Q] Quit'
+        Write-Host '  [P] PC GPU     [R] Reset state   [Q] Quit'
         switch ((Read-Host 'Choose').ToUpper()) {
             'S' { return $true }
             '' { return $true }
@@ -172,6 +174,10 @@ function Show-Menu($cfg) {
             'N' { $cfg.Net = -not $cfg.Net }
             'B' { $cfg.QuickBoot = -not $cfg.QuickBoot }
             'C' { $cfg.Smp = if ($cfg.Smp -eq 4) { 8 } else { 4 } }
+            'P' {
+                $cfg.HostGpu = switch ($cfg.HostGpu) { 'auto' { 'integrated' } 'integrated' { 'discrete' } default { 'auto' } }
+                if ($cfg.QuickBoot) { Write-Host 'A state saved on another GPU may not resume on this one; iOS then boots instead.' -ForegroundColor Yellow }
+            }
             'G' {
                 $was = "$($cfg.GpuMode) $($cfg.GpuDriver)"
                 Choose-Gpu $cfg
@@ -193,6 +199,7 @@ function Start-Emulator($cfg) {
     $ps1 = Join-Path $PSScriptRoot 'Start-iOS26.ps1'
     if (-not (Test-Path $ps1)) { throw "Start-iOS26.ps1 not found next to this menu" }
     $a = @('-Work', $cfg.Work, '-Wallpaper', $cfg.Wallpaper, '-Smp', $cfg.Smp)
+    if ($cfg.HostGpu -and $cfg.HostGpu -cne 'auto') { $a += @('-HostGpu', $cfg.HostGpu) }
     switch ($cfg.DiskMode) {
         'persist'   { $a += '-Persist'; if ($script:ResetState) { $a += '-Reset' } }
         'keep'      { $a += '-Keep' }
