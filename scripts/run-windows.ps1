@@ -64,7 +64,12 @@ param(
     # made in iOS's Settings stays until the PC's own setting changes
     [string]$TimeZone = '',
     [string]$Region = '',
-    [ValidateSet('', '12', '24')] [string]$Clock = ''
+    [ValidateSet('', '12', '24')] [string]$Clock = '',
+    # -LoadState NAME: resume that saved state of the user disk (the side bar's Save state makes them,
+    # state-<time>) instead of the quick boot's; -Persist only. A state that does not load is kept.
+    [string]$LoadState = '',
+    # -NoNet: no network card (QEMU's user-mode network is on by default)
+    [switch]$NoNet
 )
 $ErrorActionPreference = 'Stop'
 # A native tool's stderr lines are notes, not failures: Windows PowerShell 5.1 turns them into
@@ -127,6 +132,13 @@ function Get-QuickState {
     Invoke-Tool $qemuImg snapshot -l $UserDisk 2>$null | Where-Object { "$_" -cmatch "\s$quickSnapshot\s" }
 }
 $savedState = if ($Persist -and (Test-Path $UserDisk)) { Get-QuickState }
+if ($LoadState) {
+    if (-not $Persist -or -not (Test-Path $UserDisk)) { throw '-LoadState needs -Persist and its user disk' }
+    if (-not (Invoke-Tool $qemuImg snapshot -l -U $UserDisk 2>$null | Where-Object { "$_" -cmatch "^\s*\d+\s+$([regex]::Escape($LoadState))\s" })) {
+        throw "no saved state $LoadState on $UserDisk"
+    }
+    $savedState = $null
+}
 if ($savedState -and -not $quickBoot) {
     Invoke-Tool $qemuImg snapshot -d $quickSnapshot $UserDisk
     $savedState = $null
@@ -194,7 +206,12 @@ try {
         '--display', $Display, '--qemu-log', 'guest_errors,unimp', '--qmp-tcp', $QmpPort,
         '--name', 'ASoftware iOS')
     if (-not $Keep) { $qemuArgs += '--snapshot' }
-    if ($savedState) {
+    if ($NoNet) { $qemuArgs += '--net', 'none' }
+    if ($LoadState) {
+        Write-Host "Resuming the saved state $LoadState"
+        Invoke-Tool $python tools\qemu-sweet.py @qemuArgs --loadvm $LoadState
+        if ($LASTEXITCODE) { Write-Host "QEMU ended with $LASTEXITCODE; the saved state $LoadState is kept" }
+    } elseif ($savedState) {
         Write-Host 'Resuming the state saved when the window was closed'
         Invoke-Tool $python tools\qemu-sweet.py @qemuArgs --loadvm $quickSnapshot
         # QEMU failed, the state still there as it was: it could not be resumed (another QEMU

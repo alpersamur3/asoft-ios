@@ -19,6 +19,7 @@
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
 #                   [-InstallIpa app.ipa]
 #                   [-TimeZone Europe/Istanbul] [-Region TR] [-Clock 24|12]   (default: the PC's)
+#                   [-RamMiB 6144] [-LoadState state-20261109-101500]
 # .ipa: the side bar's "Install .ipa..." (or dropping files into <Work>\ipa, or -InstallIpa) installs
 # the app by direct placement on the NEXT start (Install-Ipa.ps1); after the button, restart iOS.
 param(
@@ -75,6 +76,13 @@ param(
     # (F2) and the first click there wakes it (Home). -NoAod boots the plain tree (a disk without
     # the patch must: backboardd asserts otherwise).
     [switch]$NoAod,
+    # -RamMiB N: the guest's RAM (QEMU takes it from the device tree: scripts\dt-ram.ps1 writes
+    # <tree>-<N>m next to it). A saved state loads only into the RAM it was made with.
+    [int]$RamMiB = 0,
+    # -LoadState NAME: resume that saved state of the disk (the side bar's Save state makes them,
+    # state-<time>; ASoftware.exe lists them) instead of the quick boot's; it needs -Persist or -Keep,
+    # and the vCPUs and RAM it was saved with. A state that does not load is kept, not deleted.
+    [string]$LoadState = '',
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -96,6 +104,21 @@ $aod = -not $NoAod -and (Test-Path (Join-Path $Work "$dtree-aod"))
 if ($aod) { $dtree += '-aod' }
 foreach ($f in @('fw\bootkc', 'fw\sptm', 'fw\txm', $dtree, 'rd-shell.hfs')) {
     if (-not (Test-Path (Join-Path $Work $f))) { throw "missing $f in $Work (see README.md, Build)" }
+}
+# another RAM size: the tree with it, made once next to the tree (again when the tree is newer)
+if ($RamMiB) {
+    $dtRam = Join-Path $PSScriptRoot 'scripts\dt-ram.ps1'
+    $has = & $dtRam -In (Join-Path $Work $dtree) -Read
+    if ([int]$has -ne $RamMiB) {
+        $sized = "$dtree-$($RamMiB)m"
+        $src = Get-Item (Join-Path $Work $dtree)
+        $dst = Join-Path $Work $sized
+        if (-not (Test-Path $dst) -or (Get-Item $dst).LastWriteTime -lt $src.LastWriteTime) {
+            & $dtRam -In $src.FullName -Out $dst -MiB $RamMiB
+        }
+        $dtree = $sized
+        Write-Host "Guest RAM $RamMiB MiB ($dtree)"
+    }
 }
 foreach ($f in @($Disk, $Tc)) { if (-not (Test-Path $f)) { throw "missing $f" } }
 $exe = Join-Path $Work 'qemu\qemu-system-aarch64w.exe'
@@ -171,6 +194,15 @@ if ($written) {
 # and so does an .ipa install, above.
 $quickBoot = $written -and -not $NoQuickBoot -and (Test-Path $qemuImg)
 $savedState = if ($written) { Get-QuickState $written }
+# -LoadState: that state instead (the quick boot's stays until the machine runs, then goes: the disk
+# goes on from the loaded state)
+if ($LoadState) {
+    if (-not $written) { throw '-LoadState needs a disk that keeps its states (-Persist or -Keep)' }
+    if (-not (& $qemuImg snapshot -l -U $written | Where-Object { "$_" -cmatch "^\s*\d+\s+$([regex]::Escape($LoadState))\s" })) {
+        throw "no saved state $LoadState on $written"
+    }
+    $savedState = $null
+}
 if ($savedState -and -not $quickBoot) {
     Remove-QuickState $written
     $savedState = $null
@@ -221,6 +253,10 @@ if ($from) {
 $timeArgs = @()
 foreach ($k in $pcTime.Keys) {
     if ($applied[$k] -cne $pcTime[$k]) { $timeArgs += @(@{ TimeZone = '--tz'; Region = '--region'; Clock = '--clock' }[$k], $pcTime[$k]) }
+}
+if ($timeArgs -and $LoadState) {
+    Write-Host "The PC's time zone, region or clock is new to iOS: it takes it at the next start that is not a resume"
+    $timeArgs = @()
 }
 if ($timeArgs -and $savedState) {
     Remove-QuickState $written
@@ -301,10 +337,38 @@ $qargs = @(
 ) + $snapshot
 if ($Net) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 $qargs += $Extra
+# QEMU's run state over QMP (127.0.0.1:PORT): true once the machine runs (a state it resumes has loaded);
+# false while it loads (the main loop stands still and does not answer) or when it is not there
+function Qmp-Running([int]$port) {
+    $c = New-Object Net.Sockets.TcpClient
+    try {
+        if (-not $c.ConnectAsync('127.0.0.1', $port).Wait(1000)) { return $false }
+        $c.ReceiveTimeout = 3000
+        $r = New-Object IO.StreamReader($c.GetStream())
+        $w = New-Object IO.StreamWriter($c.GetStream()); $w.AutoFlush = $true
+        $null = $r.ReadLine()
+        $w.WriteLine('{"execute":"qmp_capabilities"}'); $null = $r.ReadLine()
+        $w.WriteLine('{"execute":"query-status"}')
+        for ($i = 0; $i -lt 5; $i++) { $l = $r.ReadLine(); if ($l -cmatch '"return"') { return $l -cmatch '"running":\s*true' } }
+        $false
+    } catch { $false } finally { $c.Close() }
+}
 function Start-Qemu([string[]]$more) {
     Start-Process -FilePath $exe -ArgumentList ($qargs + $more) -PassThru -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
 }
-if ($savedState) {
+if ($LoadState) {
+    Write-Host "Resuming the saved state $LoadState"
+    $q = Start-Qemu @('-loadvm', $LoadState)
+    $null = $q.Handle
+    # until the machine runs, or QEMU ends (it is not deleted when it does not load: QEMU says why in
+    # stderr.log)
+    $until = (Get-Date).AddMinutes(5)
+    while (-not $q.HasExited -and (Get-Date) -lt $until -and -not (Qmp-Running 4453)) { Start-Sleep -Seconds 2 }
+    if ($q.HasExited -and $q.ExitCode) {
+        $why = @(Get-Content "$O\stderr.log" -Tail 6 -ErrorAction SilentlyContinue) -join "`n"
+        throw "the saved state $LoadState could not be resumed (QEMU exit $($q.ExitCode)); it is kept. $O\stderr.log:`n$why"
+    }
+} elseif ($savedState) {
     Write-Host 'Resuming the state saved when the window was closed'
     $q = Start-Qemu @('-loadvm', $quickSnapshot)
     $null = $q.Handle       # ExitCode, once it has ended, needs the handle taken

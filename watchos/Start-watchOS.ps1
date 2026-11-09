@@ -7,6 +7,10 @@
 # Writes go to watchos\watch.qcow2 (watchos\rootw.qcow2 under it stays as the install made it);
 # -Snapshot keeps them in a temporary file instead. -Smp 8: eight CPUs (the device tree dtree-w8, made
 # from the iOS 26 install's dtree-smp8). Prints "started EXE pid N -> RUN FOLDER".
+#   [-RamMiB 3072]  the watch's RAM (QEMU takes it from the device tree: ..\ios26\scripts\dt-ram.ps1)
+#   [-QuickBoot]    closing the window saves the watch (the snapshot asoft-quick of watch.qcow2) and the
+#                   next start with -QuickBoot resumes it; [-LoadState NAME] resumes another saved state
+#                   (the side bar's Save state makes them). A state loads only with its own vCPUs and RAM.
 param(
     [string]$Work = '',
     [string]$Config = (Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json'),
@@ -19,6 +23,9 @@ param(
     [switch]$NoNet,
     [switch]$Keep,
     [switch]$FirstBoot,
+    [int]$RamMiB = 0,
+    [switch]$QuickBoot,
+    [string]$LoadState = '',
     [string[]]$Extra = @()
 )
 $ErrorActionPreference = 'Stop'
@@ -47,6 +54,28 @@ foreach ($n in $need) { if (-not (Test-Path $n)) { throw "$n is missing: $goOn" 
 if ($Disk -ceq 'watchos\watch.qcow2' -and -not $FirstBoot -and -not (Test-Path (In-Work 'watchos\watch.qcow2.ready'))) {
     throw "the watchOS install is not finished (watchos\watch.qcow2 has not been through its activation step): $goOn"
 }
+# another RAM size: the tree with it, made once next to the tree (again when the tree is newer)
+if ($RamMiB) {
+    $dtRam = Join-Path $PSScriptRoot '..\ios26\scripts\dt-ram.ps1'
+    $has = & $dtRam -In (In-Work $dtree) -Read
+    if ([int]$has -ne $RamMiB) {
+        $src = Get-Item (In-Work $dtree)
+        $dtree = "$dtree-$($RamMiB)m"
+        if (-not (Test-Path (In-Work $dtree)) -or (Get-Item (In-Work $dtree)).LastWriteTime -lt $src.LastWriteTime) {
+            & $dtRam -In $src.FullName -Out (In-Work $dtree) -MiB $RamMiB
+        }
+        Write-Host "Guest RAM $RamMiB MiB ($dtree)"
+    }
+}
+# saved states: in the disk the watch writes (not with -Snapshot), through the watch QEMU's qemu-img
+$qemuImg = @((Join-Path (Split-Path $Exe) 'qemu-img.exe'), (In-Work 'qemu\qemu-img.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+function Has-State([string]$name) {
+    if (-not $qemuImg) { return $false }
+    [bool](& $qemuImg snapshot -l -U (In-Work $Disk) | Where-Object { "$_" -cmatch "^\s*\d+\s+$([regex]::Escape($name))\s" })
+}
+if (($QuickBoot -or $LoadState) -and $Snapshot) { throw '-QuickBoot and -LoadState keep states in the watch''s disk: not with -Snapshot' }
+if ($LoadState -and -not (Has-State $LoadState)) { throw "no saved state $LoadState on $(In-Work $Disk)" }
+$resume = if ($LoadState) { $LoadState } elseif ($QuickBoot -and (Has-State 'asoft-quick')) { 'asoft-quick' } else { '' }
 # one watch at a time: the ports are fixed
 $busy = @(Get-NetTCPConnection -State Listen -LocalPort 4471, 4472, 4473 -ErrorAction SilentlyContinue)
 if ($busy) { throw ("ports 4471-4473 are in use (pid {0}): is a watch running already?" -f (($busy | ForEach-Object OwningProcess | Sort-Object -Unique) -join ', ')) }
@@ -70,7 +99,7 @@ $qargs = @(
     '-dtree', (Q (In-Work $dtree)), '-tc', (Q (In-Work $Tc)), '-ramdisk', (Q (In-Work 'rd-shell.hfs')),
     '-args', (Q $boot),
     # the GTK side bar with the drawn watch: case, crown and side button, hanging from the window
-    '-display', 'gtk,show-cursor=on,zoom-to-fit=on,gl=on,sidebar=on,show-menubar=off',
+    '-display', ('gtk,show-cursor=on,zoom-to-fit=on,gl=on,sidebar=on,show-menubar=off' + $(if ($QuickBoot) { ',quick-boot=on' } else { '' })),
     '-monitor', 'tcp:127.0.0.1:4472,server=on,wait=off',
     '-parallel', 'none',
     '-chardev', (Q "socket,id=con,host=127.0.0.1,port=4471,server=on,wait=off,logfile=$O\serial.log"),
@@ -88,13 +117,48 @@ $qargs = @(
 if (-not $NoNet) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 if ($Snapshot) { $qargs += '-snapshot' }
 $qargs += $Extra
-Set-Content "$O\cmdline.txt" ($qargs -join ' ')
-$q = Start-Process -FilePath $Exe -ArgumentList $qargs -PassThru -WorkingDirectory $Work `
-    -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
-$null = $q.Handle
+# QEMU's run state over QMP (127.0.0.1:PORT): true once the machine runs (a state it resumes has loaded);
+# false while it loads (the main loop stands still and does not answer) or when it is not there
+function Qmp-Running([int]$port) {
+    $c = New-Object Net.Sockets.TcpClient
+    try {
+        if (-not $c.ConnectAsync('127.0.0.1', $port).Wait(1000)) { return $false }
+        $c.ReceiveTimeout = 3000
+        $r = New-Object IO.StreamReader($c.GetStream())
+        $w = New-Object IO.StreamWriter($c.GetStream()); $w.AutoFlush = $true
+        $null = $r.ReadLine()
+        $w.WriteLine('{"execute":"qmp_capabilities"}'); $null = $r.ReadLine()
+        $w.WriteLine('{"execute":"query-status"}')
+        for ($i = 0; $i -lt 5; $i++) { $l = $r.ReadLine(); if ($l -cmatch '"return"') { return $l -cmatch '"running":\s*true' } }
+        $false
+    } catch { $false } finally { $c.Close() }
+}
+function Start-Watch([string[]]$more) {
+    Set-Content "$O\cmdline.txt" (($qargs + $more) -join ' ')
+    $p = Start-Process -FilePath $Exe -ArgumentList ($qargs + $more) -PassThru -WorkingDirectory $Work `
+        -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
+    $null = $p.Handle
+    $p
+}
+if ($resume) { Write-Host "Resuming the saved state $resume" }
+$q = Start-Watch $(if ($resume) { @('-loadvm', $resume) } else { @() })
+# a state being resumed: until the machine runs (or QEMU ends, the state not loaded), at most 5 min
+if ($resume) {
+    $until = (Get-Date).AddMinutes(5)
+    while (-not $q.HasExited -and (Get-Date) -lt $until -and -not (Qmp-Running 4473)) { Start-Sleep -Seconds 2 }
+}
 # a QEMU that refuses its arguments or a disk ends at once: say why (the .cmd window then stays open)
 if ($q.WaitForExit(3000)) {
     $why = @(Get-Content "$O\stderr.log" -Tail 8 -ErrorAction SilentlyContinue) -join "`n"
-    throw "QEMU ended at once (exit $($q.ExitCode)); $O\stderr.log:`n$why"
+    # the quick boot's state that does not load (another QEMU build, other options) goes, and the watch
+    # boots; a state named with -LoadState is kept
+    if ($resume -ceq 'asoft-quick' -and -not $LoadState -and $q.ExitCode -and (Has-State 'asoft-quick')) {
+        Write-Host "The saved state could not be resumed ($why); booting watchOS"
+        & $qemuImg snapshot -d asoft-quick (In-Work $Disk)
+        $q = Start-Watch @()
+        if ($q.WaitForExit(3000)) { throw "QEMU ended at once (exit $($q.ExitCode)); $O\stderr.log:`n$(@(Get-Content "$O\stderr.log" -Tail 8 -ErrorAction SilentlyContinue) -join "`n")" }
+    } else {
+        throw "QEMU ended at once (exit $($q.ExitCode)); $O\stderr.log:`n$why"
+    }
 }
 "started $Exe pid $($q.Id) -> $O"
