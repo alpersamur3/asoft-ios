@@ -10,3 +10,7 @@ __pycache__/
 installer/helper/out/
 # release packages (installer/Make-Release.ps1)
 release/
+# the launcher's build (launcher/Build-Launcher.ps1)
+launcher/bin/
+launcher/obj/
+launcher/out/

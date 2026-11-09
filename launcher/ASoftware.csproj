@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- ASoftware.exe: the Windows launcher (install, start and set up iOS 16, iOS 26 and watchOS).
+       WPF on .NET Framework 4.8, which Windows 10 and 11 have: one exe, nothing to install.
+       Build it with launcher\Build-Launcher.ps1 (dotnet SDK 9 or 10). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>ASoftware</AssemblyName>
+    <RootNamespace>ASoftware</RootNamespace>
+    <StartupObject>ASoftware.Program</StartupObject>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugType>none</DebugType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <Product>ASoftware</Product>
+    <Company>ASoftware</Company>
+    <Copyright>MIT</Copyright>
+    <Version Condition="'$(Version)' == ''">0.3.0</Version>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- all part of .NET Framework 4.8 (GAC): nothing is copied beside the exe -->
+    <Reference Include="System.Web" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Management" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\logo-256.png" />
+    <Resource Include="Assets\logo.ico" />
+    <!-- iOS 26's GPU check (ios26\scripts\gpu-check.cs), compiled in: ASoftware.exe -gpu-check runs it -->
+    <Compile Include="..\ios26\scripts\gpu-check.cs" Link="Engine\gpu-check.cs" />
+  </ItemGroup>
+</Project>
