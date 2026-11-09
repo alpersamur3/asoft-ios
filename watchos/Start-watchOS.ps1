@@ -134,8 +134,10 @@ function Qmp-Running([int]$port) {
     } catch { $false } finally { $c.Close() }
 }
 function Start-Watch([string[]]$more) {
-    Set-Content "$O\cmdline.txt" (($qargs + $more) -join ' ')
-    $p = Start-Process -FilePath $Exe -ArgumentList ($qargs + $more) -PassThru -WorkingDirectory $Work `
+    # (no extra arguments arrive as a null element, which Start-Process refuses)
+    $all = @($qargs) + @($more | Where-Object { $_ })
+    Set-Content "$O\cmdline.txt" ($all -join ' ')
+    $p = Start-Process -FilePath $Exe -ArgumentList $all -PassThru -WorkingDirectory $Work `
         -RedirectStandardError "$O\stderr.log" -RedirectStandardOutput "$O\stdout.log"
     $null = $p.Handle
     $p
