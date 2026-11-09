@@ -19,6 +19,7 @@
 #                   [-Net] [-Page4K] [-NoGl] [-Cpu max,pauth-impdef=on] [-Smp 4|8] [-NoIpa]
 #                   [-InstallIpa app.ipa]
 #                   [-TimeZone Europe/Istanbul] [-Region TR] [-Clock 24|12]   (default: the PC's)
+#                   [-HostGpu auto|integrated|discrete] [-NoGeneratedCommands]
 # .ipa: the side bar's "Install .ipa..." (or dropping files into <Work>\ipa, or -InstallIpa) installs
 # the app by direct placement on the NEXT start (Install-Ipa.ps1); after the button, restart iOS.
 param(
@@ -75,6 +76,14 @@ param(
     # (F2) and the first click there wakes it (Home). -NoAod boots the plain tree (a disk without
     # the patch must: backboardd asserts otherwise).
     [switch]$NoAod,
+    # The PC's GPU iOS 26 draws on (below, "The PC's GPU"): auto, integrated or discrete. auto is
+    # the discrete one where there is one, but the integrated one on a PC whose GPUs are all AMD
+    # (an RX 7700 XT drew a garbled boot screen where its Ryzen's integrated GPU did not).
+    [ValidateSet('auto', 'integrated', 'discrete')][string]$HostGpu = 'auto',
+    # -NoGeneratedCommands: no VK_EXT_device_generated_commands on the GPU (its executions take
+    # the host step; what iOS sees is the same), for a driver that lists it but misbehaves with it.
+    # A driver that refuses the device with it gets one without it anyway.
+    [switch]$NoGeneratedCommands,
     # more QEMU options, as they are (e.g. -Extra '-msg','timestamp=on','-trace','usb_consumer_*')
     [string[]]$Extra = @()
 )
@@ -264,6 +273,33 @@ if ($Persist) {
 $env:ASOFT_PAGE_BITS = if ($Page4K) { '12' } else { '14' }
 $env:REIMS_VGPU_LOG = 'warn'
 Remove-Item Env:REIMS_VGPU_TRACE -ErrorAction SilentlyContinue
+
+# --- The PC's GPU ---------------------------------------------------------------------------------
+# Windows names the PC's GPUs (PCI vendor: 1002 AMD, 10DE NVIDIA, 8086 Intel); the library itself
+# takes a discrete one first. -HostGpu integrated/discrete (or auto on a PC whose GPUs are all AMD,
+# two or more) limits it to that kind (REIMS_VGPU_DEVICE). Set by hand in the environment, it stays.
+function Get-HostGpus {
+    try {
+        @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Where-Object { "$($_.PNPDeviceID)" -clike 'PCI\*' } | ForEach-Object {
+            $id = "$($_.PNPDeviceID)"
+            $vendor = if ($id -cmatch 'VEN_1002') { 'AMD' } elseif ($id -cmatch 'VEN_10DE') { 'NVIDIA' } elseif ($id -cmatch 'VEN_8086') { 'Intel' } else { 'other' }
+            [pscustomobject]@{ Name = "$($_.Name)"; Vendor = $vendor; Driver = "$($_.DriverVersion)" }
+        })
+    } catch { @() }
+}
+$gpus = @(Get-HostGpus)
+foreach ($g in $gpus) { Write-Host ("PC GPU: {0} ({1}, driver {2})" -f $g.Name, $g.Vendor, $g.Driver) -ForegroundColor DarkGray }
+$gpuKind = $HostGpu
+$amd = @($gpus | Where-Object { $_.Vendor -ceq 'AMD' })
+if ($gpuKind -ceq 'auto' -and $amd.Count -ge 2 -and $amd.Count -eq $gpus.Count) {
+    $gpuKind = 'integrated'
+    Write-Host 'Only AMD GPUs: iOS 26 draws on the integrated one (an RX 7700 XT drew a garbled boot screen); -HostGpu discrete tries the other' -ForegroundColor Yellow
+}
+if ($gpuKind -cne 'auto') { $env:REIMS_VGPU_DEVICE = $gpuKind }
+if ($NoGeneratedCommands) { $env:REIMS_VGPU_GENERATED_COMMANDS = 'off' }
+if ($env:REIMS_VGPU_DEVICE -or $env:REIMS_VGPU_GENERATED_COMMANDS) {
+    Write-Host ("GPU settings: REIMS_VGPU_DEVICE={0} REIMS_VGPU_GENERATED_COMMANDS={1}" -f "$env:REIMS_VGPU_DEVICE", "$env:REIMS_VGPU_GENERATED_COMMANDS") -ForegroundColor DarkGray
+}
 $env:ASOFT_SUBTITLE = 'iOS 26.6.2 ' + [char]0x00B7 + ' GPU: host Vulkan'
 # the window's Always On Display handling (qemu-sptm ui/gtk.c): F2 there takes iOS to it, a click wakes
 if ($aod) { $env:ASOFT_AOD = '1'; Write-Host "Always On Display ($dtree): the side button (F2) takes iOS to it" }
