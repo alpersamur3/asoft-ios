@@ -103,6 +103,8 @@ namespace ASoftware.Engine
                     if (c.Wallpaper == "collections") a.AddRange(new[] { "-Wallpaper", "collections" });
                     if (!c.Aod) a.Add("-NoAod");
                     if (ram != Guests.DefaultRam(os)) a.AddRange(new[] { "-RamMiB", ram.ToString() });
+                    if (c.HostGpu == "integrated" || c.HostGpu == "discrete") a.AddRange(new[] { "-HostGpu", c.HostGpu });
+                    if (c.NoGeneratedCommands) a.Add("-NoGeneratedCommands");
                     Time();
                     break;
                 default:

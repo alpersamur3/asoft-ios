@@ -51,6 +51,9 @@ namespace ASoftware.Engine
         public string Clock { get; set; } = "";
         public string GpuMode { get; set; } = "";
         public string GpuDriver { get; set; } = "";
+        /// <summary>iOS 26: the PC's GPU it draws on (auto, integrated, discrete), and no generated commands on it.</summary>
+        public string HostGpu { get; set; } = "auto";
+        public bool NoGeneratedCommands { get; set; }
     }
 
     /// <summary>What the launcher knows of a save (an internal snapshot of a disk): the guest it was made with.</summary>
@@ -161,6 +164,7 @@ namespace ASoftware.Engine
                 var qb = Json.Bool(c26, "QuickBoot"); if (qb.HasValue) Ios26.QuickBoot = qb.Value;
                 var net = Json.Bool(c26, "Net"); if (net.HasValue) Ios26.Net = net.Value;
                 var smp = Json.Int(c26, "Smp"); if (smp == 8) Ios26.Smp = 8;
+                var hg = Json.Str(c26, "HostGpu"); if (hg == "integrated" || hg == "discrete") Ios26.HostGpu = hg;
                 from.Add("ios26.config.json");
             }
             var e16 = Environment.GetEnvironmentVariable("ASOFT_WORK");
@@ -186,6 +190,7 @@ namespace ASoftware.Engine
                 o["QuickBoot"] = Ios26.QuickBoot;
                 o["Net"] = Ios26.Net;
                 o["Smp"] = Ios26.Smp;
+                o["HostGpu"] = Ios26.HostGpu ?? "auto";
                 Json.Write(AppPaths.Ios26Config, o);
             }
             catch (Exception e) { Log.Write("cannot write " + AppPaths.Ios26Config + ": " + e.Message); }

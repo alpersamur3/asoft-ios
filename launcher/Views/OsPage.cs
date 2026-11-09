@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
 using ASoftware.Engine;
@@ -260,7 +261,18 @@ namespace ASoftware.Views
             rebuild.Margin = new Thickness(0, 10, 0, 0);
             rebuild.HorizontalAlignment = HorizontalAlignment.Left;
             col.Children.Add(rebuild);
-            return Ui.Group(L.K("GpuDriver"), Ui.Row(L.K("GpuDriver"),
+            var host = Ui.Seg(new[] { ("auto", L.T("Auto", "Otomatik")), ("integrated", L.T("Integrated", "Tümleşik")), ("discrete", L.T("Graphics card", "Ekran kartı")) },
+                c.HostGpu == "integrated" || c.HostGpu == "discrete" ? c.HostGpu : "auto", v => { c.HostGpu = v; Changed(); });
+            AutomationProperties.SetName(host, "host-gpu");
+            var noGen = Ui.Switch(c.NoGeneratedCommands, v => { c.NoGeneratedCommands = v; Changed(); });
+            return Ui.Group(L.K("GpuDriver"),
+                Ui.Row(L.T("The PC's GPU", "PC'nin GPU'su"),
+                    L.T("Which one iOS 26 draws on. Auto takes the graphics card, or the integrated GPU on a PC whose GPUs are all AMD. A save made on another GPU may not resume on this one; iOS then boots afresh.",
+                        "iOS 26 hangisinde çizsin. Otomatik ekran kartını seçer; GPU'ların hepsi AMD olan bir PC'de tümleşik olanı. Başka bir GPU'da alınmış kayıt bunda sürmeyebilir; o zaman iOS baştan açılır."), host),
+                Ui.Row(L.T("Advanced: no generated commands", "Gelişmiş: üretilmiş komutlar kapalı"),
+                    L.T("Leaves VK_EXT_device_generated_commands unused, for a driver that lists it but misbehaves with it. iOS sees the same GPU.",
+                        "VK_EXT_device_generated_commands kullanılmaz; bunu listeleyip düzgün çalıştıramayan sürücüler için. iOS aynı GPU'yu görür."), noGen),
+                Ui.Row(L.K("GpuDriver"),
                 L.T("Baked into the disk when it is built: a change rebuilds the GPU layer and the wallpaper (the installer's gpu and wallpaper steps, about an hour). Without one iOS draws on the CPU, slower."
                    + (built != null ? " Built with: " + built + "." : ""),
                     "Disk kurulurken içine konur: değişiklik GPU katmanını ve duvar kâğıdını yeniden kurar (kurucunun gpu ve wallpaper adımları, yaklaşık bir saat). Sürücüsüz iOS CPU'da çizer, daha yavaş."
