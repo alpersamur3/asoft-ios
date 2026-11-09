@@ -75,7 +75,16 @@ if (-not $Lang) {
     $Lang = if ((Get-UICulture).TwoLetterISOLanguageName -eq 'tr' -or (Get-Culture).TwoLetterISOLanguageName -eq 'tr') { 'tr' } else { 'en' }
 }
 function L([string]$en, [string]$tr) { if ($Lang -eq 'tr') { $tr } else { $en } }
-function Fail([string]$why, [int]$code = 1) { Write-Host ''; Write-Host $why -ForegroundColor Red; exit $code }
+# Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1 (the installers write theirs, ##asoft|step|..., too):
+#   plan|VER|ID|SECONDS|DOWNLOAD BYTES|ADD GB|KEEP GB|DONE 0/1|TITLE   the chosen steps, in order (VER ios16, ios26, watch)
+#   option|KEY|DOWNLOAD|SECONDS|PEAK|AFTER   each row of the estimate table (ios16, ios26-wsl, ios26-helper, watch)
+#   total|DOWNLOAD|SECONDS|PEAK|AFTER|NEED|FREE|BANDWIDTH NOTE   the choice as a whole (bytes, seconds)
+#   warn|TEXT, stop|TEXT, end|VER|CODE (each installer), end|setup|CODE, wsl-restart
+function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
+# ASoftware.exe's "pause after this step": the file ASOFT_PAUSE_FILE names (the installers stop before their
+# next step with exit 5; this before the next installer)
+function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
+function Fail([string]$why, [int]$code = 1) { Emit 'stop', $why; Emit 'end', 'setup', $code; Write-Host ''; Write-Host $why -ForegroundColor Red; exit $code }
 foreach ($p in @(@('Version', $Version, @('ios16', 'ios26', 'both')), @('Watch', $Watch, @('yes', 'no')), @('Linux', $Linux, @('wsl', 'helper')),
                  @('Lang', $Lang, @('en', 'tr')), @('IfNoWsl', $IfNoWsl, @('install', 'nowsl')))) {
     if ($p[1] -and $p[2] -cnotcontains $p[1]) { Fail "-$($p[0]) $($p[1]): one of $($p[2] -join ', ')" }
@@ -592,6 +601,7 @@ if ($Want26) {
                 if ($code -ne 0 -and $code -ne 3010) { Fail ((L "wsl --install ended with $code." "wsl --install $code ile bitti.") + ' ' + (L 'Run it in an administrator PowerShell to see why: wsl --install --no-distribution' 'Nedenini görmek için yönetici PowerShell''de çalıştırın: wsl --install --no-distribution')) }
                 Write-Host ''
                 Write-Host (L 'WSL is installed. Restart Windows, then run Install-ASoftware.cmd again (or the same one-liner): it goes on where it stopped.' 'WSL kuruldu. Windows''u yeniden başlatın, sonra Install-ASoftware.cmd''yi (ya da aynı tek satırı) yeniden çalıştırın: kaldığı yerden devam eder.') -ForegroundColor Green
+                Emit 'wsl-restart'
                 exit 3010
             }
         }
@@ -673,6 +683,14 @@ if ($Want26) { $Chosen += $Plans["ios26-$Linux"] }
 if ($WantWatch) { $Chosen += $Plans['watch'] }
 $Total = Sum-Plan $Chosen $bps
 $freeB = Free-Bytes $Dir
+foreach ($k in $sums.Keys) {
+    if ($k -eq 'ios26-helper' -and -not $Helper) { continue }
+    Emit 'option', $k, ([long]$sums[$k].Dl), ([int]$sums[$k].S), ([long]$sums[$k].Peak), ([long]$sums[$k].After)
+}
+foreach ($st in $Chosen) {
+    Emit 'plan', $st.Ver, $st.Id, ([int](Step-Seconds $st $bps)), ([long]$st.Dl), $st.Add, $st.Keep, $(if ($st.Done) { 1 } else { 0 }), $st.Title
+}
+Emit 'total', ([long]$Total.Dl), ([int]$Total.S), ([long]$Total.Peak), ([long]$Total.After), ([long]$Total.Need), ([long]$freeB), $bwNote
 Write-Host ''
 Write-Host ('  {0}: {1}, {2} {3}, {4} {5} / {6}, ~{7}' -f (L 'Your choice' 'Seçiminiz'), "$(Version-Name $Version)$(if ($WantWatch) { ' + watchOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' })",
     (L 'download' 'indirme'), (Fmt-Size $Total.Dl), (L 'disk' 'disk'), (Fmt-Size $Total.Peak), (Fmt-Size $Total.After), (Fmt-Time $Total.S)) -ForegroundColor White
@@ -706,7 +724,8 @@ if ($Estimate -or $DryRun) {
         }
     }
 }
-if ($Estimate) { exit 0 }
+# (ASoftware.exe's estimate goes on through the preflight below, for its warnings)
+if ($Estimate -and $env:ASOFT_PROGRESS -cne '1') { exit 0 }
 
 # --- 5. Preflight ------------------------------------------------------------------------------
 $warn = @()
@@ -747,12 +766,15 @@ if ($Want26) {
     Write-Host ('  GPU: {0}; Vulkan: {1}' -f ($Pc.Gpus -join ', '), $(if ($Pc.VkLoader -and $Pc.VkDrivers) { L 'yes' 'var' } elseif ($Pc.VkLoader) { L 'loader only' 'yalnız yükleyici' } else { L 'no' 'yok' })) -ForegroundColor DarkGray
     Write-Host ('  WSL: {0}{1}' -f $Wsl.State, $(if ($Wsl.Why) { " ($($Wsl.Why))" })) -ForegroundColor DarkGray
 }
-foreach ($w in $warn) { Write-Host "  ! $w" -ForegroundColor Yellow }
+foreach ($w in $warn) { Write-Host "  ! $w" -ForegroundColor Yellow; Emit 'warn', $w }
+if ($short) { Emit 'warn', (L "Not enough room on $([IO.Path]::GetPathRoot($Dir)): about $(Fmt-Size ($Total.Need + 1e9)) is needed at the peak." "$([IO.Path]::GetPathRoot($Dir)) üzerinde yer yetmiyor: en çok anında yaklaşık $(Fmt-Size ($Total.Need + 1e9)) gerekir.") }
+foreach ($why1 in $stop) { Emit 'stop', $why1 }
 if ($stop) {
     $why = (L 'This PC needs: ' 'Bu PC''de gerekenler: ') + ($stop -join '; ')
     if (-not $ReadOnly) { Fail $why }
     Write-Host "  ($(L 'a real run stops here' 'gerçek çalıştırma burada durur')) $why" -ForegroundColor Yellow
 }
+if ($Estimate) { Emit 'end', 'setup', 0; exit 0 }
 
 # --- The two installers' arguments -------------------------------------------------------------
 # a real run uses the copies in the install folder (the shortcuts point there); the read-only
@@ -919,6 +941,8 @@ try {
     foreach ($v in @('ios16', 'ios26', 'watch')) {
         if (($v -eq 'ios16' -and -not $Want16) -or ($v -eq 'ios26' -and -not $Want26) -or ($v -eq 'watch' -and -not $WantWatch)) { continue }
         $name = switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'watch' { 'watchOS' } }
+        # ASoftware.exe asked for a pause: before the next installer, as the installers do before a step
+        if (-not $DryRun -and (Pause-Requested)) { $rc = 5; Emit 'paused', $v, ''; break }
         Write-Host ''
         Write-Host ("=== $name" + $(if ($v -eq 'ios26') { ' (' + (Linux-Name $Linux) + ')' }) + $(if ($DryRun) { ' -DryRun' })) -ForegroundColor Cyan
         $sync.PhaseStart = Get-Date; $sync.Phase = $v
@@ -927,6 +951,7 @@ try {
         elseif ($v -eq 'ios26') { $rc = Run-Installer (Join-Path $runFrom 'ios26\Install-iOS26.ps1') ($Args26 + $(if ($DryRun) { '-DryRun' } else { @() })) }
         else { $rc = Run-Installer (Join-Path $runFrom 'watchos\Install-watchOS.ps1') ($ArgsW + $(if ($DryRun) { '-DryRun' } else { @() })) }
         $results[$v] = @{ Code = $rc; Start = $ts; End = (Get-Date) }
+        Emit 'end', $v, $rc
         if ($rc) { break }
     }
 } catch {
@@ -940,6 +965,7 @@ try {
 if ($DryRun) {
     Write-Host ''
     Write-Host (L 'Dry run: nothing was done.' 'Deneme: hiçbir şey yapılmadı.') -ForegroundColor Cyan
+    Emit 'end', 'setup', $rc
     exit $rc
 }
 
@@ -991,13 +1017,22 @@ if ($WantWatch) { $lines += '  watchOS: ' + (Join-Path $Dir 'Start-watchOS.cmd')
 Write-Host ''
 foreach ($l in $lines) { Write-Host $l }
 try { Set-Content (Join-Path $Dir 'install-summary.txt') $lines -Encoding UTF8 } catch { }
+if ($rc -eq 5) {
+    Save-State @{ Stage = 'paused' }
+    Write-Host ''
+    Write-Host (L 'The install is paused. Run Install-ASoftware.cmd (or ASoftware.exe) again to go on where it stopped.' 'Kurulum duraklatıldı. Kaldığı yerden sürdürmek için Install-ASoftware.cmd''yi (ya da ASoftware.exe''yi) yeniden çalıştırın.') -ForegroundColor Yellow
+    Emit 'end', 'setup', 5
+    exit 5
+}
 if ($rc) {
+    Emit 'end', 'setup', $rc
     Save-State @{ Stage = 'failed' }
     Write-Host ''
     Write-Host (L 'The install stopped. Fix what the installer says above and run Install-ASoftware.cmd again: it goes on where it stopped.' 'Kurulum durdu. Kurucunun yukarıda söylediğini düzeltip Install-ASoftware.cmd''yi yeniden çalıştırın: kaldığı yerden devam eder.') -ForegroundColor Yellow
     exit $rc
 }
 Save-State @{ Stage = 'done' }
+Emit 'end', 'setup', 0
 Write-Host ''
 Write-Host (L 'Done.' 'Bitti.') -ForegroundColor Green
 exit 0

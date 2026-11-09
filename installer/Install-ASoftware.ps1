@@ -92,12 +92,29 @@ function Step-Done([string]$id) {
 # "== N/6 title" on the screen, and a line in work\install16.log that Setup-ASoftware.ps1 reads
 # (which step runs, since when)
 function Step([string]$text) {
+    # ASoftware.exe: the previous step is done, this one starts (or it asked for a pause before it)
+    if ($text -cmatch '^(\d)/6 ') {
+        $n = [int]$Matches[1]
+        if ($n -gt 1) { Emit 'step', 'ios16', ($n - 1), 6, $Steps[$n - 2].Id, 'done', $Steps[$n - 2].Title }
+        if ($n -gt 1 -and -not $DryRun -and (Pause-Requested)) {
+            Emit 'paused', 'ios16', $Steps[$n - 1].Id
+            Write-Host ''
+            Write-Host "Paused before step $n (ASoftware.exe). Run this again to go on from it." -ForegroundColor Yellow
+            exit 5
+        }
+        Emit 'step', 'ios16', $n, 6, $Steps[$n - 1].Id, 'start', $Steps[$n - 1].Title
+    }
     Write-Host ''
     Write-Host "== $text" -ForegroundColor Cyan
     if (-not $DryRun -and (Test-Path $work)) {
         Add-Content "$work\install16.log" ('{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $text) -Encoding ASCII
     }
 }
+# Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1: ##asoft|kind|field|..., one line each
+# (step|ios16|N|6|ID|start/done|TITLE, pct|ios16|ID|0-100|TEXT, paused|ios16|ID, end|ios16|CODE)
+function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
+# ASoftware.exe's "pause after this step": the file ASOFT_PAUSE_FILE names is there before a step starts
+function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Show([string]$text) { Write-Host "  > $text" -ForegroundColor DarkGray }
 
 if ($List) {
@@ -178,10 +195,17 @@ if ($free -lt $needed + 1) {
 
 Step '1/6 App files'
 if ($src.Path -ne $Dir) {
-    Show "copy Start-iOS.cmd, Start-watchOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, installer, the helper VM and the newest kernel -> $Dir"
+    Show "copy ASoftware.exe, Start-iOS.cmd, Start-watchOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, installer, the helper VM and the newest kernel -> $Dir"
     if (-not $DryRun) {
-        foreach ($item in 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
-            if (Test-Path "$src\$item") { Copy-Item "$src\$item" $Dir -Force }
+        # ASoftware.exe: the launcher (install, start, settings), in the release package's root
+        foreach ($item in 'ASoftware.exe', 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
+            if (-not (Test-Path "$src\$item")) { continue }
+            try { Copy-Item "$src\$item" $Dir -Force }
+            catch {
+                # an ASoftware.exe that runs from there (an older one) stays until it is closed
+                if ($item -cne 'ASoftware.exe') { throw }
+                Write-Host "  $Dir\ASoftware.exe is in use (it runs from there): kept; close it and run this again to update it" -ForegroundColor Yellow
+            }
         }
         # ios26, watchos: iOS 26's and watchOS's installers and launchers, run from here (Setup-ASoftware.ps1)
         foreach ($folder in 'scripts', 'tools', 'assets', 'ios26', 'watchos') {
@@ -224,7 +248,7 @@ if (-not (Test-Path "$qemuDir\qemu-system-aarch64.exe")) {
 }
 $qemu = "$qemuDir\qemu-system-aarch64.exe"
 if (-not $DryRun) { Write-Host (& $qemu --version | Select-Object -First 1) }
-if ($AppOnly) { exit 0 }
+if ($AppOnly) { Emit 'step', 'ios16', 1, 6, 'app', 'done', $Steps[0].Title; exit 0 }
 
 Step '2/6 Python'
 if (-not (Test-Path "$Dir\python\python.exe")) {
@@ -303,6 +327,7 @@ if (-not (Test-Path $ready) -and $DryRun) {
         $serial = if ($run) { "$($run.FullName)\run\serial.txt" } else { '' }
         $minutes = [int]((Get-Date) - $started).TotalMinutes
         Write-Progress -Activity 'First start of iOS' -Status "setting up iOS ($minutes min)" -PercentComplete ([Math]::Min(95, $minutes * 3))
+        Emit 'pct', 'ios16', 'firststart', ([Math]::Min(95, $minutes * 3)), "setting up iOS ($minutes min)"
         if ($serial -and (Test-Path $serial)) {
             $power = Select-String -Path $serial -Pattern 'SWEET FB: display (on|off)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
             if (($power -join ' ') -match 'off on') { $up = $true; break }
@@ -345,5 +370,7 @@ if (-not $NoShortcut) {
     }
 }
 Write-Host ''
+Emit 'step', 'ios16', 6, 6, 'shortcut', 'done', $Steps[5].Title
+Emit 'end', 'ios16', 0
 if ($DryRun) { Write-Host 'Dry run: nothing was done.' -ForegroundColor Cyan; exit 0 }
 Write-Host 'ASoftware iOS is installed. Start it from the desktop shortcut or Start-iOS.cmd.' -ForegroundColor Green

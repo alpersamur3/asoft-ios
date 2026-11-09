@@ -69,6 +69,11 @@ $Space = @{ download = 5.1; decrypt = 9.0; rootfs = 13.0; patches = 1.5; firstbo
 
 # --- Output, running tools (as Install-iOS26.ps1) ------------------------------------------------
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
+# Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1: ##asoft|kind|field|..., one line each
+# (step|watch|N|OF|ID|start|TITLE, step|...|done/skip/fail, pct|watch|ID|0-100|TEXT, paused|watch|ID, end|watch|CODE)
+function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
+# ASoftware.exe's "pause after this step": the file ASOFT_PAUSE_FILE names is there before a step starts
+function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Say([string]$text, [string]$color = 'Gray') { Write-Host "  $text" -ForegroundColor $color }
 function Fail([string]$why) { throw $why }
 function Q([string]$a) { if ($a -eq '' -or $a -cmatch '[\s"]') { '"' + $a + '"' } else { $a } }
@@ -587,6 +592,7 @@ function Do-FirstBoot {
             while ($true) {
                 if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
                 $min = ((Get-Date) - $t0).TotalMinutes
+                Emit 'pct', 'watch', 'firstboot', ([int][Math]::Min(95, 100 * $min / 15)), $(if ($ark) { 'waiting for the watch face' } else { 'waiting for the data ark' })
                 if (-not $ark) {
                     $out = Guest 90 @($test) -NoFail
                     if (@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count) {
@@ -716,11 +722,19 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         if ($Only -or ($From -and $i -lt $fromIdx)) { continue }
         if ((Get-Mark $s.Id) -ceq (Step-Sig $s.Id) -and -not ($s.Kind -ceq 'chain' -and $chainRedone)) {
             Write-Host "== $label  [done]" -ForegroundColor DarkGray
+            Emit 'step', 'watch', ($i + 1), $Steps.Count, $s.Id, 'skip', $s.Title
             continue
         }
     }
     if ($Only -and $s.Kind -ceq 'always' -and $Only -cne $s.Id -and $s.Id -cne 'check') { continue }
+    if (-not $DryRun -and (Pause-Requested)) {
+        Emit 'paused', 'watch', $s.Id
+        Write-Host ''
+        Write-Host "Paused before step $($s.Id) (ASoftware.exe). Run this again to go on from it." -ForegroundColor Yellow
+        exit 5
+    }
     Step $label
+    Emit 'step', 'watch', ($i + 1), $Steps.Count, $s.Id, 'start', $s.Title
     $script:Log = $null
     if (-not $DryRun) {
         New-Item -ItemType Directory -Force (In-Work 'install\logs') | Out-Null
@@ -743,10 +757,14 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         if ($script:Log) { Write-Host "  log: $script:Log" }
         Write-Host ("  Fix the cause and run Install-ASoftware.cmd (or watchos\Install-watchOS.cmd) again: it goes on " +
                     "from this step (Install-watchOS.cmd -Only $($s.Id) redoes just this one).") -ForegroundColor Yellow
+        Emit 'step', 'watch', ($i + 1), $Steps.Count, $s.Id, 'fail', $_.Exception.Message
+        Emit 'end', 'watch', 1
         exit 1
     }
     if ($s.Kind -cne 'always' -and -not $DryRun) { Set-Mark $s.Id (Step-Sig $s.Id) }
+    Emit 'step', 'watch', ($i + 1), $Steps.Count, $s.Id, 'done', $s.Title
 }
+Emit 'end', 'watch', 0
 Write-Host ''
 if ($DryRun) { Write-Host 'Dry run: nothing was run.' -ForegroundColor Cyan }
 elseif ($Only) { Write-Host "Done: $Only." -ForegroundColor Cyan }

@@ -165,6 +165,11 @@ $Space = @{ cloudos = 1.1; iphone = 10.3; decrypt = 10.3; rootfs = 23.5; partiti
 
 # --- Output, running tools ---------------------------------------------------------------------
 function Step([string]$text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
+# Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1: ##asoft|kind|field|..., one line each
+# (step|ios26|N|OF|ID|start|TITLE, step|...|done/skip/fail, pct|ios26|ID|0-100|TEXT, paused|ios26|ID, end|ios26|CODE)
+function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
+# ASoftware.exe's "pause after this step": the file ASOFT_PAUSE_FILE names is there before a step starts
+function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Say([string]$text, [string]$color = 'Gray') { Write-Host "  $text" -ForegroundColor $color }
 function Fail([string]$why) { throw $why }
 function Q([string]$a) { if ($a -eq '' -or $a -cmatch '[\s"]') { '"' + $a + '"' } else { $a } }
@@ -755,6 +760,7 @@ function Wait-Ui($g, [int]$minutes) {
         if ($t) { foreach ($m in [regex]::Matches($t, 'frame (\d+) shown')) { $n = [Math]::Max($n, [int]$m.Groups[1].Value) } }
         if ($n -ge 5) { Write-Progress -Activity 'iOS' -Completed; Say ("UI up after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes); return }
         Write-Progress -Activity 'iOS' -Status ("starting ({0:N0} min, frame {1})" -f ((Get-Date) - $t0).TotalMinutes, $n)
+        Emit 'pct', 'ios26', $script:StepId, '', ("iOS starting ({0:N0} min)" -f ((Get-Date) - $t0).TotalMinutes)
         Start-Sleep -Seconds 10
     }
     Fail "iOS showed no UI in $minutes minutes; see $($g.Dir)"
@@ -767,6 +773,7 @@ function Wait-Running($g, [int]$seconds, [string]$what) {
         if (-not (Guest-Alive $g)) { Fail "QEMU ended (the window was closed?) before $what; run again to redo this step" }
         $left = $seconds - ((Get-Date) - $t0).TotalSeconds
         Write-Progress -Activity 'iOS' -Status $what -SecondsRemaining ([int]$left) -PercentComplete ([Math]::Min(100, 100 * (1 - $left / $seconds)))
+        Emit 'pct', 'ios26', $script:StepId, ([int][Math]::Min(100, 100 * (1 - $left / $seconds))), $what
         Start-Sleep -Seconds 10
     }
     Write-Progress -Activity 'iOS' -Completed
@@ -805,6 +812,7 @@ function Wait-Migration($g, [int]$minutes) {
             return
         }
         Write-Progress -Activity 'iOS' -Status ("DataMigration ({0:N0} min)" -f ((Get-Date) - $t0).TotalMinutes)
+        Emit 'pct', 'ios26', $script:StepId, '', ("DataMigration ({0:N0} min; about 50 on our PC)" -f ((Get-Date) - $t0).TotalMinutes)
         Start-Sleep -Seconds 30
     }
     Fail "DataMigration was not done in $minutes minutes; run again to redo this step"
@@ -1863,12 +1871,21 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         if ($Only -or ($From -and $i -lt $fromIdx)) { continue }
         if ((Get-Mark $s.Id) -ceq (Step-Sig $s.Id) -and -not ($s.Kind -ceq 'chain' -and $chainRedone)) {
             Write-Host "== $label  [done]" -ForegroundColor DarkGray
+            Emit 'step', 'ios26', ($i + 1), $Steps.Count, $s.Id, 'skip', $s.Title
             continue
         }
     }
     # -Only STEP: the setup and the checks still run, the other every-run steps do not
     if ($Only -and $s.Kind -ceq 'always' -and $Only -cne $s.Id -and $s.Id -cne 'setup' -and $s.Id -cne 'prereq') { continue }
+    if (-not $DryRun -and (Pause-Requested)) {
+        Emit 'paused', 'ios26', $s.Id
+        Write-Host ''
+        Write-Host "Paused before step $($s.Id) (ASoftware.exe). Run this again to go on from it." -ForegroundColor Yellow
+        exit 5
+    }
     Step $label
+    $script:StepId = $s.Id
+    Emit 'step', 'ios26', ($i + 1), $Steps.Count, $s.Id, 'start', $s.Title
     $script:Log = $null
     if (-not $DryRun -and (Test-Path $Work)) {
         New-Item -ItemType Directory -Force (In-Work 'install\logs') | Out-Null
@@ -1895,10 +1912,14 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         Write-Host "Step $($s.Id) failed (README.md, Build: $($s.Readme)): $($_.Exception.Message)" -ForegroundColor Red
         if ($script:Log) { Write-Host "  log: $script:Log" }
         Write-Host "  Fix the cause and run Install-iOS26.cmd again: it goes on from this step (-Only $($s.Id) redoes just this one)." -ForegroundColor Yellow
+        Emit 'step', 'ios26', ($i + 1), $Steps.Count, $s.Id, 'fail', $_.Exception.Message
+        Emit 'end', 'ios26', 1
         exit 1
     }
     if ($s.Kind -cne 'always' -and -not $DryRun) { Set-Mark $s.Id (Step-Sig $s.Id) }
+    Emit 'step', 'ios26', ($i + 1), $Steps.Count, $s.Id, 'done', $s.Title
 }
+Emit 'end', 'ios26', 0
 Write-Host ''
 if ($DryRun) {
     Write-Host 'Dry run: nothing was run.' -ForegroundColor Cyan
