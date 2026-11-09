@@ -16,8 +16,9 @@
 #     -WatchDir DIR[|DIR]  folders with some of them as files: 141-08453-168.dmg.aea (checked by its
 #                      SHA-1), 141-08453-168.dmg.aea.trustcache, DeviceTree.n207sap.im4p or its unwrapped
 #                      DeviceTree.n207sap.raw; what none has is downloaded
-#     -QemuFrom auto|release|<folder>   the watch QEMU: auto = qemu-watch\ as it is, else the release
-#                      package below, else stop; <folder> copies a build you have (win-build.sh's dist),
+#     -QemuFrom auto|release|<folder>   the watch QEMU: auto = qemu-watch\ as it is, else a copy of this
+#                      install's qemu\ when it is a watch build (0.3.0 on), else the release package
+#                      below, else stop; <folder> copies a build you have (win-build.sh's dist),
 #                      checked for the watch's devices first
 #     -KeepBuildFiles  keep the decrypted image and the build's leftovers
 # The Linux steps run in the iOS 26 install's WSL distro (its -Linux helper mode is not supported here).
@@ -57,7 +58,7 @@ $WatchFiles = [ordered]@{        # member = bytes; into <Work>\watchos\ipsw, wit
 }
 # Our QEMU for Windows with the watch's options: qemu-sptm asoft-watch (asoft 7364c4e + ppi, usb-consumer
 # power-usage, usb-crown, the GTK watch case) with reims-vgpu / metal2vulkan that write imageblock slices
-# into extended-range textures (watchOS's backdrops). Not published yet: -QemuFrom <folder> until then.
+# into extended-range textures (watchOS's backdrops). No separate package: the release package's QEMU is one.
 $QemuWatchRelease = @{ Version = ''; Url = ''; Sha256 = '' }
 $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 # the kernel kc-watch.py starts from: the iOS 26 install's plain one (its fw\bootkc is that file only when
@@ -365,6 +366,8 @@ function Do-Qemu {
     # (the probes only read: a dry run makes them too)
     $have = Qemu-HasWatch $exe
     if ($QemuFrom -ceq 'auto' -and $have) { Say "have $dst (it has usb-crown)"; return }
+    # the QEMU this install runs iOS 26 on is a watch build too from 0.3.0 on: a copy of it, nothing to download
+    if ($QemuFrom -ceq 'auto' -and (Qemu-HasWatch (Join-Path (In-Work 'qemu') 'qemu-system-aarch64.exe'))) { $QemuFrom = In-Work 'qemu' }
     if ($QemuFrom -cnotin 'auto', 'release') {
         $src = [IO.Path]::GetFullPath($QemuFrom).TrimEnd('\')
         # (Combine, not Join-Path, which throws on a drive that is not there)
@@ -388,8 +391,8 @@ function Do-Qemu {
         }
     } else {
         if (-not $QemuWatchRelease.Url) {
-            Stop-Here ('the watch QEMU is not published as a package yet: give a build with -QemuFrom <folder> ' +
-                       '(qemu-sptm asoft-watch, win-build.sh''s dist)')
+            Stop-Here ('this install''s QEMU has no watch devices (usb-crown): install from the latest release package, ' +
+                       'or give a build with -QemuFrom <folder> (qemu-sptm asoft-release, win-build.sh''s dist)')
             return
         }
         Need-Space $Space.qemu

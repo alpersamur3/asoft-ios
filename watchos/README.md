@@ -18,9 +18,10 @@ It needs:
   enough: the watch face needs Metal)
 - 5.0 GB from Apple (the IPSW's OS image, its trust cache and the watch's device tree), and
   about 21 GB free on the install drive while it builds, 14 GB when it is done
-- our QEMU build with the watch's machine options (`qemu-watch\`). It is not published yet: give one with
-  `-QemuFrom <folder>` (`Install-ASoftware.cmd -WatchQemu <folder>`); a folder without the watch's
-  devices (iOS's QEMU) is refused before anything is copied
+- our QEMU build with the watch's machine options (`qemu-watch\`): a copy of the QEMU this install runs
+  iOS 26 on, from the 0.3.0 package on. For an older install or a checkout give one with `-QemuFrom <folder>`
+  (`Install-ASoftware.cmd -WatchQemu <folder>`); a folder without the watch's devices is refused before
+  anything is copied
 
 Like the iOS 26 installer it leaves a marker per step (`work\install\watch-*.done`) and goes on where it
 stopped; `-List` shows the steps, `-DryRun` the commands, `-From STEP` / `-Only STEP` redo steps.

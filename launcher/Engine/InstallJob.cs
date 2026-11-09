@@ -61,7 +61,8 @@ namespace ASoftware.Engine
             a.Add("-Lang"); a.Add(L.Lang);
             if (mode != null) a.Add(mode);
             else { a.Add("-Yes"); a.Add("-IfNoWsl"); a.Add("install"); }
-            // watchOS's QEMU: a folder of one (the release package has none yet), as Setup's -WatchQemu
+            // watchOS's QEMU: a folder of one when this PC has a separate build, as Setup's -WatchQemu
+            // (else Setup takes the release package's, which has the watch's devices from 0.3.0 on)
             if (c.Watch)
             {
                 var wq = WatchQemu(c);

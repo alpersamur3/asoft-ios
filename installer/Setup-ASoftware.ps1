@@ -138,8 +138,8 @@ function Has-Param([string]$file, [string]$name) {
     $ast = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
     [bool]($ast.ParamBlock -and @($ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $name }).Count)
 }
-# Our QEMU build with the watch's devices (qemu-sptm asoft-watch: usb-crown) in a folder, as
-# Install-watchOS.ps1 checks it; iOS's QEMU (the package's qemu\bin) does not have them
+# Our QEMU build with the watch's devices (usb-crown) in a folder, as Install-watchOS.ps1 checks it; the
+# package's qemu\bin has them from 0.3.0 on, an older one does not
 function Qemu-HasWatch([string]$dir) {
     # (Combine, not Join-Path, which throws on a drive that is not there)
     if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return $false }
@@ -148,8 +148,8 @@ function Qemu-HasWatch([string]$dir) {
     [bool]((Invoke-Native $exe @('-device', 'help')).Out | Where-Object { $_ -cmatch '"usb-crown"' })
 }
 # watchOS's QEMU: -WatchQemu, else -QemuDist (the package's qemu\bin) when it is a watch build, else what
-# <work>\qemu-watch has, else the watch installer's pinned package (none is published yet). Dir: the
-# folder Install-watchOS.ps1 gets as -QemuFrom; Why: why there is none
+# <work>\qemu-watch has, else this install's <work>\qemu when it is one. Dir: the folder Install-watchOS.ps1
+# gets as -QemuFrom; Why: why there is none
 function Watch-Qemu([string]$work) {
     $r = @{ Dir = $null; There = $false; Why = '' }
     if ($work) { $r.There = Qemu-HasWatch ([IO.Path]::Combine($work, 'qemu-watch')) }
@@ -159,8 +159,10 @@ function Watch-Qemu([string]$work) {
         else { $r.Why = L "-WatchQemu $d`: no qemu-system-aarch64.exe with the watch's devices (usb-crown) there" "-WatchQemu $d`: orada saatin aygıtlarını (usb-crown) içeren qemu-system-aarch64.exe yok" }
     } elseif ($QemuDist -and (Qemu-HasWatch ([IO.Path]::GetFullPath($QemuDist)))) {
         $r.Dir = [IO.Path]::GetFullPath($QemuDist).TrimEnd('\')
+    } elseif ($work -and -not $r.There -and (Qemu-HasWatch ([IO.Path]::Combine($work, 'qemu')))) {
+        $r.Dir = [IO.Path]::Combine($work, 'qemu')
     } elseif (-not $r.There -and -not $TW.QemuWatchRelease.Url) {
-        $r.Why = L "watchOS's QEMU (our build with the watch's devices) is not published yet: give one with -WatchQemu <folder>" "watchOS'un QEMU'su (saatin aygıtlarını içeren derlememiz) henüz yayımlanmadı: -WatchQemu <klasör> ile verin"
+        $r.Why = L "this install's QEMU has no watch devices (usb-crown): install from the latest release package, or give one with -WatchQemu <folder>" "bu kurulumun QEMU'sunda saatin aygıtları (usb-crown) yok: son sürüm paketiyle kurun ya da -WatchQemu <klasör> ile verin"
     }
     $r
 }
@@ -624,8 +626,8 @@ if ($Want26 -and $Work -cnotmatch '^[A-Za-z]:\\[^\s''"`$;&|<>()]+$') {
 }
 $QemuThere = Test-Path (Join-Path $Work 'qemu\qemu-system-aarch64.exe')
 # watchOS's QEMU: -WatchQemu, else -QemuDist (the package's qemu\bin) when it is a watch build, else what
-# work\qemu-watch has, else the watch installer's pinned package (none is published yet)
-# (again now the work folder is known: its qemu-watch\ counts too)
+# work\qemu-watch has, else this install's work\qemu when it is one
+# (again now the work folder is known: its qemu-watch\ and qemu\ count too)
 $WatchQemuDir = $null
 $WatchQemuThere = $false
 $WatchQemuWhy = ''
