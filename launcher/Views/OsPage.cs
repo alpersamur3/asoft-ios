@@ -49,6 +49,7 @@ namespace ASoftware.Views
             hg.Children.Add(new System.Windows.Shapes.Ellipse { Width = 300, Height = 300, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -140, -60, 0), Fill = new SolidColorBrush(Color.FromArgb(0x18, 255, 255, 255)) });
             hg.Children.Add(new DeviceGlyph { Os = os, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 10, 40, 0), RenderTransform = new ScaleTransform(0.78, 0.78) });
             var back = new Button { Style = Ui.S("BtnIcon"), Content = "\uE72B", Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 12, 0, 0), ToolTip = L.K("Back") };
+            AutomationProperties.SetName(back, L.K("Back"));
             back.Click += (s, e) => main.GoHome();
             hg.Children.Add(back);
             var title = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(24, 0, 0, 18) };
@@ -155,6 +156,7 @@ namespace ASoftware.Views
                 ram = Ui.Seg(choices.Select(m => (m, (m / 1024.0).ToString("0.#") + " GB")), cur, v => { c.RamMiB = v == def ? 0 : v; Changed(); });
                 ramDesc = L.T($"Its device tree's own: {def / 1024.0:0.#} GB. A save loads with the size it was made with; a new size applies at the next full start.",
                               $"Aygıt ağacının kendi değeri: {def / 1024.0:0.#} GB. Bir kayıt alındığı boyutla açılır; yeni boyut bir sonraki tam açılışta geçerli olur.");
+                if (os == "ios26") ramDesc += " " + L.T("4 GB is the most for now.", "Şimdilik en çok 4 GB.");
             }
             else
             {

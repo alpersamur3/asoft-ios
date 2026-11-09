@@ -22,7 +22,9 @@ namespace ASoftware.Engine
         public static int QmpPort(string os) => os == "ios16" ? 4445 : os == "ios26" ? 4453 : 4473;
         public static int SerialPort(string os) => os == "ios26" ? 4451 : os == "watch" ? 4471 : 0;
         public static bool HasRamSetting(string os) => os != "ios16";
-        public static int[] RamChoices(string os) => os == "watch" ? new[] { 2048, 3072, 4096 } : new[] { 3072, 4096, 6144, 8192 };
+        // iOS 26 stops at 4 GB for now: above 5 GB the guest's RAM runs into QEMU's framebuffer at 0x1c0000000, and
+        // reims-vgpu cannot map the RAM behind it (rvg_device_create fails, QEMU ends at once)
+        public static int[] RamChoices(string os) => os == "watch" ? new[] { 2048, 3072, 4096 } : new[] { 3072, 4096 };
         public static string[] Windows(string os) => os == "ios16" ? new[] { "ASoftware iOS" } : os == "ios26" ? new[] { "ASoftware iOS 26" } : new[] { "ASoftware watchOS" };
 
         public static OsConfig Cfg(string os) => LauncherConfig.Current.For(os);
