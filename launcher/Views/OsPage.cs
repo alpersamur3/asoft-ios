@@ -183,7 +183,6 @@ namespace ASoftware.Views
                 ram = Ui.Seg(choices.Select(m => (m, (m / 1024.0).ToString("0.#") + " GB")), cur, v => { c.RamMiB = v == def ? 0 : v; Changed(); });
                 ramDesc = L.T($"Its device tree's own: {def / 1024.0:0.#} GB. A save loads with the size it was made with; a new size applies at the next full start.",
                               $"Aygıt ağacının kendi değeri: {def / 1024.0:0.#} GB. Bir kayıt alındığı boyutla açılır; yeni boyut bir sonraki tam açılışta geçerli olur.");
-                if (os == "ios26") ramDesc += " " + L.T("4 GB is the most for now.", "Şimdilik en çok 4 GB.");
             }
             else
             {
