@@ -115,6 +115,10 @@ def auto_lock(root, seconds):
     data = load(path) if os.path.exists(path) else {}
     data.setdefault('restrictedValue', {})['maxInactivity'] = {'value': seconds}
     os.makedirs(d, exist_ok=True)
+    # mobile's, as iOS makes it: profiled (mobile) writes the effective settings beside this file. Made here
+    # as root (a disk where profiled had not made it yet) it could not, and iOS kept its own one minute
+    os.chown(d, MOBILE, MOBILE)
+    os.chmod(d, 0o755)
     save(path, data, MOBILE, MOBILE, 0o644)
     for p in ('EffectiveUserSettings.plist', 'PublicInfo/PublicEffectiveUserSettings.plist'):
         fp = os.path.join(d, p)
