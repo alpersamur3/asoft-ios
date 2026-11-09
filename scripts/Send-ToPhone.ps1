@@ -27,7 +27,7 @@ param(
     [string]$Out = '',
     [switch]$WithMyData,
     [switch]$NoSend,
-    [string]$Package = 'com.asoft.ios'
+    [string]$Package = $(if ($env:ASOFT_PHONE_PACKAGE) { $env:ASOFT_PHONE_PACKAGE } else { 'com.asoft.ios' })
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Out) {
@@ -40,13 +40,23 @@ $CmdLine = 'debug=0xc serial=3 cpus=4 keepsyms=1 -enable_kprintf_spam -noprogres
     'sweetfb_keepon=1'
 
 function Say($s) { Write-Host $s }
+# ASoftware.exe follows these (ASOFT_PROGRESS=1); on a console they are not printed
+function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
+$script:StepsOf = if ($NoSend) { 3 } else { 4 }
+$script:StepNo = 0
+function Step([string]$id, [string]$title) { $script:StepNo++; Emit @('step', 'phone', $script:StepNo, $script:StepsOf, $id, 'start', $title) }
+trap { Emit @('end', 'phone', 1); break }
 
 # A native tool, its output shown, its exit code checked (PowerShell 5.1 turns a native
 # program's stderr into errors under -ErrorAction Stop)
 function Run([string]$exe, [string[]]$a) {
     $old = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $exe @a 2>&1 | ForEach-Object { Write-Host "  $_" }
+    & $exe @a 2>&1 | ForEach-Object {
+        # qemu-img -p: "    (12.34/100%)", which on a console rewrites one line
+        if ("$_" -match '\((\d+(?:\.\d+)?)/100%\)') { Emit @('pct', 'phone', 'disk', $Matches[1], ''); return }
+        Write-Host "  $_"
+    }
     $code = $LASTEXITCODE
     $ErrorActionPreference = $old
     if ($code) { throw "$([IO.Path]::GetFileName($exe)) failed ($code)" }
@@ -86,6 +96,7 @@ function Make-Bundle26 {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $tmp | Out-Null
     try {
+        Step 'prepare' 'Preparing'
         foreach ($n in $trees.Keys) {
             $t = $trees[$n]
             Run $python (@('-I', $dtPhone, $t[0], "$tmp\$n") + @($t | Select-Object -Skip 1))
@@ -93,10 +104,12 @@ function Make-Bundle26 {
         foreach ($n in $copy.Keys) { Copy-Item $copy[$n] "$tmp\$n" }
         $free = (Get-PSDrive ([IO.Path]::GetPathRoot($tmp).Substring(0, 1))).Free
         Say "Packing the disk and its backing chain into one file (minutes; $([math]::Round($free / 1GB)) GB free on that drive)"
+        Step 'disk' 'Packing the disk'
         Run $qemuImg @('convert', '-p', '-O', 'qcow2', '-c', '-o', 'compression_type=zstd', $disk, "$tmp\$diskName")
         @{ format = 1; ios = $OS; made = (Get-Date).ToString('s'); madeOn = 'pc'; diskBytes = (Get-Item "$tmp\$diskName").Length } |
             ConvertTo-Json | Set-Content -Encoding ASCII "$tmp\asoft-bundle.json"
         Remove-Item -Force $Out -ErrorAction SilentlyContinue
+        Step 'file' 'Making the file'
         # the manifest first: the app reads it before the rest and makes room for the new disk
         Run "$env:SystemRoot\System32\tar.exe" (@('-cf', $Out, '-C', $tmp, 'asoft-bundle.json') + @($trees.Keys) + @($copy.Keys) + @($diskName))
     } finally {
@@ -145,6 +158,7 @@ if ($OS -ne '16') {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $tmp | Out-Null
     try {
+        Step 'prepare' 'Preparing'
         # -- the kernel with this iPhone's device tree
         $env:ASOFT_DEVICE_TREE = $adt
         Run $python @("$Dir\tools\mkadt.py", "$tmp\qemu.adt", '--qemu', '--highmem')
@@ -153,12 +167,14 @@ if ($OS -ne '16') {
         # -- the disk: its backing chain in one file, zstd-compressed clusters (the phone reads them as they are)
         $free = (Get-PSDrive ([IO.Path]::GetPathRoot($tmp).Substring(0, 1))).Free
         Say "Packing the disk (a few minutes; $([math]::Round($free / 1GB)) GB free on that drive)"
+        Step 'disk' 'Packing the disk'
         Run $qemuImg @('convert', '-p', '-O', 'qcow2', '-c', '-o', 'compression_type=zstd', $disk, "$tmp\disk.qcow2")
 
         @{ format = 1; ios = '16'; build = '20H392'; kernel = $kernel.Directory.Name; withMyData = [bool]$WithMyData
            made = (Get-Date).ToString('s'); diskBytes = (Get-Item "$tmp\disk.qcow2").Length } |
             ConvertTo-Json | Set-Content -Encoding ASCII "$tmp\asoft-bundle.json"
 
+        Step 'file' 'Making the file'
         # -- one file: tar (Windows' own bsdtar), manifest first so the app can check it before the rest
         Remove-Item -Force $Out -ErrorAction SilentlyContinue
         Run "$env:SystemRoot\System32\tar.exe" @('-cf', $Out, '-C', $tmp, 'asoft-bundle.json', 'payload.bin', 'disk.qcow2')
@@ -181,6 +197,8 @@ if (-not $NoSend -and $adb) {
     if ($state -eq 'device') {
         $dest = "/sdcard/Android/data/$Package/files/import"
         Say "Sending to the phone ($dest)"
+        Step 'push' 'Sending to the phone'
+        Emit @('push', "$dest/$([IO.Path]::GetFileName($Out))", $size)
         Run $adb @('shell', "mkdir -p $dest")
         Run $adb @('push', $Out, "$dest/")
         # adb's folder and file belong to the shell user (mode 2770): a release build of the app
@@ -195,3 +213,4 @@ if ($sent) {
     Say 'Copy the file to the phone (USB cable, File Explorer: the phone''s Download folder),'
     Say 'then on the phone: ASoftware iOS > Set up > Choose file.'
 }
+Emit @('end', 'phone', 0)

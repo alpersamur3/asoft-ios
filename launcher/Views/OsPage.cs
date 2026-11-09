@@ -499,7 +499,8 @@ namespace ASoftware.Views
             p.Children.Add(Ui.Hstack(
                 Ui.Btn(L.K("OpenRunFolder"), () => MainWindow.Open(run), "Btn", "\uE838"),
                 Ui.Btn(L.K("OpenInstallLogs"), () => MainWindow.Open(Directory.Exists(inst) ? inst : Guests.Work(os)), "Btn", "\uE838"),
-                Ui.Btn(L.K("PackLogs"), Pack, "BtnPrimary", "\uE7B8")));
+                Ui.Btn(L.K("PackLogs"), Pack, "BtnPrimary", "\uE7B8"),
+                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(os), "BtnGhost", "\uEBE8")));
             p.Children.Add(Ui.Text(run == "" ? L.T("No run yet.", "Henüz çalışma yok.") : L.T("The last run: ", "Son çalışma: ") + run, "Faint", 12));
             var logView = new TextBox { Style = Ui.S("Field"), FontFamily = Ui.F("Mono"), IsReadOnly = true, TextWrapping = TextWrapping.NoWrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, Height = 360, FontSize = 11.5, AcceptsReturn = true, Margin = new Thickness(0, 10, 0, 0), VerticalContentAlignment = VerticalAlignment.Top };
             var serial = run == "" ? "" : new[] { "serial.log", Path.Combine("run", "serial.txt"), "stderr.log" }.Select(x => Path.Combine(run, x)).FirstOrDefault(File.Exists) ?? "";
@@ -524,57 +525,11 @@ namespace ASoftware.Views
             catch (Exception e) { return e.Message; }
         }
 
-        /// <summary>The logs a report needs, in one zip on the desktop: the last run's (text files up to 20 MB each,
-        /// the tail of bigger ones), the install's step logs, the launcher's own and its config.</summary>
         void Pack()
         {
-            var zip = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"ASoftware-logs-{os}-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             try
             {
-                using (var z = ZipFile.Open(zip, ZipArchiveMode.Create))
-                {
-                    void Put(string file, string name)
-                    {
-                        try
-                        {
-                            var fi = new FileInfo(file);
-                            if (!fi.Exists) return;
-                            var e = z.CreateEntry(name, CompressionLevel.Optimal);
-                            using (var to = e.Open())
-                            using (var from = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                            {
-                                if (fi.Length > 20 << 20) from.Seek(-(20 << 20), SeekOrigin.End);
-                                from.CopyTo(to);
-                            }
-                        }
-                        catch { }
-                    }
-                    var run = Guests.LastRunFolder(os);
-                    if (run != "")
-                        foreach (var f in Directory.EnumerateFiles(run, "*", SearchOption.AllDirectories).Where(f => new[] { ".log", ".txt", ".json" }.Contains(Path.GetExtension(f).ToLowerInvariant())))
-                            Put(f, "run/" + f.Substring(run.Length).TrimStart('\\').Replace('\\', '/'));
-                    var inst = Path.Combine(Guests.Work(os), "install", "logs");
-                    if (Directory.Exists(inst))
-                        foreach (var f in Directory.EnumerateFiles(inst, "*.log")) Put(f, "install/" + Path.GetFileName(f));
-                    var marks = Path.Combine(Guests.Work(os), "install");
-                    if (Directory.Exists(marks)) foreach (var f in Directory.EnumerateFiles(marks, "*.done").Take(60)) Put(f, "install/markers/" + Path.GetFileName(f));
-                    var ll = Path.Combine(AppPaths.LocalData, "logs");
-                    if (Directory.Exists(ll)) foreach (var f in Directory.EnumerateFiles(ll, "*.log").OrderByDescending(File.GetLastWriteTime).Take(8)) Put(f, "launcher/" + Path.GetFileName(f));
-                    Put(Log.File, "launcher/launcher.log");
-                    Put(AppPaths.ConfigFile, "config/launcher.json");
-                    Put(AppPaths.SetupState, "config/setup.json");
-                    Put(AppPaths.Ios26Config, "config/ios26.config.json");
-                    Put(Path.Combine(Guests.Work(os), "qemu", "BUILD.txt"), "qemu/BUILD.txt");
-                    var dir = Path.GetDirectoryName(Guests.Work(os).TrimEnd('\\'));
-                    if (dir != null) Put(Path.Combine(dir, "install-summary.txt"), "install-summary.txt");
-                    var e2 = z.CreateEntry("pc.txt");
-                    using (var w = new StreamWriter(e2.Open()))
-                    {
-                        var m = Native.Memory();
-                        w.WriteLine($"ASoftware {Updates.AppVersion}; Windows {Environment.OSVersion.Version}; {Environment.ProcessorCount} logical processors; RAM {m.total / 1e9:0.0} GB, free {m.free / 1e9:0.0} GB");
-                        w.WriteLine($"work {Guests.Work(os)}; free {L.Size(Native.FreeBytes(Guests.Work(os)))}");
-                    }
-                }
+                var zip = LogPack.Make(os);
                 Process.Start("explorer.exe", "/select,\"" + zip + "\"");
                 main.Snack(L.T("Logs packed: ", "Loglar paketlendi: ") + zip, "good");
             }

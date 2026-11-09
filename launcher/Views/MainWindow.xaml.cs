@@ -30,10 +30,12 @@ namespace ASoftware.Views
             foreach (var os in new[] { "ios16", "ios26", "watch", "vision" }) cards.Add(new OsCardVm(os, this));
             Cards.ItemsSource = cards;
             foreach (var c in cards) c.Refresh();
+            RefreshTools();
             Machines.Changed += os => Dispatcher.BeginInvoke(new Action(() => { var c = cards.FirstOrDefault(x => x.Os == os); if (c != null) { c.QuickLooked = DateTime.MinValue; c.Refresh(); } (Page.Content as OsPage)?.Refresh(); RefreshTray(); }));
             Machines.Note += (os, text) => Dispatcher.BeginInvoke(new Action(() => Snack(text, "info")));
             InstallJob.Changed += () => Dispatcher.BeginInvoke(new Action(() => { foreach (var c in cards) c.Refresh(); RefreshBanners(); InstallEnded(); }));
-            L.Changed += () => { foreach (var c in cards) { c.Retext(); c.Refresh(); } RefreshBanners(); (Page.Content as IRetext)?.Retext(); RefreshTray(); };
+            L.Changed += () => { foreach (var c in cards) { c.Retext(); c.Refresh(); } RefreshBanners(); RefreshTools(); (Page.Content as IRetext)?.Retext(); RefreshTray(); };
+            PhoneJob.Changed += () => Dispatcher.BeginInvoke(new Action(RefreshTools));
             Theme.Changed += () => { foreach (var c in cards) c.Retext(); };
             snackTimer.Tick += (s, e) => { snackTimer.Stop(); Snack_Hide(); };
             timer.Tick += (s, e) => Poll();
@@ -81,10 +83,50 @@ namespace ASoftware.Views
                 if ((DateTime.Now - pcLooked).TotalSeconds > 9) { pcLooked = DateTime.Now; await RefreshPc(qemus); }
                 (Page.Content as OsPage)?.Tick();
                 (Page.Content as WizardPage)?.Tick();
+                (Page.Content as PhonePage)?.Tick();
             }
             catch (Exception ex) { Log.Write("poll: " + ex.Message); }
             finally { polling = false; }
         }
+
+        // --- the tiles under the cards -----------------------------------------------------------------
+        void RefreshTools()
+        {
+            Tools.Children.Clear();
+            var j = PhoneJob.Current;
+            var phoneNote = j != null && j.Running
+                ? Guests.Name(j.Os) + " · " + j.StepText()
+                : L.T("The app and what this PC has, onto an Android phone", "Uygulama ve bu PC'dekiler Android telefona");
+            Tile("tile-phone", "\uE8EA", L.T("Install on a phone", "Telefona kur"), phoneNote, OpenPhone);
+            Tile("tile-report", "\uEBE8", L.T("Report a problem", "Sorun bildir"), L.T("Opens a filled-in issue on GitHub", "GitHub'da doldurulmuş bir bildirim açar"), () => OpenReport());
+        }
+
+        void Tile(string id, string icon, string title, string note, Action click)
+        {
+            var g = new Grid();
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var box = new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(12), Child = new Grid { Children = { Center(Ui.Icon(icon, 18, "Accent")) } } };
+            box.SetResourceReference(Border.BackgroundProperty, "AccentSoft");
+            g.Children.Add(box);
+            var t = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 8, 0) };
+            t.Children.Add(new TextBlock { Text = title, Style = (Style)FindResource("H3") });
+            t.Children.Add(new TextBlock { Text = note, Style = (Style)FindResource("Faint"), FontWeight = FontWeights.Normal, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap, Margin = new Thickness(0, 1, 0, 0) });
+            Grid.SetColumn(t, 1);
+            g.Children.Add(t);
+            var arrow = Ui.Icon("\uE76C", 12, "Text3");
+            Grid.SetColumn(arrow, 2);
+            g.Children.Add(arrow);
+            var b = new Button { Style = (Style)FindResource("Btn"), Content = g, Width = 560, Margin = new Thickness(10, 6, 10, 6), Padding = new Thickness(14, 12, 14, 12), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            b.SetResourceReference(Control.BackgroundProperty, "Surface");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(b, id);
+            System.Windows.Automation.AutomationProperties.SetName(b, title);
+            b.Click += (s, e) => click();
+            Tools.Children.Add(b);
+        }
+
+        static FrameworkElement Center(FrameworkElement e) { e.HorizontalAlignment = HorizontalAlignment.Center; e.VerticalAlignment = VerticalAlignment.Center; return e; }
 
         // --- this PC, under the cards ------------------------------------------------------------------
         DateTime pcLooked;
@@ -198,6 +240,9 @@ namespace ASoftware.Views
             ShowPage(w);
         }
 
+        public void OpenPhone() => ShowPage(new PhonePage(this));
+        public void OpenReport(string area = null, string title = null, string text = null) => ShowPage(new ReportPage(this, area, title, text));
+
         public void ResumeInstall()
         {
             var c = InstallJob.Unfinished() ?? LauncherConfig.Current.Install;
@@ -229,6 +274,8 @@ namespace ASoftware.Views
             {
                 case "wizard": OpenWizard(null); break;
                 case "settings": ShowPage(new SettingsPage(this)); break;
+                case "phone": OpenPhone(); break;
+                case "report": OpenReport(); break;
                 case "ios16": case "ios26": case "watch": OpenOs(page, tab); break;
                 default: GoHome(); break;
             }
@@ -298,6 +345,8 @@ namespace ASoftware.Views
 
         public static void Open(string what)
         {
+            var test = Environment.GetEnvironmentVariable("ASOFT_TEST_OPEN");     // the UI tests: what would have been opened
+            if (!string.IsNullOrEmpty(test)) { File.AppendAllText(test, what + "\r\n"); return; }
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(what) { UseShellExecute = true }); } catch (Exception e) { Log.Write("open " + what + ": " + e.Message); }
         }
 

@@ -42,6 +42,7 @@ namespace ASoftware.Views
             about.Children.Add(Ui.Text(L.T("Imported: ", "İçe aktarılan: ") + c.Imported, "Faint", 2));
             var links = Ui.Hstack(
                 Ui.Btn("GitHub", () => MainWindow.Open("https://github.com/" + Updates.Repo), "Btn", "\uE774"),
+                Ui.Btn(L.T("Report a problem", "Sorun bildir"), () => main.OpenReport(), "Btn", "\uEBE8"),
                 Ui.Btn(L.T("Open the settings folder", "Ayar klasörünü aç"), () => MainWindow.Open(AppPaths.LocalData), "Btn", "\uE838"),
                 Ui.Btn(L.T("Launcher log", "Başlatıcı logu"), () => MainWindow.Open(Log.File), "Btn", "\uE9F9"));
             links.Margin = new Thickness(0, 12, 0, 0);

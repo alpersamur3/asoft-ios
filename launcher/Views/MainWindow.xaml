@@ -116,8 +116,10 @@
                             <ItemsPanelTemplate><WrapPanel HorizontalAlignment="Center"/></ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
+                    <!-- install on a phone, report a problem -->
+                    <WrapPanel x:Name="Tools" HorizontalAlignment="Center" Margin="0,8,0,0"/>
                     <!-- this PC: memory, the drives the guests are on, the GPU -->
-                    <WrapPanel x:Name="PcStrip" HorizontalAlignment="Center" Margin="0,18,0,0"/>
+                    <WrapPanel x:Name="PcStrip" HorizontalAlignment="Center" Margin="0,12,0,0"/>
                 </StackPanel>
             </ScrollViewer>
             <ContentControl x:Name="Page" Grid.Row="2" Visibility="Collapsed" Focusable="False"/>
