@@ -1,5 +1,6 @@
 # ASoftware watchOS installer: watchOS 27.2 (24S118) as an Apple Watch Series 9 (Watch7,1, 41 mm) on
-# -M vresearch, built on this PC's iOS 26 install (Install-iOS26.ps1's work folder). From it: cloudOS
+# -M vresearch, built on this PC's iOS 26 install or only its base (Install-iOS26.ps1's work folder; its
+# -Base is enough: iOS 26 itself is not needed). From it: cloudOS
 # 26.4b's research kernel (cloud\kernelcache.research.vphone600.decompressed, which kc-watch.py patches
 # into the watch's), SPTM, TXM, the device trees (dtree-smp4/8, which dt-watch.py gives the watch's
 # identity), the shell ramdisk, darwin-vm's sysroot, the guest GPU driver and the WSL distro. The
@@ -298,8 +299,8 @@ function Do-Check {
               'tools\qemu-sptm\scripts\darwin\vresearch_dt_fixup.py')
     $missing = @($need | Where-Object { -not (Test-Path (In-Work $_)) })
     if ($missing) {
-        Stop-Here ("this is no finished iOS 26 install ($Work lacks $($missing -join ', ')): install iOS 26 first " +
-                   '(Install-ASoftware.cmd), or give its folder with -Work')
+        Stop-Here ("this has no iOS 26 base ($Work lacks $($missing -join ', ')): make it with Install-ASoftware.cmd -Version watchos " +
+                   '(or install iOS 26), or give its folder with -Work')
     }
     # where its Linux steps ran: its linux step's marker has the mode it resolved (its config may say auto)
     $mode = Ios-Mark 'linux'
@@ -318,7 +319,7 @@ function Do-Check {
         Stop-Here "WSL has no distro $Distro, where the iOS 26 install ran its Linux steps (WSL lists: $(if ($distros) { $distros -join ', ' } else { 'none' })): ios26\Install-iOS26.cmd -Linux wsl -Only linux makes it"
     }
     # the watch face needs Metal: the GPU driver iOS 26's gpu step leaves in gpu-driver\ (or on its disk)
-    if ((Ios-Mark 'gpu') -ceq 'gpuless' -and -not (Test-Path (In-Work "gpu-driver\$GpuBundle"))) {
+    if (((Ios-Mark 'gpu') -ceq 'gpuless' -or (Ios-Mark 'gpudriver') -ceq 'gpuless') -and -not (Test-Path (In-Work "gpu-driver\$GpuBundle"))) {
         Stop-Here ('iOS 26 was installed GPU-less, and the watch face needs its GPU driver (Metal): choose one in ' +
                    'ios26\Start-iOS26.cmd''s menu ([G]), run ios26\Install-iOS26.cmd again (it redoes its gpu step), then this')
     }

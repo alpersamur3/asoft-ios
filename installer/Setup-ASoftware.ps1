@@ -13,7 +13,7 @@
 # %LOCALAPPDATA%\ASoftware\setup.json. While it runs, the window title shows the step, the time
 # so far and the time left; at the end it prints what it took and where everything is.
 #
-#   Install-ASoftware.cmd [-Version ios16|ios26|both] [-Watch yes|no] [-Linux wsl|helper] [-Dir D:\ASoftware]
+#   Install-ASoftware.cmd [-Version ios16|ios26|both|watchos|ios16-watchos] [-Watch yes|no] [-Linux wsl|helper] [-Dir D:\ASoftware]
 #                         [-Lang en|tr] [-Yes] [-Estimate] [-List] [-Check] [-DryRun]
 #     -Version, -Watch, -Linux   the answers to the questions (else it asks; -Watch needs iOS 26)
 #     -Dir               the install folder: the app, and work\ for both iOS (default: <the fixed
@@ -85,7 +85,7 @@ function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('#
 # next step with exit 5; this before the next installer)
 function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Fail([string]$why, [int]$code = 1) { Emit 'stop', $why; Emit 'end', 'setup', $code; Write-Host ''; Write-Host $why -ForegroundColor Red; exit $code }
-foreach ($p in @(@('Version', $Version, @('ios16', 'ios26', 'both')), @('Watch', $Watch, @('yes', 'no')), @('Linux', $Linux, @('wsl', 'helper')),
+foreach ($p in @(@('Version', $Version, @('ios16', 'ios26', 'both', 'watchos', 'ios16-watchos')), @('Watch', $Watch, @('yes', 'no')), @('Linux', $Linux, @('wsl', 'helper')),
                  @('Lang', $Lang, @('en', 'tr')), @('IfNoWsl', $IfNoWsl, @('install', 'nowsl')))) {
     if ($p[1] -and $p[2] -cnotcontains $p[1]) { Fail "-$($p[0]) $($p[1]): one of $($p[2] -join ', ')" }
 }
@@ -165,7 +165,7 @@ function Watch-Qemu([string]$work) {
     $r
 }
 $T16 = Read-Tables $Inst16 @('ipswUrl', 'ipswSize', 'pythonUrl', 'QemuRelease', 'space', 'Steps')
-$T26 = Read-Tables $Inst26 @('QemuRelease', 'Pin', 'CloudOsUrl', 'IPhoneUrl', 'CloudOsFiles', 'CloudOsGpuImage', 'OsImage',
+$T26 = Read-Tables $Inst26 @('BaseSteps', 'QemuRelease', 'Pin', 'CloudOsUrl', 'IPhoneUrl', 'CloudOsFiles', 'CloudOsGpuImage', 'OsImage',
                              'SysOsImage', 'AppOsImage', 'IPhoneFiles', 'GpuPluginRelease', 'Space', 'Steps')
 # watchOS (on what iOS 26 installed), where this version has its installer
 $TW = if (Test-Path $InstW) { Read-Tables $InstW @('WatchUrl', 'OsImage', 'WatchFiles', 'QemuWatchRelease', 'Space', 'Steps') } else { $null }
@@ -228,6 +228,7 @@ $Ref26 = [ordered]@{
     persona     = @{ S = 7; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 46 }
     activation  = @{ S = 13; Thr = 1; Add = 0.2; Keep = 0.2; Linux = $true; H = 87 }
     apps        = @{ S = 76; Thr = 2; Add = 2.0; Keep = 2.0; Linux = $true; H = 359 }
+    gpudriver   = @{ S = 15; Thr = 2; Add = 0.8; Keep = 0.01; Linux = $true; H = 40 }
     gpu         = @{ S = 19; Thr = 2; Add = 0.3; Keep = 0; Linux = $true; H = 58 }
     wallpaper   = @{ S = 3524; Thr = 6; Add = 1.9; Keep = 1.75 }   # 52 min of it DataMigration
     collections = @{ S = 0; Thr = 1; Add = 0; Keep = 0 }
@@ -291,6 +292,7 @@ function Plan-26([string]$how, [bool]$qemuShared, [string]$wslState) {
     $cloud = 0; foreach ($v in $T26.CloudOsFiles.Values) { $cloud += $v }
     $phone = 0; foreach ($v in $T26.IPhoneFiles.Values) { $phone += $v }
     foreach ($s in $T26.Steps) {
+        if ($BaseOnly -and $T26.BaseSteps -cnotcontains $s.Id) { continue }
         # the wsl step is "linux" where Install-iOS26.ps1 has -Linux; a step not measured yet: a minute
         $r = $Ref26[$s.Id]
         if (-not $r -and $s.Id -eq 'linux') { $r = $Ref26['wsl'] }
@@ -311,7 +313,7 @@ function Plan-26([string]$how, [bool]$qemuShared, [string]$wslState) {
             'cloudos' { if (-not $CloudOsIpsw) { $dl = $cloud } }
             'iphone' { if (-not $IPhoneIpsw) { $dl = $phone } }
             'devicetree' { $dl = $Bytes.DtFixup }
-            'gpu' { if (-not $GpuPlugin) { $dl = $Bytes.GpuPlugin } }
+            'gpudriver' { if (-not $GpuPlugin) { $dl = $Bytes.GpuPlugin } }
             'collections' { if ($Collections) { $sec = 900; $add = 1.5; $keep = 1.5 } }
         }
         if ($how -eq 'helper' -and $r.Linux) { $sec = if ($r.H) { $r.H } else { $sec * $HelperFactor } }
@@ -458,7 +460,7 @@ function Save-State([hashtable]$keys) {
     ($o | ConvertTo-Json) | Set-Content -Encoding UTF8 $State
 }
 function Version-Name([string]$v) {
-    switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'both' { L 'iOS 16 and iOS 26' 'iOS 16 ve iOS 26' } }
+    switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'both' { L 'iOS 16 and iOS 26' 'iOS 16 ve iOS 26' } 'watchos' { 'watchOS' } 'ios16-watchos' { L 'iOS 16 and watchOS' 'iOS 16 ve watchOS' } }
 }
 function Linux-Name([string]$h) { if ($h -eq 'helper') { L 'without WSL' "WSL'siz" } else { 'WSL' } }
 # watchOS's sources for setup.json, so a resumed run (with no arguments) has them again: the watch QEMU
@@ -510,11 +512,15 @@ if (-not $Version) {
           (L 'no WSL and no administrator needed; about an hour' 'WSL ve yönetici izni gerekmez; yaklaşık bir saat'), $false),
         @((L "iOS 26.6.2 (iPhone 16): research preview, drawn by your PC's GPU" "iOS 26.6.2 (iPhone 16): araştırma önizlemesi, PC'nin GPU'suyla çizilir"),
           (L 'two to three hours, about 50 GB at its peak; a Vulkan GPU' 'iki üç saat sürer, en çok yaklaşık 50 GB; Vulkan destekli GPU'), $false),
-        @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false)) 0
-    $Version = @('ios16', 'ios26', 'both')[$i]
+        @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false),
+        @((L 'watchOS 27.2 only (Apple Watch Series 9)' 'Yalnız watchOS 27.2 (Apple Watch Series 9)'), (L 'iOS 26 is not needed, only the base it shares; WSL' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL'), (-not $TW))) 0
+    $Version = @('ios16', 'ios26', 'both', 'watchos')[$i]
 }
-$Want16 = $Version -ne 'ios26'
-$Want26 = $Version -ne 'ios16'
+$Want16 = $Version -ceq 'ios16' -or $Version -ceq 'both' -or $Version -ceq 'ios16-watchos'
+# watchOS alone needs only what it shares with iOS 26 (Install-iOS26.ps1 -Base)
+$BaseOnly = $Version -ceq 'watchos' -or $Version -ceq 'ios16-watchos'
+$Want26 = $Version -cne 'ios16'
+if ($BaseOnly) { $Watch = 'yes'; if (-not $Linux) { $Linux = 'wsl' } }
 
 # --- 1b. watchOS on iOS 26 ---------------------------------------------------------------------
 $WantWatch = $false
@@ -662,6 +668,7 @@ if ($Want26) {
 }
 if ($WantWatch) { $Plans['watch'] = @(Plan-Watch) }
 function Row-Name([string]$k) {
+    if ($BaseOnly -and $k -clike 'ios26-*') { return (L 'What watchOS shares with iOS 26' 'watchOS''un iOS 26 ile paylaştığı') }
     switch ($k) { 'watch' { 'watchOS 27.2' } 'ios16' { 'iOS 16' } 'ios26-wsl' { L 'iOS 26, fast install (WSL)' 'iOS 26, hızlı kurulum (WSL)' } 'ios26-helper' { L 'iOS 26, without WSL' 'iOS 26, WSL''siz' } }
 }
 Write-Host ''
@@ -692,7 +699,7 @@ foreach ($st in $Chosen) {
 }
 Emit 'total', ([long]$Total.Dl), ([int]$Total.S), ([long]$Total.Peak), ([long]$Total.After), ([long]$Total.Need), ([long]$freeB), $bwNote
 Write-Host ''
-Write-Host ('  {0}: {1}, {2} {3}, {4} {5} / {6}, ~{7}' -f (L 'Your choice' 'Seçiminiz'), "$(Version-Name $Version)$(if ($WantWatch) { ' + watchOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' })",
+Write-Host ('  {0}: {1}, {2} {3}, {4} {5} / {6}, ~{7}' -f (L 'Your choice' 'Seçiminiz'), "$(Version-Name $Version)$(if ($WantWatch -and -not $BaseOnly) { ' + watchOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' })",
     (L 'download' 'indirme'), (Fmt-Size $Total.Dl), (L 'disk' 'disk'), (Fmt-Size $Total.Peak), (Fmt-Size $Total.After), (Fmt-Time $Total.S)) -ForegroundColor White
 Write-Host ('  {0}: {1}   ({2} {3} {4})' -f (L 'Folder' 'Klasör'), $Dir, (Fmt-Size $freeB), (L 'free on' 'boş:'), ([IO.Path]::GetPathRoot($Dir))) -ForegroundColor White
 if ($Want26 -and $Linux -eq 'wsl' -and $wslState -eq 'bare') {
@@ -798,6 +805,7 @@ if ($KeepBuildFiles) { $Args26 += '-KeepBuildFiles' }
 if ($BakeMinutes) { $Args26 += '-BakeMinutes', "$BakeMinutes" }
 if ($Ios26Config) { $Args26 += '-Config', [IO.Path]::GetFullPath($Ios26Config) }
 if ($NoShortcut) { $Args26 += '-NoShortcut' }
+if ($BaseOnly) { $Args26 += '-Base' }
 $ArgsW = @('-Work', $Work)
 if ($Ios26Config) { $ArgsW += '-Config', [IO.Path]::GetFullPath($Ios26Config) }
 if ($WatchIpsw) { $ArgsW += '-WatchIpsw', [IO.Path]::GetFullPath($WatchIpsw) }
@@ -940,7 +948,7 @@ try {
     }
     foreach ($v in @('ios16', 'ios26', 'watch')) {
         if (($v -eq 'ios16' -and -not $Want16) -or ($v -eq 'ios26' -and -not $Want26) -or ($v -eq 'watch' -and -not $WantWatch)) { continue }
-        $name = switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'watch' { 'watchOS' } }
+        $name = switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L 'The base watchOS shares with iOS 26' 'watchOS''un iOS 26 ile paylaştığı taban' } else { 'iOS 26' } } 'watch' { 'watchOS' } }
         # ASoftware.exe asked for a pause: before the next installer, as the installers do before a step
         if (-not $DryRun -and (Pause-Requested)) { $rc = 5; Emit 'paused', $v, ''; break }
         Write-Host ''
@@ -972,7 +980,7 @@ if ($DryRun) {
 # --- 7. What it took ---------------------------------------------------------------------------
 $t1 = Get-Date
 $lines = @()
-$lines += (L 'ASoftware iOS setup' 'ASoftware iOS kurulumu') + " $(Version-Name $Version)$(if ($WantWatch) { ' + watchOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' }): $($t0.ToString('yyyy-MM-dd HH:mm')) - $($t1.ToString('HH:mm'))"
+$lines += (L 'ASoftware iOS setup' 'ASoftware iOS kurulumu') + " $(Version-Name $Version)$(if ($WantWatch -and -not $BaseOnly) { ' + watchOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' }): $($t0.ToString('yyyy-MM-dd HH:mm')) - $($t1.ToString('HH:mm'))"
 $lines += (L 'Time' 'Süre') + ": $(Fmt-Time ($t1 - $t0).TotalSeconds) (" + (L 'estimate' 'tahmin') + " $(Fmt-Time $Total.S))"
 foreach ($v in $results.Keys) {
     $r = $results[$v]
@@ -1012,7 +1020,7 @@ if ($null -ne $net0) {
 $lines += (L 'Where' 'Nerede') + ':'
 $lines += "  $Dir   (" + (L 'the app' 'uygulama') + '), ' + "$Work   (" + (L 'disks, downloads, runs' 'diskler, indirilenler, çalışmalar') + ')'
 if ($Want16) { $lines += '  iOS 16: ' + (Join-Path $Dir 'Start-iOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'desktop shortcut "ASoftware iOS"' 'masaüstü kısayolu "ASoftware iOS"') + ')' }) }
-if ($Want26) { $lines += '  iOS 26: ' + (Join-Path $Dir 'ios26\Start-iOS26.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware iOS 26"' 'Başlat menüsü "ASoftware iOS 26"') + ')' }) + '; ' + (L 'logs' 'loglar') + ': ' + (Join-Path $Work 'install\logs') }
+if ($Want26 -and -not $BaseOnly) { $lines += '  iOS 26: ' + (Join-Path $Dir 'ios26\Start-iOS26.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware iOS 26"' 'Başlat menüsü "ASoftware iOS 26"') + ')' }) + '; ' + (L 'logs' 'loglar') + ': ' + (Join-Path $Work 'install\logs') }
 if ($WantWatch) { $lines += '  watchOS: ' + (Join-Path $Dir 'Start-watchOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware watchOS"' 'Başlat menüsü "ASoftware watchOS"') + ')' }) }
 Write-Host ''
 foreach ($l in $lines) { Write-Host $l }
@@ -1030,6 +1038,21 @@ if ($rc) {
     Write-Host ''
     Write-Host (L 'The install stopped. Fix what the installer says above and run Install-ASoftware.cmd again: it goes on where it stopped.' 'Kurulum durdu. Kurucunun yukarıda söylediğini düzeltip Install-ASoftware.cmd''yi yeniden çalıştırın: kaldığı yerden devam eder.') -ForegroundColor Yellow
     exit $rc
+}
+# ASoftware.exe: one place to start, set up and save every OS (the package has it from this version on)
+$appExe = Join-Path $Dir 'ASoftware.exe'
+if (-not $NoShortcut -and (Test-Path -LiteralPath $appExe)) {
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($place in [Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')) {
+            $link = $shell.CreateShortcut((Join-Path $place 'ASoftware.lnk'))
+            $link.TargetPath = $appExe
+            $link.WorkingDirectory = $Dir
+            $link.Description = L 'Install, start and set up iOS and watchOS' 'iOS ve watchOS kur, başlat, ayarla'
+            $link.Save()
+        }
+        Write-Host (L 'ASoftware is on the desktop and in the Start menu.' 'ASoftware masaüstünde ve Başlat menüsünde.')
+    } catch { Write-Host "ASoftware.lnk: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 Save-State @{ Stage = 'done' }
 Emit 'end', 'setup', 0

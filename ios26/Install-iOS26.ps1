@@ -24,6 +24,8 @@
 #     -Linux auto|wsl|helper   where the Linux steps run: WSL 2, or the helper VM; auto (the
 #                    default): WSL if it is installed, else the helper VM. Remembered
 #     -DryRun        print every command the steps would run; runs nothing
+#     -Base          only what watchOS shares with iOS 26 (cloudOS's firmware, the device trees, the
+#                    ramdisk, the sysroot, the GPU driver): $BaseSteps below. iOS 26 itself can follow later
 #     -From STEP     redo STEP and every step after it; -Only STEP redoes just that one (a disk
 #                    step: the disk steps after it are redone on the next run)
 #     -Collections   also build the lighter Collections wallpaper disk (README.md 5.3.6), as when
@@ -62,6 +64,7 @@ param(
     [switch]$Collections,
     [switch]$NoCollections,
     [ValidateRange(1, 120)][int]$BakeMinutes = 6,
+    [switch]$Base,
     [switch]$KeepBuildFiles,
     [switch]$NoShortcut,
     [ValidateSet('', 'auto', 'wsl', 'helper')][string]$Linux = ''
@@ -1187,7 +1190,7 @@ function Do-CloudOs {
         # it is not here)
         if ($m -ceq "$CloudOsGpuImage.aea") {
             if ((Gpu-Route) -cne 'cloudos') { Say "$m`: not needed (the GPU driver is not taken from cloudOS)" DarkGray; continue }
-            if ((Get-Mark 'gpu') -ceq (Step-Sig 'gpu')) { Say "$m`: its GPU driver is on the disk already"; continue }
+            if ((Get-Mark 'gpu') -ceq (Step-Sig 'gpu') -or (Get-Mark 'gpudriver') -ceq (Step-Sig 'gpudriver')) { Say "$m`: its GPU driver is out of it already"; continue }
         }
         Get-IpswMember (CloudOs-Source) $m (In-Work ('cloudos\' + ($m -replace '/', '\'))) $CloudOsFiles[$m]
     }
@@ -1439,21 +1442,19 @@ function Set-BootKc([bool]$gles) {
     }
 }
 
-function Do-Gpu {
-    # 5.2: the guest GPU driver into /System/Library/Extensions (root:wheel, 755/644), its Mach-Os'
-    # CDHashes into the trust cache. GpuMode cloudos: Apple's bundle out of the cloudOS OS image
-    # (cloudos-gpu-driver.sh: its binary's CDHash must be in that image's trust cache) and the
-    # compiler plugin; gpu: the folder you chose, as it is. Without one (GPU-less) no GPU layer.
+function Do-GpuDriver([switch]$Again) {
+    # The guest GPU driver in gpu-driver\<bundle>, once, for every guest (Install-watchOS.ps1 retargets its
+    # own copy; the gpu step puts it on iOS 26's disk). GpuMode cloudos: Apple's bundle out of the cloudOS OS
+    # image (cloudos-gpu-driver.sh: its binary's CDHash must be in that image's trust cache) and the compiler
+    # plugin; gpu: the folder you chose, as it is. A few MB, where the 755 MB image is dropped once it is out.
     $route = Gpu-Route
-    Set-BootKc ($route -ceq 'cloudos' -and -not $GpuPlugin)
-    if (-not $route) {
-        Say 'GPU-less (no guest GPU driver in the config): no GPU layer' Yellow
-        foreach ($f in 'root26-gpu.qcow2', 'root26-gpu.tc') { if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; if (-not $DryRun) { Remove-Item (In-Work $f); Drop-Owned $f } } }
-        return
-    }
-    $copy = In-Work "install\work\gpu\$GpuBundle"
+    if (-not $route) { Say 'GPU-less (no guest GPU driver in the config): none to fetch' Yellow; return }
+    if (-not $Again -and (Get-Mark 'gpu') -ceq (Step-Sig 'gpu')) { Say "iOS 26's gpu step has made its GPU layer: its driver is here already"; return }
+    $out = In-Work 'install\work\gpu'
+    $copy = Join-Path $out $GpuBundle
+    Show-Cmd "del install\work\gpu (if there)"
+    if (-not $DryRun) { Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue }
     if ($route -ceq 'cloudos') {
-        $driver = "cloudos\$CloudOsGpuImage.aea"
         $plugin = Gpu-Plugin
         $why = Plugin-Missing
         if ($why) {
@@ -1462,8 +1463,6 @@ function Do-Gpu {
             Get-File $GpuPluginRelease.Url $plugin $GpuPluginRelease.Sha256
         }
         Need-GpuImage
-        Show-Cmd "del install\work\gpu (if there)"
-        if (-not $DryRun) { Remove-Item (In-Work 'install\work\gpu') -Recurse -Force -ErrorAction SilentlyContinue }
         $body = 'bash $S/cloudos-gpu-driver.sh cloudos/{IMG}.aea install/work/gpu cloudos/Firmware/{IMG}.aea.trustcache'
         if ($LinuxMode -ceq 'helper') {
             # decrypted by ipsw.exe; the helper VM reads the bundle off it (apfs-fuse)
@@ -1484,21 +1483,9 @@ function Do-Gpu {
         Need-Space $Space.gpu
         Copy-Tree $driver $copy
     }
-    $files = if ($DryRun) { @("$copy\...") } else { @(Get-ChildItem $copy -Recurse -File | ForEach-Object FullName) }
-    $hashes = Hashes (Py 'cdhash.py' $files)
-    if (-not $DryRun -and -not $hashes) { Fail "no signed Mach-O in $driver (is it $GpuBundle?)" }
-    if (-not $DryRun -and $route -ceq 'cloudos' -and $hashes.Count -lt 2) { Fail "the compiler plugin $plugin is not a signed Mach-O" }
-    $list = In-Work 'install\work\gpu.hashes'
-    Show-Cmd "$list = the CDHashes above"
-    if (-not $DryRun) { New-Item -ItemType Directory -Force (Split-Path $list) | Out-Null; Set-Content $list $hashes -Encoding ASCII }
-    $null = Py 'mktc.py' @('-2', (In-Work 'root26-gpu.tc'), (In-Work 'root26-apps.tc'), $list)
-    $body = Step-Body 'gpu'
-    $null = Run-Linux 'gpu' $body.Replace('{BUNDLE}', $GpuBundle) -In @('install/work/gpu')
-    # kept for the other guests (Install-watchOS.ps1 retargets its own copy): a few MB, which the
-    # cleanup leaves, where the 755 MB image it came out of would otherwise be downloaded again
     # (copied under another name and renamed: an interrupted copy never looks like the driver)
     $shared = In-Work "gpu-driver\$GpuBundle"
-    Show-Cmd "copy $copy -> $shared"
+    Show-Cmd "move $copy -> $shared"
     if (-not $DryRun) {
         $new = In-Work 'gpu-driver\.new'
         Remove-Item $new -Recurse -Force -ErrorAction SilentlyContinue
@@ -1507,9 +1494,39 @@ function Do-Gpu {
         Remove-Item $shared -Recurse -Force -ErrorAction SilentlyContinue
         Move-Item (Join-Path $new $GpuBundle) $shared
         Remove-Item $new -Force
+        Remove-Item $out -Recurse -Force
     }
-    # the driver is out of it (a gpu step redone later gets the image again)
+    # the driver is out of it (a redo of this step gets the image again)
     if ($route -ceq 'cloudos') { Drop-Aea $CloudOsGpuImage 'cloudos' }
+}
+
+function Do-Gpu {
+    # 5.2: the guest GPU driver into /System/Library/Extensions (root:wheel, 755/644), its Mach-Os'
+    # CDHashes into the trust cache. GpuMode cloudos: Apple's bundle out of the cloudOS OS image
+    # (cloudos-gpu-driver.sh: its binary's CDHash must be in that image's trust cache) and the
+    # compiler plugin; gpu: the folder you chose, as it is. Without one (GPU-less) no GPU layer.
+    $route = Gpu-Route
+    Set-BootKc ($route -ceq 'cloudos' -and -not $GpuPlugin)
+    if (-not $route) {
+        Say 'GPU-less (no guest GPU driver in the config): no GPU layer' Yellow
+        foreach ($f in 'root26-gpu.qcow2', 'root26-gpu.tc') { if (Test-Path (In-Work $f)) { Show-Cmd "del $f"; if (-not $DryRun) { Remove-Item (In-Work $f); Drop-Owned $f } } }
+        return
+    }
+    $copy = In-Work "install\work\gpu\$GpuBundle"
+    $driver = In-Work "gpu-driver\$GpuBundle"
+    # (an install from before the gpudriver step, redoing this one)
+    if (-not $DryRun -and -not (Test-Path $driver -PathType Container)) { Do-GpuDriver -Again }
+    Copy-Tree $driver $copy
+    $files = if ($DryRun) { @("$copy\...") } else { @(Get-ChildItem $copy -Recurse -File | ForEach-Object FullName) }
+    $hashes = Hashes (Py 'cdhash.py' $files)
+    if (-not $DryRun -and -not $hashes) { Fail "no signed Mach-O in $driver (is it $GpuBundle?)" }
+    if (-not $DryRun -and $route -ceq 'cloudos' -and $hashes.Count -lt 2) { Fail "the compiler plugin $(Gpu-Plugin) is not a signed Mach-O" }
+    $list = In-Work 'install\work\gpu.hashes'
+    Show-Cmd "$list = the CDHashes above"
+    if (-not $DryRun) { New-Item -ItemType Directory -Force (Split-Path $list) | Out-Null; Set-Content $list $hashes -Encoding ASCII }
+    $null = Py 'mktc.py' @('-2', (In-Work 'root26-gpu.tc'), (In-Work 'root26-apps.tc'), $list)
+    $body = Step-Body 'gpu'
+    $null = Run-Linux 'gpu' $body.Replace('{BUNDLE}', $GpuBundle) -In @('install/work/gpu')
 }
 
 function Do-Wallpaper {
@@ -1648,6 +1665,7 @@ $Steps = @(
     @{ Id = 'firmware';    Readme = '3.1, 3.2';             Kind = 'once';   Title = 'Firmware: device tree, kernelcache, SPTM, TXM' }
     @{ Id = 'devicetree';  Readme = '3.3';                  Kind = 'once';   Title = 'The device trees for 4 and 8 vCPUs' }
     @{ Id = 'ramdisk';     Readme = '3.4, 3.5';             Kind = 'once';   Title = 'Sysroot check and the shell ramdisk' }
+    @{ Id = 'gpudriver';   Readme = '5.2';                  Kind = 'once';   Title = 'The guest GPU driver, out of cloudOS (iOS 26 and watchOS share it)' }
     @{ Id = 'rootfs';      Readme = '4.1';                  Kind = 'chain';  Title = 'The root file system (root26.qcow2)' }
     @{ Id = 'trustcache';  Readme = '4.2';                  Kind = 'chain';  Title = 'Its trust cache (root26.tc)' }
     @{ Id = 'partition';   Readme = '4.3';                  Kind = 'chain';  Title = 'The partitioned disk (root26g.qcow2)' }
@@ -1662,6 +1680,9 @@ $Steps = @(
     @{ Id = 'cleanup';     Readme = '-';                    Kind = 'always'; Title = 'Remove what only the build needs' }
     @{ Id = 'shortcut';    Readme = 'Start menu and setup'; Kind = 'always'; Title = 'Checklist and Start menu shortcut' }
 )
+# What watchOS shares with iOS 26 (-Base): enough for Install-watchOS.ps1; the iOS 26 install can follow
+# on the same work folder, its steps here counting as done
+$BaseSteps = @('setup', 'prereq', 'python', 'qemu', 'linux', 'sysroot', 'cloudos', 'firmware', 'devicetree', 'ramdisk', 'gpudriver')
 # The files a step builds on, and the step that makes each: checked before the step (or the run
 # loop, for a disk step) changes anything
 $Boot = @(@('fw\bootkc', 'firmware'), @('fw\sptm', 'firmware'), @('fw\txm', 'firmware'), @('dtree-smp4', 'devicetree'),
@@ -1702,6 +1723,7 @@ function Step-Sig([string]$id) {
             if ($r -ceq 'cloudos') { return "cloudos $CloudOsGpuImage plugin $(Plugin-Sig)" }
             if ($r) { return "gpu $(Gpu-Driver)" } else { return 'gpuless' }
         }
+        'gpudriver' { return (Step-Sig 'gpu') }
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
         # aod: the apps step with Always On Display and Auto-Lock Never (an install before it redoes
         # apps and the layers on it)
@@ -1725,6 +1747,7 @@ function Invoke-Step([string]$id) {
         'firmware' { Do-Firmware }
         'devicetree' { Do-DeviceTree }
         'ramdisk' { Do-Ramdisk }
+        'gpudriver' { Do-GpuDriver }
         'rootfs' { Do-Rootfs }
         'trustcache' { Do-TrustCache }
         'partition' { Do-Partition }
@@ -1791,6 +1814,7 @@ if ($List) {
     $i = 0
     foreach ($s in $Steps) {
         $i++
+        if ($Base -and $BaseSteps -cnotcontains $s.Id) { continue }
         $m = Get-Mark $s.Id
         $state = if ($s.Kind -ceq 'always') { 'every run' } elseif ($m -and $m -ceq (Step-Sig $s.Id)) { 'done' } elseif ($m) { 'redo' } else { '-' }
         Write-Host ("  {0,2} {1,-12} {2,-9} README.md {3,-22} {4}" -f $i, $s.Id, $state, $s.Readme, $s.Title)
@@ -1865,6 +1889,7 @@ $chainRedone = $false
 $topRetired = $false
 for ($i = 0; $i -lt $Steps.Count; $i++) {
     $s = $Steps[$i]
+    if ($Base -and $BaseSteps -cnotcontains $s.Id) { continue }
     $forced = ($From -and $i -ge $fromIdx) -or ($Only -ceq $s.Id)
     $label = "{0}/{1} {2}: {3} (README.md, Build: {4})" -f ($i + 1), $Steps.Count, $s.Id, $s.Title, $s.Readme
     if ($s.Kind -cne 'always' -and -not $forced) {
@@ -1923,6 +1948,8 @@ Emit 'end', 'ios26', 0
 Write-Host ''
 if ($DryRun) {
     Write-Host 'Dry run: nothing was run.' -ForegroundColor Cyan
+} elseif ($Base) {
+    Write-Host "Done: the base watchOS shares with iOS 26, in $Work. watchos\Install-watchOS.cmd builds on it; Install-iOS26.cmd goes on from it." -ForegroundColor Cyan
 } elseif ($Only) {
     Write-Host "Done: $Only. Run Install-iOS26.cmd again to go on with what is not done (-List shows it)." -ForegroundColor Cyan
 } else {

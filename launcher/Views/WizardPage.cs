@@ -56,9 +56,9 @@ namespace ASoftware.Views
             {
                 page = 0;
                 choice.Ios16 = os == "ios16";
-                choice.Ios26 = os == "ios26" || (os == "watch" && !Guests.Installed("ios26"));
+                choice.Ios26 = os == "ios26";
                 choice.Watch = os == "watch";
-                if (os == "watch" && Guests.Installed("ios26")) { choice.Ios26 = true; FromIos26Install(); }
+                if (os == "watch" && Guests.Installed("ios26")) FromIos26Install();
             }
             Build();
         }
@@ -193,16 +193,12 @@ namespace ASoftware.Views
             c16 = OsChoice("ios16", choice.Ios16, L.T("Ready to use: Safari and .ipa apps. No WSL, no administrator.", "Kullanıma hazır: Safari ve .ipa uygulamaları. WSL ve yönetici izni gerekmez."),
                 L.T("about 40 min · 6.4 GB download", "yaklaşık 40 dk · 6,4 GB indirme"), v => choice.Ios16 = v);
             c26 = OsChoice("ios26", choice.Ios26, L.T("A research preview drawn by your PC's GPU (Vulkan), Liquid Glass included.", "PC'nizin GPU'suyla (Vulkan) çizilen bir araştırma önizlemesi, Liquid Glass dahil."),
-                L.T("1.5–2.5 h · 11 GB download · ~50 GB at its peak", "1,5–2,5 sa · 11 GB indirme · en çok ~50 GB"), v =>
-                {
-                    choice.Ios26 = v;
-                    if (!v && choice.Watch && !Guests.Installed("ios26")) { choice.Watch = false; if (cw != null) cw.IsChecked = false; }
-                });
-            cw = OsChoice("watch", choice.Watch, L.T("Apple Watch Series 9 in a drawn case; the crown, the side button. Built on iOS 26's base.", "Çizilmiş kasada Apple Watch Series 9; kuron, yan düğme. iOS 26'nın tabanı üstüne kurulur."),
-                L.T("about 30 min more · 5 GB download · WSL", "yaklaşık 30 dk daha · 5 GB indirme · WSL"), v =>
+                L.T("1.5–2.5 h · 11 GB download · ~50 GB at its peak", "1,5–2,5 sa · 11 GB indirme · en çok ~50 GB"), v => choice.Ios26 = v);
+            cw = OsChoice("watch", choice.Watch, L.T("Apple Watch Series 9 in a drawn case; the crown, the side button. Needs only the base it shares with iOS 26.", "Çizilmiş kasada Apple Watch Series 9; kuron, yan düğme. iOS 26'nın yalnız ortak tabanını ister."),
+                L.T("about 35 min · 6.5 GB download · WSL", "yaklaşık 35 dk · 6,5 GB indirme · WSL"), v =>
                 {
                     choice.Watch = v;
-                    if (v) { choice.Ios26 = true; if (c26 != null) c26.IsChecked = true; if (Guests.Installed("ios26")) FromIos26Install(); }
+                    if (v && Guests.Installed("ios26")) FromIos26Install();
                 });
             cards.Children.Add(c16); cards.Children.Add(c26); cards.Children.Add(cw);
             p.Children.Add(cards);
@@ -217,7 +213,7 @@ namespace ASoftware.Views
             var g = new StackPanel { Width = 250 };
             var head = new Border { Height = 92, CornerRadius = new CornerRadius(12), Background = Theme.OsGradient(os), Margin = new Thickness(0, 0, 0, 12), ClipToBounds = true };
             var hg = new Grid();
-            hg.Children.Add(new DeviceGlyph { Os = os, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, -6, 0), RenderTransform = new ScaleTransform(0.52, 0.52) });
+            hg.Children.Add(new DeviceGlyph { Os = os, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 8, 0), RenderTransform = new ScaleTransform(0.52, 0.52) });
             hg.Children.Add(new TextBlock { Text = Guests.Name(os), Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, FontFamily = Ui.F("DisplayFont"), VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(14, 0, 0, 10) });
             head.Child = hg;
             g.Children.Add(head);
@@ -235,7 +231,7 @@ namespace ASoftware.Views
         void How()
         {
             var p = Page(L.K("HowToBuild"), null);
-            if (choice.Ios26)
+            if (choice.Ios26 || choice.Watch)
             {
                 p.Children.Add(new TextBlock { Text = L.K("LinuxTools"), Style = Ui.S("H3"), Margin = new Thickness(0, 18, 0, 8) });
                 var wslNote = wslState == "" ? L.T("looking at WSL…", "WSL'e bakılıyor…")
@@ -269,7 +265,7 @@ namespace ASoftware.Views
             void Free()
             {
                 var ok = Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$");
-                free.Text = (ok || !choice.Ios26 ? "" : L.T("iOS 26 needs a folder on a drive letter without spaces or shell characters. ", "iOS 26 sürücü harfli, boşluk ve kabuk karakteri içermeyen bir klasör ister. "))
+                free.Text = (ok || !(choice.Ios26 || choice.Watch) ? "" : L.T("iOS 26 needs a folder on a drive letter without spaces or shell characters. ", "iOS 26 sürücü harfli, boşluk ve kabuk karakteri içermeyen bir klasör ister. "))
                     + L.Size(Native.FreeBytes(choice.Dir)) + " " + L.T("free on ", "boş: ") + Path.GetPathRoot(choice.Dir);
             }
             dir.TextChanged += (s, e) => { choice.Dir = dir.Text.Trim(); Free(); };
@@ -286,7 +282,7 @@ namespace ASoftware.Views
             var back = Ui.Btn(L.K("Back"), () => { page = 0; Build(); });
             var next = Ui.Btn(L.K("Next"), () =>
             {
-                if (choice.Ios26 && !Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$")) { main.Snack(L.T("Choose a folder without spaces for iOS 26.", "iOS 26 için boşluksuz bir klasör seçin."), "warn"); return; }
+                if ((choice.Ios26 || choice.Watch) && !Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$")) { main.Snack(L.T("Choose a folder without spaces for iOS 26.", "iOS 26 için boşluksuz bir klasör seçin."), "warn"); return; }
                 if (choice.Watch) choice.Linux = "wsl";
                 page = 2; Build(); Check();
             }, "BtnPrimary", "\uE72A");
@@ -419,7 +415,7 @@ namespace ASoftware.Views
                 var key = os == "ios26" ? "ios26-" + choice.Linux : os;
                 estimate.Options.TryGetValue(key, out var o);
                 int done = steps.Count(s => s.State == "skip");
-                Cell(Guests.Name(os) + (done > 0 ? L.T($"  ({done} of {steps.Count} steps done)", $"  ({steps.Count} adımın {done}'i bitti)") : ""), 0);
+                Cell(Head(os) + (done > 0 ? L.T($"  ({done} of {steps.Count} steps done)", $"  ({steps.Count} adımın {done}'i bitti)") : ""), 0);
                 Cell(L.Size(steps.Where(s => s.State != "skip").Sum(s => s.Download)), 1);
                 Cell(o != null ? L.Size(o[2]) : "", 2);
                 Cell(o != null ? L.Size(o[3]) : "", 3);
@@ -433,6 +429,9 @@ namespace ASoftware.Views
             foreach (var s in estimate.Stops) sp.Children.Add(Line("Bad", "\uEA39", s));
             return Box(estimate.Stops.Count > 0 ? "Bad" : estimate.Warnings.Count > 0 ? "Warn" : "Line", sp);
         }
+
+        // watchOS without iOS 26: its "ios26" steps are the base they share
+        string Head(string os) => os == "ios26" && !choice.Ios26 ? L.T("The base watchOS shares with iOS 26", "watchOS'un iOS 26 ile paylaştığı taban") : Guests.Name(os);
 
         static UIElement Line(string tone, string icon, string text)
         {
@@ -507,6 +506,8 @@ namespace ASoftware.Views
                 if (j.Result == "paused" || j.Result == "failed")
                     buttons.Add(Ui.Btn(L.K("Resume"), () => { Resume(j.Choice); }, "BtnPrimary", "\uE768"));
                 buttons.Add(Ui.Btn(L.T("Back to home", "Ana sayfaya dön"), () => main.GoHome(), j.Result == "done" ? "BtnPrimary" : "Btn", "\uE80F"));
+                if (j.Result == "failed")
+                    buttons.Add(Ui.Btn(L.T("Report this", "Bunu bildir"), () => main.OpenReport("install", L.T("The install stopped", "Kurulum durdu"), j.Message), "BtnGhost", "\uEBE8"));
             }
             buttons.Add(Ui.Btn(L.K("ShowLog"), () => { showLog = !showLog; Build(); }, "BtnGhost", "\uE9F9"));
             p.Children.Add(Nav(buttons.ToArray()));
@@ -557,7 +558,7 @@ namespace ASoftware.Views
                     var steps = j.Plan.Where(s => s.Os == os).ToList();
                     if (steps.Count == 0) continue;
                     var rows = steps.Select(s => StepRow(s)).ToArray();
-                    runSteps.Children.Add(Ui.Group(Guests.Name(os), rows));
+                    runSteps.Children.Add(Ui.Group(Head(os), rows));
                 }
             }
             if (logBox != null && j.Runner != null)

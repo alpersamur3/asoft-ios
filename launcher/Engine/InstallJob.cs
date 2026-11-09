@@ -53,9 +53,10 @@ namespace ASoftware.Engine
         public static string Args(InstallChoice c, string mode)
         {
             var a = new List<string>();
-            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : "ios16";
+            // watchOS without iOS 26: Setup makes only the base they share
+            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : c.Watch ? (c.Ios16 ? "ios16-watchos" : "watchos") : "ios16";
             a.Add("-Version"); a.Add(ver);
-            if (c.Ios26) { a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no"); a.Add("-Linux"); a.Add(c.Linux); }
+            if (c.Ios26 || c.Watch) { a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no"); a.Add("-Linux"); a.Add(c.Linux); }
             a.Add("-Dir"); a.Add(Runner.Q(c.Dir));
             a.Add("-Lang"); a.Add(L.Lang);
             if (mode != null) a.Add(mode);
@@ -126,11 +127,11 @@ namespace ASoftware.Engine
             try { if (File.Exists(AppPaths.PauseFile)) File.Delete(AppPaths.PauseFile); } catch { }
             // iOS 26's setup asks where its GPU driver comes from: the wizard's answer, in its config
             var conf = LauncherConfig.Current;
-            if (c.Ios26)
+            if (c.Ios26 || c.Watch)
             {
                 conf.Ios26.GpuMode = c.GpuMode;
                 conf.Ios26.GpuDriver = c.GpuMode == "gpu" ? c.GpuDriver : "";
-                if (conf.Ios26.Work == "" || !Guests.Installed("ios26")) conf.Ios26.Work = j.Ios26Work;
+                if (c.Ios26 && (conf.Ios26.Work == "" || !Guests.Installed("ios26"))) conf.Ios26.Work = j.Ios26Work;
                 conf.WriteIos26Config();
             }
             if (c.Ios16 && (conf.Ios16.Work == "" || !Guests.Installed("ios16"))) { conf.Ios16.Work = Path.Combine(c.Dir, "work"); conf.Ios16.App = c.Dir; }

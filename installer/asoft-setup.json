@@ -81,6 +81,22 @@
       "IMG": "094-39278-029.dmg",
       "BUNDLE": "AppleParavirtGPUMetalIOGPUFamily.bundle",
       "PLUGIN": "libAppleParavirtCompilerPluginIOGPUFamily.dylib"
+    },
+    "base": {
+      "steps": [
+        "setup",
+        "prereq",
+        "python",
+        "qemu",
+        "linux",
+        "sysroot",
+        "cloudos",
+        "firmware",
+        "devicetree",
+        "ramdisk",
+        "gpudriver"
+      ],
+      "note": "Install-iOS26.ps1 -Base runs only these: all watchOS needs from iOS 26. iOS 26 can follow on the same work folder."
     }
   },
   "os": {
@@ -470,6 +486,34 @@
           ]
         },
         {
+          "id": "gpudriver",
+          "title": "The guest GPU driver, out of cloudOS (iOS 26 and watchOS share it)",
+          "kind": "once",
+          "shared": true,
+          "linux": [
+            {
+              "name": "gpu-driver",
+              "disks": [
+                {
+                  "ro": "install/work/gpu-img/{IMG}",
+                  "at": "cloudos/{IMG}"
+                }
+              ],
+              "in": [
+                "cloudos/Firmware/{IMG}.aea.trustcache"
+              ],
+              "out": [
+                "install/work/gpu"
+              ]
+            }
+          ],
+          "python": [],
+          "out": [
+            "gpu-driver/{BUNDLE}"
+          ],
+          "note": "Runs once for iOS 26 and watchOS. gpu-driver's body is a one-liner in the PS1 (bash $S/cloudos-gpu-driver.sh cloudos/{IMG}[.aea] install/work/gpu cloudos/Firmware/{IMG}.aea.trustcache); the compiler plugin is then copied into the bundle and the bundle is moved to gpu-driver/{BUNDLE}, then the image is dropped. iOS 26's gpu step and watchOS's gpu step read gpu-driver/{BUNDLE}."
+        },
+        {
           "id": "rootfs",
           "title": "The root file system (root26.qcow2)",
           "kind": "chain",
@@ -650,21 +694,6 @@
           "kind": "chain",
           "linux": [
             {
-              "name": "gpu-driver",
-              "disks": [
-                {
-                  "ro": "install/work/gpu-img/{IMG}",
-                  "at": "cloudos/{IMG}"
-                }
-              ],
-              "in": [
-                "cloudos/Firmware/{IMG}.aea.trustcache"
-              ],
-              "out": [
-                "install/work/gpu"
-              ]
-            },
-            {
               "name": "gpu",
               "disks": [
                 {
@@ -678,11 +707,12 @@
             }
           ],
           "python": [
+            "copy gpu-driver/{BUNDLE} install/work/gpu/{BUNDLE}",
             "cdhash.py install/work/gpu/{BUNDLE}/... > install/work/gpu.hashes",
             "mktc.py -2 root26-gpu.tc root26-apps.tc install/work/gpu.hashes",
             "kc-gles.py cloud/kernelcache.research.vphone600.decompressed fw/bootkc (the release's compiler plugin)"
           ],
-          "note": "gpu-driver's body is a one-liner in the PS1 (bash $S/cloudos-gpu-driver.sh cloudos/{IMG}[.aea] install/work/gpu cloudos/Firmware/{IMG}.aea.trustcache); the driver is kept in gpu-driver/{BUNDLE} for the other guests"
+          "note": "The step first copies gpu-driver/{BUNDLE} (the gpudriver step left it there) to install/work/gpu/{BUNDLE}, which its hashes and its gpu body read."
         },
         {
           "id": "wallpaper",
