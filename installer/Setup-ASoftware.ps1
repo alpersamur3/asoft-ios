@@ -1117,7 +1117,7 @@ $titler = [powershell]::Create()
         } catch { }
         Start-Sleep -Seconds 5
     }
-}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir).AddArgument($(if ($BaseOnly) { L 'watchOS base' 'watchOS tabanı' } else { 'iOS 26' }))
+}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir).AddArgument($(if ($VisionVer) { L 'visionOS base' 'visionOS tabanı' } elseif ($BaseOnly) { L 'watchOS base' 'watchOS tabanı' } else { 'iOS 26' }))
 $titlerRun = $null
 if (-not $DryRun) { $titlerRun = $titler.BeginInvoke() }
 $net0 = $null
