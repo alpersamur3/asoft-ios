@@ -459,7 +459,9 @@ function Step-Seconds($st, [double]$bps) {
 # download bytes, seconds, peak and after (GB, 10^9) of a list of steps, in order; Need: the room the
 # steps left to run still take (the peak less what finished steps left on the drive)
 function Sum-Plan($steps, [double]$bps) {
-    $dl = 0; $sec = 0; $cum = 0; $peak = 0; $there = 0
+    # (0.0: with an Int32 0, [Math]::Max($peak, ...) takes its Int32 overload and rounds every peak to whole GB,
+    # up to half a GB under what the steps take)
+    $dl = 0; $sec = 0; $cum = 0.0; $peak = 0.0; $there = 0.0
     foreach ($st in $steps) {
         if ($st.Done) { $cum += $st.Keep; $there = $cum; $peak = [Math]::Max($peak, $cum); continue }
         $dl += $st.Dl
