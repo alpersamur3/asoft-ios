@@ -19,9 +19,17 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 if (git -C $repo status --porcelain) { throw 'commit first: the package takes the committed files' }
 
+# Windows's own tar (bsdtar: it also writes the zip below), by its full path: started from Git Bash, "tar" is
+# MSYS's GNU tar, which reads C:\... as a host named C, unpacks nothing and makes no zip
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path $tar)) { throw "no $tar (Windows 10 1803 or later has it)" }
+
 git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Start-visionOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos visionos
-tar -x -f "$Out\src.tar" -C $stage
+if ($LASTEXITCODE) { throw "git archive failed ($LASTEXITCODE)" }
+& $tar -x -f "$Out\src.tar" -C $stage
+if ($LASTEXITCODE) { throw "tar could not unpack the repository's files into $stage ($LASTEXITCODE)" }
 Remove-Item "$Out\src.tar"
+if (-not (Test-Path "$stage\Install-ASoftware.cmd")) { throw "the repository's files did not reach $stage" }
 # ASoftware.exe, the launcher (install, start, settings), stamped with this version (its update check
 # compares it with the releases), in the package's root: Install-ASoftware.ps1 copies it into -Dir
 & (Join-Path $repo 'launcher\Build-Launcher.ps1') -Version $Version -Out $stage
@@ -41,7 +49,9 @@ $probe = @(& "$QemuDist\qemu-system-aarch64.exe" -device 'usb-touchscreen,help' 
 $ErrorActionPreference = 'Stop'
 if (-not ($probe | Where-Object { $_ -cmatch '\bwalk-hold-key=' })) { Write-Warning "$QemuDist's QEMU has no usb-touchscreen walk-hold-key: visionOS installs from this package need -VisionQemu" }
 robocopy $QemuDist "$stage\qemu\bin" /MIR /XD backup-* /NFL /NDL /NJH /NJS /NP | Out-Null
-$qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUILD.txt") -join '; ' } else { 'see its --version' }
+# (BUILD.txt's first line is the build's stamp, the commits it was built from; the lines under it are notes)
+$qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { "$(Get-Content "$QemuDist\BUILD.txt" -TotalCount 1)".Trim() } else { '' }
+if (-not $qemuBuild) { $qemuBuild = 'see its --version' }
 
 @"
 # Where the binaries in this package come from
@@ -62,7 +72,8 @@ $qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUIL
 
 $zip = Join-Path $Out "$name-win64.zip"
 if (Test-Path $zip) { Remove-Item $zip }
-tar -a -c -f $zip -C $Out $name
+& $tar -a -c -f $zip -C $Out $name
+if ($LASTEXITCODE -or -not (Test-Path $zip)) { throw "tar could not write $zip ($LASTEXITCODE)" }
 Copy-Item "$repo\installer\Get-ASoftware.ps1" $Out -Force
 $lines = foreach ($f in $zip, "$Out\Get-ASoftware.ps1") {
     '{0}  {1}' -f (Get-FileHash $f -Algorithm SHA256).Hash.ToLower(), (Split-Path $f -Leaf)
