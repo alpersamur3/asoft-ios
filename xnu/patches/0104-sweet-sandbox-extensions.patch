@@ -1,0 +1,151 @@
+diff --git a/bsd/kern/sweet_amfi.c b/bsd/kern/sweet_amfi.c
+index a747f4e..d3a95da 100644
+--- a/bsd/kern/sweet_amfi.c
++++ b/bsd/kern/sweet_amfi.c
+@@ -24,11 +24,14 @@
+  */
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <kern/debug.h>
++#include <kern/kalloc.h>
+ #include <kern/startup.h>
++#include <libkern/OSAtomic.h>
+ #include <libkern/amfi/amfi.h>
+ #include <mach/kern_return.h>
+ #include <sys/codesign.h>
+ #include <sys/mount.h>
++#include <sys/param.h>
+ #include <sys/priv.h>
+ #include <sys/proc.h>
+ #include <sys/systm.h>
+@@ -279,14 +282,114 @@ sweet_amfi_vnode_check_signature(struct vnode *vp, __unused struct label *label,
+  * launchd reports mach lookups as "error = 159: Sandbox restriction"
+  * (backboardd cannot reach mobilegestalt or iohideventsystem; tccd:
+  * "profile not found"). SWEET runs without a sandbox: operations succeed
+- * (checks allow, profile init is accepted); the few that must return
+- * data (container paths, extension tokens) fail with ENOENT. The first
+- * use of each operation number is logged.
++ * (checks allow, profile init is accepted); extension tokens are issued
++ * and consumed (below); the operations that must return a container
++ * path fail with ENOENT. The first use of each operation number is logged.
+  */
+ static uint64_t sweet_sandbox_seen;
+ 
++/*
++ * Extension tokens: op 5 issues one, op 6 consumes it. tccd issues a token
++ * with every grant of a service that has an extension class (Photos,
++ * AddressBook, ...) and turns a failed issue into a denial (kTCCErrorDomain
++ * 6), so assetsd aborted at every boot ("assetsd requires TCCPhotosService
++ * access"). There is no sandbox to extend: issue writes a token in
++ * Sandbox.kext's layout (zero HMAC) naming the class and the path, consume
++ * returns a new positive handle; release (7) and update (8) already succeed.
++ * Arguments as libsystem_sandbox (iOS 16.7) passes them:
++ *   issue    { class, type, data (path or NULL), flags, token (0x800 bytes),
++ *            pid, pidversion }
++ *   consume  { token, its length with the NUL, int64_t *handle }
++ */
++#define SWEET_EXT_TOKEN_MAX     0x800   /* __sandbox_extension_issue's malloc */
++#define SWEET_EXT_CLASS_MAX     128
++
++struct sweet_ext_issue_args {
++	user64_addr_t ext_class;
++	uint64_t      type;
++	user64_addr_t data;
++	uint64_t      flags;
++	user64_addr_t token;
++	int64_t       pid;
++	uint64_t      pidversion;
++};
++
++struct sweet_ext_consume_args {
++	user64_addr_t token;
++	uint64_t      length;
++	user64_addr_t handle;
++};
++
++static int64_t sweet_ext_handles;
++static uint64_t sweet_ext_ids;
++
++static int
++sweet_sandbox_extension_issue(user_addr_t arg)
++{
++	struct sweet_ext_issue_args a;
++	char cls[SWEET_EXT_CLASS_MAX];
++	char *path, *token;
++	uint64_t id;
++	size_t len;
++	int n;
++	int error = copyin(arg, &a, sizeof(a));
++	if (error) {
++		return error;
++	}
++	error = copyinstr((user_addr_t)a.ext_class, cls, sizeof(cls), &len);
++	if (error) {
++		return error;
++	}
++	path = kalloc_data(MAXPATHLEN, Z_WAITOK | Z_ZERO);
++	token = kalloc_data(SWEET_EXT_TOKEN_MAX, Z_WAITOK | Z_ZERO);
++	if (path == NULL || token == NULL) {
++		error = ENOMEM;
++		goto out;
++	}
++	if (a.data != 0) {
++		error = copyinstr((user_addr_t)a.data, path, MAXPATHLEN, &len);
++		if (error) {
++			goto out;
++		}
++	}
++	id = OSIncrementAtomic64((volatile SInt64 *)&sweet_ext_ids) + 1;
++	n = snprintf(token, SWEET_EXT_TOKEN_MAX,
++	    "%s;00;%08x;00000000;00000000;%016lx;%s;01;%08x;%016llx;%s",
++	    "0000000000000000000000000000000000000000000000000000000000000000",
++	    (uint32_t)a.flags, strlen(cls), cls, (uint32_t)a.type, id, path);
++	if (n < 0 || n >= SWEET_EXT_TOKEN_MAX) {
++		error = ENAMETOOLONG;
++		goto out;
++	}
++	error = copyout(token, (user_addr_t)a.token, (size_t)n + 1);
++out:
++	if (path) {
++		kfree_data(path, MAXPATHLEN);
++	}
++	if (token) {
++		kfree_data(token, SWEET_EXT_TOKEN_MAX);
++	}
++	return error;
++}
++
++static int
++sweet_sandbox_extension_consume(user_addr_t arg)
++{
++	struct sweet_ext_consume_args a;
++	int64_t handle;
++	int error = copyin(arg, &a, sizeof(a));
++	if (error) {
++		return error;
++	}
++	if (a.token == 0 || a.length == 0 || a.length > SWEET_EXT_TOKEN_MAX) {
++		return EINVAL;
++	}
++	handle = OSIncrementAtomic64((volatile SInt64 *)&sweet_ext_handles) + 1;
++	return a.handle ? copyout(&handle, (user_addr_t)a.handle, sizeof(handle)) : 0;
++}
++
+ static int
+-sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
++sweet_sandbox_syscall(struct proc *p, int call, user_addr_t arg)
+ {
+ 	if (call >= 0 && call < 64 && !(sweet_sandbox_seen & (1ULL << call))) {
+ 		sweet_sandbox_seen |= 1ULL << call;
+@@ -295,9 +398,11 @@ sweet_sandbox_syscall(struct proc *p, int call, __unused user_addr_t arg)
+ 		printf("SWEET Sandbox: %s op %d\n", name, call);
+ 	}
+ 	switch (call) {
+-	case 4:         /* container path (audit token / pid) */
+ 	case 5:         /* extension issue */
++		return sweet_sandbox_extension_issue(arg);
+ 	case 6:         /* extension consume */
++		return sweet_sandbox_extension_consume(arg);
++	case 4:         /* container path (audit token / pid) */
+ 	case 0x43:      /* container expected */
+ 		return ENOENT;
+ 	default:
