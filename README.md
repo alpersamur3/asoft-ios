@@ -41,9 +41,17 @@ Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gp
 does not need iOS 26, only the base it shares with it (cloudOS's kernel and firmware, the GPU driver:
 about 1 GB from Apple), which an iOS 26 install has already. See [`watchos/`](watchos/README.md).
 
+**visionOS 27.2** (research preview): the Apple Vision Pro's Home, Settings and Safari in a window drawn
+as the headset, its 3D compositor on the same GPU path. The mouse is your eyes and your pinch; with the
+right button held you look around and walk (W A S D). Like the watch it needs only the base it shares
+with iOS 26, and WSL. It is slow (about 5 minutes to Home on a cold start, about 15 seconds from a quick
+save) and silent for now: sound needs a plug-in that is not published yet. Its installer is new and has
+not been run end to end yet. See [`visionos/`](visionos/README.md).
+
 **`ASoftware.exe`** is the launcher: it installs, starts and closes each system, holds its settings and
 saves, sends iOS to an Android phone ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
-and packs a problem report. The `.cmd` scripts below still work without it.
+and packs a problem report. The `.cmd` scripts below still work without it. One QEMU build runs all four
+systems ([QEMU](#qemu)).
 
 The rest of this page is about iOS 16; iOS 26 has [its own page](ios26/README.md).
 
@@ -95,9 +103,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-
 
 It asks two things:
 
-1. **Which system:** iOS 16, iOS 26, both (one QEMU for both, downloaded once), or watchOS 27.2 alone
-   (only the base it shares with iOS 26, not iOS 26 itself; it needs WSL). With iOS 26 it also asks
-   whether to add watchOS.
+1. **Which system:** iOS 16, iOS 26, both (one QEMU for both, downloaded once), or watchOS 27.2 or
+   visionOS 27.2 alone (only the base they share with iOS 26, not iOS 26 itself; they need WSL). With
+   iOS 26 it also asks whether to add watchOS and visionOS.
 2. **For iOS 26, where its build runs Linux tools:** *Fast install (WSL)*, or *Install without
    WSL* (a small Linux VM in our QEMU; no administrator, no restart).
    - WSL is the default when it works.
@@ -121,6 +129,7 @@ On our PC (i7-13700HX, 24 threads, NVMe SSD, 40 Mbit/s):
 | iOS 26, without WSL | 11.4 GB | 49 GB / 25 GB | about 2 h 35 min (measured end to end: 107 min of steps, plus the 11 GB from Apple, 47 min at about 32 Mbit/s) |
 | Both (WSL) | 17.6 GB | 62 GB / 38 GB | about 2 h 50 min |
 | watchOS alone (WSL) | 6.2 GB | 23 GB / 16 GB | about 1 h (measured end to end: 56 min, of which 32 min for the 6.2 GB from Apple at about 30 Mbit/s and 16 min for the watch's first start) |
+| visionOS alone (WSL) | 18.8 GB | 22 GB / 22 GB | about 2 h 30 min (an estimate from the steps of our hand-run build: the installer has not been run end to end yet) |
 
 A new WSL distro for iOS 26 adds 0.9 GB to the download, about 15 minutes (the hfsplus module is
 built for your WSL kernel) and about 7 GB on the drive WSL keeps its distros on.
@@ -132,7 +141,8 @@ Stopped, or restarted for WSL? Run it again: it goes on where it stopped.
 
 | Option | Does |
 | --- | --- |
-| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos`, `-Watch yes\|no`, `-Linux wsl\|helper` | Answers the questions (`watchos`: watchOS without iOS 26) |
+| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos\|visionos\|ios16-visionos`, `-Watch yes\|no`, `-Vision yes\|no`, `-Linux wsl\|helper` | Answers the questions (`watchos`, `visionos`: without iOS 26) |
+| `-VisionQemu <folder>` | visionOS from a checkout: a build of our QEMU with its options (release packages from 0.3.0 on have one in `qemu\bin`, which the installer finds itself) |
 | `-Dir D:\ASoftware` | The install folder |
 | `-Yes` | Asks nothing |
 | `-Estimate` | Shows what it takes and stops |
@@ -204,12 +214,17 @@ QEMU on Windows ([below](#qemu)), the helper VM on Linux (`installer/helper/buil
 
 ### QEMU
 
-iOS 16 and iOS 26 run on one QEMU build: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft),
+One QEMU build runs all four systems: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft),
 branch `asoft` (`ios26` until 2026-11-01; QEMU 11.1 with jprx's research-VM work and our iOS 26
 machine), built by [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots
-iOS 16 as before, `-M vresearch` boots iOS 26. Both installers take its release package
-([`asoft-7364c4e`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)), and both
-launchers run it from `work\qemu`.
+iOS 16 as before, `-M vresearch` boots iOS 26, watchOS and visionOS. The release zip carries the
+build in `qemu\bin` (its `SOURCES.md` names the branches), and every installer takes it from there.
+From a checkout, the iOS 16 and iOS 26 installers download its release package
+([`asoft-7364c4e`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)), which does
+not have the watch's and the headset's options yet (the watch's screen and crown; the headset's
+window, its walk mode and `-cpu x-tlbi-filter`): there, give watchOS and visionOS a build with
+`-WatchQemu` / `-VisionQemu`. The launchers run it from `work\qemu`; the watch's installer keeps
+its copy in `work\qemu-watch`, and visionOS's puts it in place of `work\qemu`.
 
 Our window for iOS 16 was eight patches on QEMU 11.1.2 in `qemu/patches/`. They are commits on
 that branch now, unchanged:
@@ -267,9 +282,17 @@ Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu)
 iOS 26 gerekmez, yalnız onunla paylaştığı taban (cloudOS'un çekirdeği ve ürün yazılımı, GPU sürücüsü:
 Apple'dan yaklaşık 1 GB); iOS 26 kuruluysa bu taban zaten vardır. Bkz. [`watchos/`](watchos/README.md).
 
+**visionOS 27.2** (araştırma önizlemesi): başlık olarak çizilmiş bir pencerede Apple Vision Pro'nun Home'u,
+Ayarlar'ı ve Safari'si; 3B birleştiricisi aynı GPU yolunda. Fare gözünüz ve parmak sıkıştırmanızdır; sağ
+tuş basılıyken etrafa bakar ve yürürsünüz (W A S D). Saat gibi yalnız iOS 26 ile paylaştığı tabanı ve
+WSL'i ister. Yavaştır (soğuk açılışta Home'a yaklaşık 5 dakika, hızlı kayıttan yaklaşık 15 saniye) ve
+şimdilik sessizdir: ses, henüz yayımlanmamış bir eklenti ister. Kurucusu yenidir ve henüz uçtan uca
+çalıştırılmadı. Bkz. [`visionos/`](visionos/README.md).
+
 **`ASoftware.exe`** başlatıcıdır: her sistemi kurar, açar ve kapatır, ayarlarını ve kayıtlarını tutar,
 iOS'u Android telefona gönderir ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
-ve sorun raporu hazırlar. Aşağıdaki `.cmd` betikleri onsuz da çalışır.
+ve sorun raporu hazırlar. Aşağıdaki `.cmd` betikleri onsuz da çalışır. Dört sistemi de tek bir QEMU
+derlemesi çalıştırır ([QEMU](#qemu-1)).
 
 Aşağısı iOS 16 hakkında.
 
@@ -321,9 +344,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-
 
 İki şey sorar:
 
-1. **Hangi sistem:** iOS 16, iOS 26, ikisi (ikisine tek QEMU, bir kez indirilir) ya da yalnız watchOS
-   27.2 (iOS 26'nın kendisi değil, yalnız onunla paylaştığı taban; WSL ister). iOS 26 seçilince
-   watchOS'un da eklenip eklenmeyeceğini sorar.
+1. **Hangi sistem:** iOS 16, iOS 26, ikisi (ikisine tek QEMU, bir kez indirilir), yalnız watchOS 27.2
+   ya da yalnız visionOS 27.2 (iOS 26'nın kendisi değil, yalnız onunla paylaştıkları taban; WSL
+   isterler). iOS 26 seçilince watchOS'un ve visionOS'un da eklenip eklenmeyeceğini sorar.
 2. **iOS 26 için, derleme Linux araçlarını nerede çalıştırsın:** *Hızlı kurulum (WSL)* ya da
    *WSL'siz kurulum* (QEMU'muzda küçük bir Linux VM; yönetici izni ve yeniden başlatma gerekmez).
    - WSL çalışıyorsa varsayılan WSL'dir.
@@ -347,6 +370,7 @@ Bizim bilgisayarda (i7-13700HX, 24 iş parçacığı, NVMe SSD, 40 Mbit/s):
 | iOS 26, WSL'siz | 11,4 GB | 49 GB / 25 GB | yaklaşık 2 sa 35 dk (uçtan uca ölçülen: 107 dk adım süresi, artı Apple'dan 11 GB, ~32 Mbit/s'de 47 dk) |
 | İkisi (WSL) | 17,6 GB | 62 GB / 38 GB | yaklaşık 2 sa 50 dk |
 | Yalnız watchOS (WSL) | 6,2 GB | 23 GB / 16 GB | yaklaşık 1 sa (uçtan uca ölçüldü: 56 dk; 32 dakikası Apple'dan 6,2 GB, yaklaşık 30 Mbit/s ile, 16 dakikası saatin ilk açılışı) |
+| Yalnız visionOS (WSL) | 18,8 GB | 22 GB / 22 GB | yaklaşık 2 sa 30 dk (elle yaptığımız kurulumun adımlarından tahmin: kurucu henüz uçtan uca çalıştırılmadı) |
 
 iOS 26 için yeni bir WSL dağıtımı indirmeye 0,9 GB, süreye yaklaşık 15 dakika (hfsplus modülü WSL
 çekirdeğinize göre derlenir) ve WSL'in dağıtımları tuttuğu sürücüde yaklaşık 7 GB ekler.
@@ -358,7 +382,8 @@ başlatıldı mı? Yeniden çalıştırın: kaldığı yerden sürer.
 
 | Seçenek | Ne yapar |
 | --- | --- |
-| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos`, `-Watch yes\|no`, `-Linux wsl\|helper` | Soruları yanıtlar (`watchos`: iOS 26'sız watchOS) |
+| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos\|visionos\|ios16-visionos`, `-Watch yes\|no`, `-Vision yes\|no`, `-Linux wsl\|helper` | Soruları yanıtlar (`watchos`, `visionos`: iOS 26'sız) |
+| `-VisionQemu <klasör>` | Depo kopyasından visionOS: seçeneklerini içeren QEMU derlememiz (0.3.0'dan itibaren sürüm paketlerinde `qemu\bin` içinde vardır, kurucu kendisi bulur) |
 | `-Dir D:\ASoftware` | Kurulum klasörü |
 | `-Yes` | Hiçbir şey sormaz |
 | `-Estimate` | Ne gerektirdiğini gösterip durur |
@@ -409,12 +434,17 @@ iOS 16'nın kısmı `installer\Install-ASoftware.ps1`; tek başına da çalış�
 
 ### QEMU
 
-iOS 16 ve iOS 26 aynı QEMU derlemesinde çalışır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft)
+Dört sistemi de tek bir QEMU derlemesi çalıştırır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft)
 deposunun `asoft` dalı (2026-11-01'e kadar `ios26`; jprx'in araştırma VM'i çalışması ve bizim iOS 26
 makinemizle QEMU 11.1), [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir.
-`-M virt` iOS 16'yı eskisi gibi, `-M vresearch` iOS 26'yı açar. İki kurulum da onun sürüm paketini alır
-([`asoft-7364c4e`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)), iki başlatıcı da
-onu `work\qemu` içinden çalıştırır. iOS 16 penceresinin QEMU 11.1.2 üzerindeki sekiz yaması (`qemu/patches/`, 0002-0009)
+`-M virt` iOS 16'yı eskisi gibi, `-M vresearch` iOS 26'yı, watchOS'u ve visionOS'u açar. Sürüm zip'i
+derlemeyi `qemu\bin` içinde taşır (dalları `SOURCES.md` söyler), kurucuların hepsi onu oradan alır.
+Depo kopyasından çalışınca iOS 16 ve iOS 26 kurulumları onun sürüm paketini indirir
+([`asoft-7364c4e`](https://github.com/alpersamur3/qemu-sptm/releases/tag/asoft-7364c4e)); o pakette
+saatin ve başlığın seçenekleri henüz yoktur (saatin ekranı ve tacı; başlığın penceresi, yürüme modu ve
+`-cpu x-tlbi-filter`): orada watchOS ve visionOS'a `-WatchQemu` / `-VisionQemu` ile bir derleme verin.
+Başlatıcılar onu `work\qemu` içinden çalıştırır; saatin kurucusu kendi kopyasını `work\qemu-watch`
+içinde tutar, visionOS'unki onu `work\qemu`'nun yerine koyar. iOS 16 penceresinin QEMU 11.1.2 üzerindeki sekiz yaması (`qemu/patches/`, 0002-0009)
 artık bu dalda değiştirilmeden birer commit'tir (liste yukarıda, İngilizce bölümün *QEMU* başlığında).
 `qemu/patches/`, `qemu/build-windows.sh` ve `qemu-win` iş akışı kaldırıldı: o derlemeyi artık hiçbir şey
 dağıtmıyor, aynı yamaların ikinci bir kopyasını dalla eşit tutmak kimsenin çalıştırmadığı bir QEMU için
