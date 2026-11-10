@@ -384,9 +384,21 @@ if (-not $NoGl) { $display += ',gl=on' }
 if ($quickBoot) { $display += ',quick-boot=on' }
 
 $boot = "serial=3 -v debug=0x14e cpus=$Smp rd=disk0s1 wdt=-1 keepsyms=1 -noprogress launchd_unsecure_cache=1 launchd_disable_all_timeouts=1 aks-endpoint=0 cpu_boot_timeout_secs=30"
+# loadvm-date (a QEMU that has it): a resumed state's clock is set by "date" on the root shell (the serial console),
+# and the machine's own clock stays where it was saved. The QEMU's older way moves the machine's clock on by the time
+# it was away, and every timeout that was running at the save runs out with it: iOS 26 resumed 14 minutes after its
+# save drew nothing and took no tap for minutes (4 vCPUs busy), where it answers a tap in seconds this way.
+$machine = 'vresearch,fb=1179x2556,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on'
+$probeExe = Join-Path (Split-Path $exe) 'qemu-system-aarch64.exe'
+if (Test-Path $probeExe) {
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    $machineProbe = @(& $probeExe -M 'vresearch,help' 2>&1 | ForEach-Object { "$_" })
+    $ErrorActionPreference = 'Stop'
+    if ($machineProbe | Where-Object { $_ -cmatch '\bloadvm-date=' }) { $machine += ',loadvm-date=on' }
+}
 $qargs = @(
     '-name', '"ASoftware iOS 26"',
-    '-M', 'vresearch,fb=1179x2556,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on',
+    '-M', $machine,
     '-bootkc', "`"$Work\fw\bootkc`"", '-sptm', "`"$Work\fw\sptm`"", '-txm', "`"$Work\fw\txm`"",
     '-dtree', "`"$Work\$dtree`"", '-tc', "`"$Tc`"", '-ramdisk', "`"$Work\rd-shell.hfs`"",
     '-args', "`"$boot`"",

@@ -154,10 +154,21 @@ $env:ASOFT_SUBTITLE = 'watchOS 27.2 (24S118)'
 $boot = "serial=3 -v debug=0x14e cpus=$Smp rd=disk0s1 wdt=-1 keepsyms=1 -noprogress launchd_unsecure_cache=1 " +
         'launchd_disable_all_timeouts=1 aks-endpoint=0 cpu_boot_timeout_secs=30'
 function Q([string]$a) { '"' + $a + '"' }
+# ppi=326: the 41 mm Series 9's screen class (MobileGestalt's table needs 352x430 @2x at 326 ppi)
+# loadvm-date (a QEMU that has it): a resumed state's clock is set by "date" on the root shell (the serial console),
+# as iOS 26's and visionOS's are, and the machine's own clock stays where it was saved: no timeout that was running
+# at the save runs out at the load (the watch at its face took the older way, the clock moved on, without harm)
+$machine = 'vresearch,fb=352x430,ppi=326,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on'
+$probeExe = Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe'
+if (Test-Path $probeExe) {
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    $machineProbe = @(& $probeExe -M 'vresearch,help' 2>&1 | ForEach-Object { "$_" })
+    $ErrorActionPreference = 'Stop'
+    if ($machineProbe | Where-Object { $_ -cmatch '\bloadvm-date=' }) { $machine += ',loadvm-date=on' }
+}
 $qargs = @(
     '-name', (Q 'ASoftware watchOS 27.2'),
-    # ppi=326: the 41 mm Series 9's screen class (MobileGestalt's table needs 352x430 @2x at 326 ppi)
-    '-M', 'vresearch,fb=352x430,ppi=326,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on',
+    '-M', $machine,
     '-bootkc', (Q (In-Work 'watchos\bootkc-w')), '-sptm', (Q (In-Work 'fw\sptm')), '-txm', (Q (In-Work 'fw\txm')),
     '-dtree', (Q (In-Work $dtree)), '-tc', (Q (In-Work $Tc)), '-ramdisk', (Q (In-Work 'rd-shell.hfs')),
     '-args', (Q $boot),
