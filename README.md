@@ -214,9 +214,9 @@ QEMU on Windows ([below](#qemu)), the helper VM on Linux (`installer/helper/buil
 
 ### QEMU
 
-One QEMU build runs all four systems: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft),
-branch `asoft` (`ios26` until 2026-11-01; QEMU 11.1 with jprx's research-VM work and our iOS 26
-machine), built by [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots
+One QEMU build runs all four systems: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft-release),
+branch `asoft-release` (`asoft` before 0.3.0, `ios26` until 2026-11-01; QEMU 11.1 with jprx's
+research-VM work and our iOS 26 machine), built by [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh). `-M virt` boots
 iOS 16 as before, `-M vresearch` boots iOS 26, watchOS and visionOS. The release zip carries the
 build in `qemu\bin` (its `SOURCES.md` names the branches), and every installer takes it from there.
 From a checkout, the iOS 16 and iOS 26 installers download its release package
@@ -434,9 +434,9 @@ iOS 16'nın kısmı `installer\Install-ASoftware.ps1`; tek başına da çalış�
 
 ### QEMU
 
-Dört sistemi de tek bir QEMU derlemesi çalıştırır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft)
-deposunun `asoft` dalı (2026-11-01'e kadar `ios26`; jprx'in araştırma VM'i çalışması ve bizim iOS 26
-makinemizle QEMU 11.1), [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir.
+Dört sistemi de tek bir QEMU derlemesi çalıştırır: [alpersamur3/qemu-sptm](https://github.com/alpersamur3/qemu-sptm/tree/asoft-release)
+deposunun `asoft-release` dalı (0.3.0'dan önce `asoft`, 2026-11-01'e kadar `ios26`; jprx'in araştırma
+VM'i çalışması ve bizim iOS 26 makinemizle QEMU 11.1), [`ios26/scripts/win-build.sh`](ios26/scripts/win-build.sh) ile derlenir.
 `-M virt` iOS 16'yı eskisi gibi, `-M vresearch` iOS 26'yı, watchOS'u ve visionOS'u açar. Sürüm zip'i
 derlemeyi `qemu\bin` içinde taşır (dalları `SOURCES.md` söyler), kurucuların hepsi onu oradan alır.
 Depo kopyasından çalışınca iOS 16 ve iOS 26 kurulumları onun sürüm paketini indirir
