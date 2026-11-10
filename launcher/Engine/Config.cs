@@ -54,6 +54,10 @@ namespace ASoftware.Engine
         /// <summary>iOS 26: the PC's GPU it draws on (auto, integrated, discrete), and no generated commands on it.</summary>
         public string HostGpu { get; set; } = "auto";
         public bool NoGeneratedCommands { get; set; }
+        /// <summary>visionOS: the sound disk with a speaker (Start-visionOS.ps1 -Sound), when the install made one.</summary>
+        public bool Sound { get; set; }
+        /// <summary>visionOS: the window draws the headset around the picture (off: -NoFrame).</summary>
+        public bool Frame { get; set; } = true;
     }
 
     /// <summary>What the launcher knows of a save (an internal snapshot of a disk): the guest it was made with.</summary>
@@ -74,6 +78,7 @@ namespace ASoftware.Engine
         public bool Ios16 { get; set; }
         public bool Ios26 { get; set; }
         public bool Watch { get; set; }
+        public bool Vision { get; set; }
         public string Linux { get; set; } = "wsl";
         public string Dir { get; set; } = "";
         public string GpuMode { get; set; } = "cloudos";
@@ -94,13 +99,15 @@ namespace ASoftware.Engine
         public OsConfig Ios16 { get; set; } = new OsConfig { Smp = 4 };
         public OsConfig Ios26 { get; set; } = new OsConfig { Smp = 4, GpuMode = "" };
         public OsConfig Watch { get; set; } = new OsConfig { Smp = 4 };
+        /// <summary>visionOS: 8 vCPUs by default, as Start-visionOS.ps1's.</summary>
+        public OsConfig Vision { get; set; } = new OsConfig { Smp = 8 };
         public List<SaveMeta> Saves { get; set; } = new List<SaveMeta>();
         public InstallChoice Install { get; set; } = new InstallChoice();
         public string Imported { get; set; } = "";
 
         public static LauncherConfig Current { get; private set; }
 
-        public OsConfig For(string os) => os == "ios16" ? Ios16 : os == "ios26" ? Ios26 : Watch;
+        public OsConfig For(string os) => os == "ios16" ? Ios16 : os == "ios26" ? Ios26 : os == "vision" ? Vision : Watch;
 
         public static LauncherConfig Load()
         {
@@ -113,9 +120,17 @@ namespace ASoftware.Engine
             if (c.Ios16 == null) c.Ios16 = new OsConfig();
             if (c.Ios26 == null) c.Ios26 = new OsConfig();
             if (c.Watch == null) c.Watch = new OsConfig();
+            if (c.Vision == null) c.Vision = new OsConfig { Smp = 8 };
             if (c.Saves == null) c.Saves = new List<SaveMeta>();
             if (c.Install == null) c.Install = new InstallChoice();
             if (string.IsNullOrEmpty(c.Imported)) c.ImportOld();
+            // visionOS is built in iOS 26's work folder (or the base's a watchOS install made): a config from before it
+            // knew visionOS looks there
+            if (c.Vision.Work == "")
+            {
+                var from = c.Ios26.Work != "" ? c.Ios26 : c.Watch;
+                if (from.Work != "") { c.Vision.Work = from.Work; c.Vision.App = from.App; }
+            }
             Current = c;
             if (fresh || c.dirty) c.Save();
             return c;
@@ -140,15 +155,17 @@ namespace ASoftware.Engine
                 if (dir != "")
                 {
                     Install.Dir = dir;
-                    Install.Ios16 = ver == "ios16" || ver == "both";
+                    Install.Ios16 = ver == "ios16" || ver == "both" || ver.StartsWith("ios16-", StringComparison.Ordinal);
                     Install.Ios26 = ver == "ios26" || ver == "both";
                     Install.Watch = Json.Str(setup, "Watch") == "yes";
+                    Install.Vision = Json.Str(setup, "Vision") == "yes";
                     Install.Linux = Json.Str(setup, "Linux") == "helper" ? "helper" : "wsl";
                     Install.Stage = Json.Str(setup, "Stage");
                     Install.Started = Json.Str(setup, "Started");
                     if (Install.Ios16) { Ios16.App = dir; Ios16.Work = Path.Combine(dir, "work"); }
                     if (Install.Ios26) { Ios26.App = dir; Ios26.Work = Path.Combine(dir, "work"); }
                     if (Install.Watch) { Watch.App = dir; Watch.Work = Path.Combine(dir, "work"); }
+                    if (Install.Vision) { Vision.App = dir; Vision.Work = Path.Combine(dir, "work"); }
                 }
                 var lang = Json.Str(setup, "Lang");
                 if (lang == "en" || lang == "tr") Lang = lang;
@@ -158,7 +175,7 @@ namespace ASoftware.Engine
             if (c26 != null)
             {
                 var w = Json.Str(c26, "Work");
-                if (w != "") { Ios26.Work = w; if (Watch.Work == "") Watch.Work = w; }
+                if (w != "") { Ios26.Work = w; if (Watch.Work == "") Watch.Work = w; if (Vision.Work == "") Vision.Work = w; }
                 Ios26.GpuMode = Json.Str(c26, "GpuMode");
                 Ios26.GpuDriver = Json.Str(c26, "GpuDriver");
                 var wp = Json.Str(c26, "Wallpaper"); if (wp == "collections") Ios26.Wallpaper = wp;

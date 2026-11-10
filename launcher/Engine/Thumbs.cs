@@ -24,7 +24,8 @@ namespace ASoftware.Engine
         public static string Dir => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(AppPaths.ConfigFile)), "thumbs");
         public static string FileOf(string os) => Path.Combine(Dir, os + ".jpg");
 
-        const int Width = 360;       // twice what a device on the home page shows
+        // its shorter side: twice what a device on the home page shows (a phone's width; visionOS's 1920x1080 is 640x360)
+        const int Width = 360;
         const int Budget = 3000;     // ms one capture may take in all
         const int Greeting = 800;    // ms QMP has to greet: longer means another client holds it
 
@@ -112,28 +113,38 @@ namespace ASoftware.Engine
                 var err = Screendump(Guests.QmpPort(os), dump);
                 if (err == "") return;                      // QMP was taken or not there yet: the next round
                 if (err != null) { Once(os, err); return; }
-                var frame = Decode(dump);
-                // the display sleeps (a black frame): the picture from before stays
-                if (NearlyBlack(frame)) return;
-                BitmapSource small = frame;
-                if (frame.PixelWidth > Width)
-                {
-                    double k = (double)Width / frame.PixelWidth;
-                    small = new TransformedBitmap(frame, new ScaleTransform(k, k));
-                }
-                var enc = new JpegBitmapEncoder { QualityLevel = 85 };
-                enc.Frames.Add(BitmapFrame.Create(new FormatConvertedBitmap(small, PixelFormats.Bgr24, null, 0)));
-                // written beside it, then put in its place: a reader never sees half a picture
-                var dest = FileOf(os);
-                var tmp = dest + ".tmp";
-                using (var f = File.Create(tmp)) enc.Save(f);
-                if (File.Exists(dest)) File.Replace(tmp, dest, null);
-                else File.Move(tmp, dest);
+                if (!Store(os, dump)) return;
                 lock (said) said.Remove(os);
                 Changed?.Invoke(os);
             }
             catch (Exception e) { Once(os, e.Message); }
             finally { if (dump != null) try { File.Delete(dump); } catch { } }
+        }
+
+        /// <summary>A screen dump made the system's picture: decoded, its shorter side scaled to Width, a JPEG in its
+        /// place. False for a nearly black frame (the display sleeps, or a guest has not drawn yet: the picture from
+        /// before stays).</summary>
+        static bool Store(string os, string dump)
+        {
+            var frame = Decode(dump);
+            if (NearlyBlack(frame)) return false;
+            BitmapSource small = frame;
+            int shorter = Math.Min(frame.PixelWidth, frame.PixelHeight);
+            if (shorter > Width)
+            {
+                double k = (double)Width / shorter;
+                small = new TransformedBitmap(frame, new ScaleTransform(k, k));
+            }
+            var enc = new JpegBitmapEncoder { QualityLevel = 85 };
+            enc.Frames.Add(BitmapFrame.Create(new FormatConvertedBitmap(small, PixelFormats.Bgr24, null, 0)));
+            // written beside it, then put in its place: a reader never sees half a picture
+            Directory.CreateDirectory(Dir);
+            var dest = FileOf(os);
+            var tmp = dest + ".tmp";
+            using (var f = File.Create(tmp)) enc.Save(f);
+            if (File.Exists(dest)) File.Replace(tmp, dest, null);
+            else File.Move(tmp, dest);
+            return true;
         }
 
         /// <summary>A failure goes to the log once, not every round, until a capture works again.</summary>

@@ -48,7 +48,7 @@ namespace ASoftware.Engine
         // XAML's fixed texts
         static readonly Dictionary<string, string[]> S = new Dictionary<string, string[]>
         {
-            ["Tagline"] = new[] { "iOS and watchOS on your PC, drawn by its GPU", "iOS ve watchOS bilgisayarınızda, GPU'suyla çizilir" },
+            ["Tagline"] = new[] { "iOS, watchOS and visionOS on your PC, drawn by its GPU", "iOS, watchOS ve visionOS bilgisayarınızda, GPU'suyla çizilir" },
             ["Install"] = new[] { "Install", "Kur" },
             ["InstallDots"] = new[] { "Add a system", "Sistem ekle" },
             ["Start"] = new[] { "Start", "Başlat" },
@@ -118,7 +118,6 @@ namespace ASoftware.Engine
             ["Time"] = new[] { "Time", "Süre" },
             ["StartInstall"] = new[] { "Start the install", "Kurulumu başlat" },
             ["Locate"] = new[] { "Use an existing install…", "Var olan bir kurulumu kullan…" },
-            ["ComingLater"] = new[] { "Coming later", "Yakında" },
             ["UpdateAvailable"] = new[] { "A new version is out", "Yeni bir sürüm çıktı" },
             ["ReleasePage"] = new[] { "Release page", "Sürüm sayfası" },
             ["Dismiss"] = new[] { "Dismiss", "Gizle" },

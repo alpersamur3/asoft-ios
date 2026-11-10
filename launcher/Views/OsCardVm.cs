@@ -35,8 +35,6 @@ namespace ASoftware.Views
     public sealed class OsCardVm : Vm
     {
         public string Os { get; }
-        public bool Later => Os == "vision";
-        public bool HasActions => !Later;
         public string Name => Guests.Name(Os);
         public string Detail => Guests.Detail(Os);
 
@@ -57,7 +55,10 @@ namespace ASoftware.Views
         public ICommand SaveCloseCmd { get; }
         public ICommand TurnOffCmd { get; }
         /// <summary>A click on the device opens the system's page, as its "more" button does.</summary>
-        public ICommand DeviceCmd => Later ? null : MoreCmd;
+        public ICommand DeviceCmd => MoreCmd;
+        /// <summary>Save and close is there for a system with saves (Guests.HasQuickSave); without it Turn off stands alone.</summary>
+        public Visibility SaveCloseVisibility => Guests.HasQuickSave(Os) ? Visibility.Visible : Visibility.Collapsed;
+        public Thickness TurnOffMargin => Guests.HasQuickSave(Os) ? new Thickness(22, 0, 0, 0) : new Thickness(0);
 
         string state = "", line1 = "", line2 = "", primary = "", stateKey = "Idle";
         double progress, deviceProgress = -1; bool showProgress, running, primaryEnabled = true, canSave, busy, present = true, awake, outline;
@@ -109,14 +110,14 @@ namespace ASoftware.Views
             Os = os; main = w;
             Test = TestState(os);
             PrimaryCmd = new Relay(() => main.Primary(this));
-            MoreCmd = new Relay(() => main.OpenOs(Os), () => !Later);
+            MoreCmd = new Relay(() => main.OpenOs(Os));
             SaveCloseCmd = new Relay(() => main.SaveClose(Os));
             TurnOffCmd = new Relay(() => main.TurnOff(Os));
         }
 
         public void Retext() { Raise(nameof(MoreText)); Raise(nameof(SaveCloseText)); Raise(nameof(TurnOffText)); Raise(nameof(StateBrush)); Raise(nameof(PrimaryStyle)); }
 
-        public void LoadShot() => Shot = Later ? null : Thumbs.Get(Os);
+        public void LoadShot() => Shot = Thumbs.Get(Os);
 
         public string Action = "";   // what Primary does: install, resume-install, show-install, start, show, none
 
@@ -135,13 +136,6 @@ namespace ASoftware.Views
 
         void State(ref double device, ref bool there, ref bool up)
         {
-            if (Later)
-            {
-                StateText = L.K("ComingLater"); Tone("Idle");
-                Line1 = L.T("Runs on this PC from local builds; it comes to the installer in a later version.", "Bu PC'de yerel derlemelerle çalışıyor; kurucuya sonraki bir sürümde gelecek.");
-                Primary = L.K("ComingLater"); PrimaryEnabled = false; Action = "none";
-                return;
-            }
             var c = Guests.Cfg(Os);
             var job = InstallJob.Current;
             bool fakeInstall = Test != null && Test.StartsWith("install");
@@ -162,6 +156,9 @@ namespace ASoftware.Views
                 }
                 Line1 = $"{run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB · " + (run.Disk == "" ? L.T("throwaway disk", "atılan disk") : L.T("keeps changes", "değişiklikleri saklar"));
                 Line2 = run.Ours ? "" : L.T("Started outside the launcher (pid ", "Başlatıcı dışında açıldı (pid ") + run.QemuPid + ")";
+                // visionOS's window stays dark for minutes when it boots (a CPU in software): the card says it has not hung
+                if (Os == "vision" && run.Ours && !run.Resumed && uptime.TotalMinutes < 8 && run.Busy == "")
+                    Line2 = L.T("Home comes about 5–7 min after the start", "Home açılıştan yaklaşık 5–7 dk sonra gelir");
                 CanSave = run.Disk != "" && run.QuickBoot && !Busy;
                 Primary = L.T("Show window", "Pencereyi göster"); Action = "show"; PrimaryEnabled = !Busy;
                 return;
@@ -212,6 +209,10 @@ namespace ASoftware.Views
                     StateText = L.T("Not installed", "Kurulu değil"); Tone("Idle");
                     Line1 = Os == "ios16" ? L.T("About 40 min · 6.4 GB from Apple · 13 GB of disk", "Yaklaşık 40 dk · Apple'dan 6,4 GB · 13 GB disk")
                           : Os == "ios26" ? L.T("About 1.5–2.5 h · 11 GB from Apple · 23 GB of disk; a Vulkan GPU", "Yaklaşık 1,5–2,5 sa · Apple'dan 11 GB · 23 GB disk; Vulkan GPU")
+                          // (visionOS, as the watch, needs only the base it shares with iOS 26: made here when none is there;
+                          // the figures are Setup-ASoftware.ps1's own, from its visionOS question and its menu's entry)
+                          : Os == "vision" ? (Guests.HasBase(Os) ? L.T("About 2 h · 17.7 GB from Apple · 21 GB of disk", "Yaklaşık 2 sa · Apple'dan 17,7 GB · 21 GB disk")
+                                                                 : L.T("About 2 h · 19 GB from Apple; no\u00a0iOS 26 needed", "Yaklaşık 2 sa · Apple'dan 19 GB; iOS 26 gerekmez"))
                           // (the watch needs only the base it shares with iOS 26: made here when neither is there)
                           : Guests.HasWatchBase() ? L.T("About 40 min · 5 GB from Apple · 14 GB of disk", "Yaklaşık 40 dk · Apple'dan 5 GB · 14 GB disk")
                           : L.T("About 1 h · 6 GB from Apple · 16 GB of disk; no\u00a0iOS 26 needed", "Yaklaşık 1 sa · Apple'dan 6 GB · 16 GB disk; iOS 26 gerekmez");
@@ -227,7 +228,9 @@ namespace ASoftware.Views
             Line1 = $"{c.Smp} vCPU · {Guests.Ram(Os) / 1024.0:0.#} GB · " + (keep ? L.T("keeps changes", "değişiklikleri saklar") : L.T("throwaway disk", "atılan disk"));
             // a save no start has resumed yet, made with the settings it has now (else the start boots afresh with them,
             // and the save becomes the way back: Machines.Start)
-            if (Test == "saved" || keep && c.QuickBoot && Quick != null && !Quick.WayBack && Guests.Fits(Os, LauncherConfig.Current.FindSave(Guests.SaveDisk(Os), Guests.QuickName), Guests.Shape(Os)))
+            bool saves = Guests.HasQuickSave(Os);
+            if (!saves) Quick = null;
+            if (saves && (Test == "saved" || keep && c.QuickBoot && Quick != null && !Quick.WayBack && Guests.Fits(Os, LauncherConfig.Current.FindSave(Guests.SaveDisk(Os), Guests.QuickName), Guests.Shape(Os))))
             {
                 StateText = L.T("Saved", "Kaydedildi"); Tone("Accent");
                 Line2 = L.T("Resumes where you left it · ", "Bıraktığınız yerden açılır · ") + Guests.When(Quick.When);

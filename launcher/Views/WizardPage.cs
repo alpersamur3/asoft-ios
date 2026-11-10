@@ -13,8 +13,8 @@ using ASoftware.Engine;
 
 namespace ASoftware.Views
 {
-    /// <summary>The install: what (iOS 16, iOS 26, watchOS), how and where, a check of this PC (GPU, Setup's own
-    /// estimates), then the run with its steps, pause and log. Setup-ASoftware.ps1 does the work.</summary>
+    /// <summary>The install: what (iOS 16, iOS 26, watchOS, visionOS), how and where, a check of this PC (GPU, Setup's
+    /// own estimates), then the run with its steps, pause and log. Setup-ASoftware.ps1 does the work.</summary>
     public class WizardPage : UserControl, IRetext
     {
         readonly MainWindow main;
@@ -42,6 +42,7 @@ namespace ASoftware.Views
             choice.Ios16 = !Guests.Installed("ios16");
             choice.Ios26 = false;
             choice.Watch = false;
+            choice.Vision = false;
             if (InstallJob.Current != null && (InstallJob.Current.Running || InstallJob.Current.Result != "")) page = 3;
             Build();
             // (the screenshots run nothing: WSL is taken as ready)
@@ -98,7 +99,8 @@ namespace ASoftware.Views
                 choice.Ios16 = os == "ios16";
                 choice.Ios26 = os == "ios26";
                 choice.Watch = os == "watch";
-                if (os == "watch" && Guests.Installed("ios26")) FromIos26Install();
+                choice.Vision = os == "vision";
+                if ((os == "watch" || os == "vision") && Guests.Installed("ios26")) FromIos26Install();
             }
             Build();
         }
@@ -106,14 +108,14 @@ namespace ASoftware.Views
         /// <summary>A stopped install: its choice, straight to the check (Setup knows what is done).</summary>
         public void Resume(InstallChoice c)
         {
-            choice.Ios16 = c.Ios16; choice.Ios26 = c.Ios26; choice.Watch = c.Watch; choice.Linux = c.Linux ?? "wsl"; choice.Dir = c.Dir;
+            choice.Ios16 = c.Ios16; choice.Ios26 = c.Ios26; choice.Watch = c.Watch; choice.Vision = c.Vision; choice.Linux = c.Linux ?? "wsl"; choice.Dir = c.Dir;
             if (!string.IsNullOrEmpty(c.GpuMode)) { choice.GpuMode = c.GpuMode; choice.GpuDriver = c.GpuDriver; }
             page = 2;
             Build();
             Check();
         }
 
-        /// <summary>watchOS on an iOS 26 this launcher knows: its install folder.</summary>
+        /// <summary>watchOS or visionOS on an iOS 26 this launcher knows: its install folder.</summary>
         void FromIos26Install()
         {
             var w = Guests.Work("ios26").TrimEnd('\\');
@@ -230,10 +232,10 @@ namespace ASoftware.Views
         void What()
         {
             var p = Page(L.K("WhatToInstall"), L.T("Each comes from Apple's servers and is built on this PC. You can add the others later.", "Her biri Apple'ın sunucularından gelir ve bu PC'de kurulur. Diğerlerini sonra ekleyebilirsiniz."));
-            // (one width for the three: the page's column, at most 760)
+            // (one width for the four: the page's column, at most 760)
             var cards = new StackPanel { Margin = new Thickness(0, 18, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
             AtMost.Bind(cards, body, CardsMax);
-            CheckBox c16 = null, c26 = null, cw = null;
+            CheckBox c16 = null, c26 = null, cw = null, cv = null;
             c16 = OsChoice("ios16", choice.Ios16, L.T("Ready to use: Safari and .ipa apps. No WSL, no administrator.", "Kullanıma hazır: Safari ve .ipa uygulamaları. WSL ve yönetici izni gerekmez."),
                 L.T("about 40 min · 6.4 GB download", "yaklaşık 40 dk · 6,4 GB indirme"), v => choice.Ios16 = v);
             c26 = OsChoice("ios26", choice.Ios26, L.T("A research preview drawn by your PC's GPU (Vulkan), Liquid Glass included.", "PC'nizin GPU'suyla (Vulkan) çizilen bir araştırma önizlemesi, Liquid Glass dahil."),
@@ -246,11 +248,24 @@ namespace ASoftware.Views
                     choice.Watch = v;
                     if (v && Guests.Installed("ios26")) FromIos26Install();
                 });
-            cards.Children.Add(c16); cards.Children.Add(c26); cards.Children.Add(cw);
+            // (the figures are Setup-ASoftware.ps1's own: its visionOS question with a base, its menu's entry without)
+            cv = OsChoice("vision", choice.Vision, L.T("Apple Vision Pro: its rooms and windows drawn by your PC's GPU in a 1920x1080 view. A research preview on an emulated CPU, so it is slow. Needs only the base it shares with iOS 26.",
+                                                       "Apple Vision Pro: odaları ve pencereleri PC'nizin GPU'suyla 1920x1080 bir görünümde çizilir. Öykünülen bir işlemcide araştırma önizlemesi, bu yüzden yavaş. iOS 26'nın yalnız ortak tabanını ister."),
+                Guests.HasBase("vision") ? L.T("about 2 h · 17.7 GB download · WSL", "yaklaşık 2 sa · 17,7 GB indirme · WSL")
+                                         : L.T("about 2 h · 19 GB download · WSL", "yaklaşık 2 sa · 19 GB indirme · WSL"), v =>
+                {
+                    choice.Vision = v;
+                    if (v && Guests.Installed("ios26")) FromIos26Install();
+                });
+            cards.Children.Add(c16); cards.Children.Add(c26); cards.Children.Add(cw); cards.Children.Add(cv);
             p.Children.Add(cards);
             if (Guests.Installed("ios26"))
                 p.Children.Add(Ui.Text(L.T("iOS 26 is installed: choosing it again checks it and goes on with what is not done.", "iOS 26 kurulu: yeniden seçmek onu denetler ve bitmeyenlerle devam eder."), "Faint", 12));
-            var next = Ui.Btn(L.K("Next"), () => { if (choice.Ios16 || choice.Ios26 || choice.Watch) { page = 1; Build(); } }, "BtnPrimary", "\uE72A");
+            var next = Ui.Btn(L.K("Next"), () =>
+            {
+                if (!(choice.Ios16 || choice.Ios26 || choice.Watch || choice.Vision)) return;
+                page = 1; Build();
+            }, "BtnPrimary", "\uE72A");
             p.Children.Add(Nav(next));
         }
 
@@ -258,10 +273,11 @@ namespace ASoftware.Views
         {
             // the system's device beside what it is (a product picture: lit, its home screen)
             var g = new Grid();
-            // (one column width for the phones and the wider watch: the three cards' texts start on one line)
+            // (one column width for the phones, the wider watch and the headset: the cards' texts start on one line; the
+            // headset, wide and low, fills the column's width at about a third of a phone's height)
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(68) });
             g.ColumnDefinitions.Add(new ColumnDefinition());
-            g.Children.Add(new DeviceArt { Os = os, Height = 84, Present = true, Awake = true, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 18, 0) });
+            g.Children.Add(new DeviceArt { Os = os, Height = os == "vision" ? 31 : 84, Present = true, Awake = true, VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, os == "vision" ? 8 : 2, 18, 0) });
             var sp = new StackPanel { Margin = new Thickness(0, 0, 30, 0) };
             sp.Children.Add(new TextBlock { Text = Guests.Name(os), Style = Ui.S("H2") });
             sp.Children.Add(Ui.Text(Guests.Detail(os), "Faint", 1));
@@ -280,7 +296,9 @@ namespace ASoftware.Views
         void How()
         {
             var p = Page(L.K("HowToBuild"), null);
-            if (choice.Ios26 || choice.Watch)
+            // watchOS and visionOS: their installers run in WSL, and they draw with iOS 26's GPU driver
+            bool onBase = choice.Watch || choice.Vision;
+            if (choice.Ios26 || onBase)
             {
                 p.Children.Add(new TextBlock { Text = L.K("LinuxTools"), Style = Ui.S("H3"), Margin = new Thickness(0, 18, 0, 8) });
                 var wslNote = wslState == "" ? L.T("looking at WSL…", "WSL'e bakılıyor…")
@@ -290,8 +308,14 @@ namespace ASoftware.Views
                 var r1 = Radio("linux", L.T("Fast install with WSL", "Hızlı kurulum (WSL)"), wslNote, choice.Linux == "wsl", () => choice.Linux = "wsl", wslState != "novirt");
                 var r2 = Radio("linux", L.T("Without WSL", "WSL'siz"), HelperThere ? L.T("A small Linux VM in our QEMU: no administrator, no restart; about an hour slower.", "QEMU'da küçük bir Linux VM: yönetici ve yeniden başlatma gerekmez; yaklaşık bir saat daha yavaş.")
                                                                          : L.T("Not in this copy (installer\\helper\\out: the release package has it).", "Bu kopyada yok (installer\\helper\\out: sürüm paketinde var)."),
-                    choice.Linux == "helper", () => choice.Linux = "helper", HelperThere && !choice.Watch);
-                if (choice.Watch) { var needs = Ui.Text(L.T("watchOS's installer needs WSL.", "watchOS kurucusu WSL ister."), "Faint", -4); needs.Margin = new Thickness(0, -4, 0, 10); p.Children.Add(needs); }
+                    choice.Linux == "helper", () => choice.Linux = "helper", HelperThere && !onBase);
+                if (onBase)
+                {
+                    var needs = Ui.Text(choice.Watch && choice.Vision ? L.T("watchOS's and visionOS's installers need WSL.", "watchOS ve visionOS kurucuları WSL ister.")
+                                        : choice.Vision ? L.T("visionOS's installer needs WSL.", "visionOS kurucusu WSL ister.")
+                                        : L.T("watchOS's installer needs WSL.", "watchOS kurucusu WSL ister."), "Faint", -4);
+                    needs.Margin = new Thickness(0, -4, 0, 10); p.Children.Add(needs);
+                }
                 p.Children.Add(r1); p.Children.Add(r2);
 
                 p.Children.Add(new TextBlock { Text = L.K("GpuDriver"), Style = Ui.S("H3"), Margin = new Thickness(0, 20, 0, 8) });
@@ -304,8 +328,8 @@ namespace ASoftware.Views
                         if (f != null) { choice.GpuDriver = f; choice.GpuMode = "gpu"; }
                         Build();
                     }));
-                p.Children.Add(Radio("gpu", L.T("None (GPU-less)", "Yok (GPU'suz)"), L.T("iOS draws on the CPU: it works, slower; watchOS needs a driver.", "iOS CPU'da çizer: çalışır, daha yavaş; watchOS sürücü ister."),
-                    choice.GpuMode == "gpuless", () => choice.GpuMode = "gpuless", !choice.Watch));
+                p.Children.Add(Radio("gpu", L.T("None (GPU-less)", "Yok (GPU'suz)"), L.T("iOS draws on the CPU: it works, slower; watchOS and visionOS need a driver.", "iOS CPU'da çizer: çalışır, daha yavaş; watchOS ve visionOS sürücü ister."),
+                    choice.GpuMode == "gpuless", () => choice.GpuMode = "gpuless", !onBase));
             }
 
             p.Children.Add(new TextBlock { Text = L.K("Location"), Style = Ui.S("H3"), Margin = new Thickness(0, 20, 0, 8) });
@@ -314,7 +338,7 @@ namespace ASoftware.Views
             void Free()
             {
                 var ok = Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$");
-                free.Text = (ok || !(choice.Ios26 || choice.Watch) ? "" : L.T("iOS 26 needs a folder on a drive letter without spaces or shell characters. ", "iOS 26 sürücü harfli, boşluk ve kabuk karakteri içermeyen bir klasör ister. "))
+                free.Text = (ok || !(choice.Ios26 || onBase) ? "" : L.T("iOS 26 needs a folder on a drive letter without spaces or shell characters. ", "iOS 26 sürücü harfli, boşluk ve kabuk karakteri içermeyen bir klasör ister. "))
                     + L.Size(Native.FreeBytes(choice.Dir)) + " " + L.T("free on ", "boş: ") + Path.GetPathRoot(choice.Dir);
             }
             dir.TextChanged += (s, e) => { choice.Dir = dir.Text.Trim(); Free(); };
@@ -325,14 +349,16 @@ namespace ASoftware.Views
                 if (f != null) { dir.Text = f; }
             })));
             p.Children.Add(free);
-            if (choice.Watch && Guests.Installed("ios26"))
-                p.Children.Add(Ui.Text(L.T("watchOS is built in iOS 26's install folder.", "watchOS, iOS 26'nın kurulum klasörüne kurulur."), "Faint", 4));
+            if (onBase && Guests.Installed("ios26"))
+                p.Children.Add(Ui.Text(choice.Vision && !choice.Watch ? L.T("visionOS is built in iOS 26's install folder.", "visionOS, iOS 26'nın kurulum klasörüne kurulur.")
+                                     : choice.Vision ? L.T("watchOS and visionOS are built in iOS 26's install folder.", "watchOS ve visionOS, iOS 26'nın kurulum klasörüne kurulur.")
+                                     : L.T("watchOS is built in iOS 26's install folder.", "watchOS, iOS 26'nın kurulum klasörüne kurulur."), "Faint", 4));
 
             var back = Ui.Btn(L.K("Back"), () => { page = 0; Build(); });
             var next = Ui.Btn(L.K("Next"), () =>
             {
-                if ((choice.Ios26 || choice.Watch) && !Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$")) { main.Snack(L.T("Choose a folder without spaces for iOS 26.", "iOS 26 için boşluksuz bir klasör seçin."), "warn"); return; }
-                if (choice.Watch) choice.Linux = "wsl";
+                if ((choice.Ios26 || onBase) && !Regex.IsMatch(choice.Dir ?? "", @"^[A-Za-z]:\\[^\s'""`$;&|<>()]+$")) { main.Snack(L.T("Choose a folder without spaces for iOS 26.", "iOS 26 için boşluksuz bir klasör seçin."), "warn"); return; }
+                if (onBase) choice.Linux = "wsl";
                 page = 2; Build(); Check();
             }, "BtnPrimary", "\uE72A");
             p.Children.Add(Nav(back, next));
@@ -358,7 +384,7 @@ namespace ASoftware.Views
             Build();
             try
             {
-                var gpu = (choice.Ios26 || choice.Watch) ? GpuCheck() : Task.FromResult(0);
+                var gpu = (choice.Ios26 || choice.Watch || choice.Vision) ? GpuCheck() : Task.FromResult(0);
                 var est = InstallJob.Estimate(choice);
                 await gpu;
                 estimate = await est;
@@ -385,7 +411,7 @@ namespace ASoftware.Views
         void CheckPage()
         {
             var p = Page(L.K("CheckPc"), L.T("What this PC has, and what the install takes here (Setup's own estimate, its times scaled to this PC).", "Bu PC'de ne var ve kurulum burada ne gerektirir (Setup'ın kendi tahmini, süreleri bu PC'ye göre ölçeklenir)."));
-            if (choice.Ios26 || choice.Watch) p.Children.Add(GpuBox());
+            if (choice.Ios26 || choice.Watch || choice.Vision) p.Children.Add(GpuBox());
             p.Children.Add(EstimateBox());
             bool blocked = estimate == null || estimate.Stops.Count > 0 || gpuResult == "none" || gpuResult == "fail" && choice.GpuMode != "gpuless";
             var back = Ui.Btn(L.K("Back"), () => { page = 1; Build(); });
@@ -456,7 +482,7 @@ namespace ASoftware.Views
             }
             grid.RowDefinitions.Add(new RowDefinition());
             Cell("", 0, true); Cell(L.K("Download"), 1, true); Cell(L.K("DiskPeak"), 2, true); Cell(L.K("DiskAfter"), 3, true); Cell(L.K("Time"), 4, true);
-            foreach (var os in new[] { "ios16", "ios26", "watch" })
+            foreach (var os in Guests.Ids)
             {
                 var steps = estimate.Plan.Where(s => s.Os == os).ToList();
                 if (steps.Count == 0) continue;
@@ -464,7 +490,7 @@ namespace ASoftware.Views
                 var key = os == "ios26" ? "ios26-" + choice.Linux : os;
                 estimate.Options.TryGetValue(key, out var o);
                 int done = steps.Count(s => s.State == "skip");
-                Cell(Head(os) + (done > 0 ? L.T($"  ({done} of {steps.Count} steps done)", $"  ({steps.Count} adımın {done}'i bitti)") : ""), 0);
+                Cell(Head(os, choice) + (done > 0 ? L.T($"  ({done} of {steps.Count} steps done)", $"  ({steps.Count} adımın {done}'i bitti)") : ""), 0);
                 Cell(L.Size(steps.Where(s => s.State != "skip").Sum(s => s.Download)), 1);
                 Cell(o != null ? L.Size(o[2]) : "", 2);
                 Cell(o != null ? L.Size(o[3]) : "", 3);
@@ -479,8 +505,12 @@ namespace ASoftware.Views
             return Box(estimate.Stops.Count > 0 ? "Bad" : estimate.Warnings.Count > 0 ? "Warn" : "Line", sp);
         }
 
-        // watchOS without iOS 26: its "ios26" steps are the base they share
-        string Head(string os) => os == "ios26" && !choice.Ios26 ? L.T("The base watchOS shares with iOS 26", "watchOS'un iOS 26 ile paylaştığı taban") : Guests.Name(os);
+        // watchOS or visionOS without iOS 26: its "ios26" steps are the base they share
+        static string Head(string os, InstallChoice c) =>
+            os != "ios26" || c.Ios26 ? Guests.Name(os)
+            : c.Watch && c.Vision ? L.T("The base watchOS and visionOS share with iOS 26", "watchOS ve visionOS'un iOS 26 ile paylaştığı taban")
+            : c.Vision ? L.T("The base visionOS shares with iOS 26", "visionOS'un iOS 26 ile paylaştığı taban")
+            : L.T("The base watchOS shares with iOS 26", "watchOS'un iOS 26 ile paylaştığı taban");
 
         // a warning or a stop: its tone's dot and its text
         static UIElement Line(string tone, string text)
@@ -517,7 +547,7 @@ namespace ASoftware.Views
         {
             try
             {
-                InstallJob.Start(new InstallChoice { Ios16 = choice.Ios16, Ios26 = choice.Ios26, Watch = choice.Watch, Linux = choice.Linux, Dir = choice.Dir, GpuMode = choice.GpuMode, GpuDriver = choice.GpuDriver },
+                InstallJob.Start(new InstallChoice { Ios16 = choice.Ios16, Ios26 = choice.Ios26, Watch = choice.Watch, Vision = choice.Vision, Linux = choice.Linux, Dir = choice.Dir, GpuMode = choice.GpuMode, GpuDriver = choice.GpuDriver },
                     estimate?.Plan.Select(s => new PlanStep { Os = s.Os, Id = s.Id, Title = s.Title, Seconds = s.Seconds, Download = s.Download, State = s.State }).ToList());
                 page = 3;
                 Build();
@@ -591,7 +621,7 @@ namespace ASoftware.Views
                 case "restart": runHead.Text = L.T("Restart Windows", "Windows'u yeniden başlatın"); runSub.Text = L.T("WSL is installed; after the restart open ASoftware: the install goes on.", "WSL kuruldu; yeniden başlattıktan sonra ASoftware'i açın: kurulum sürer."); break;
                 case "failed": runHead.Text = L.T("The install stopped", "Kurulum durdu"); runSub.Text = j.Message + "  " + L.T("Fix the cause and resume: it goes on from this step.", "Nedenini giderip sürdürün: bu adımdan devam eder."); break;
                 default:
-                    runHead.Text = L.T("Installing ", "Kuruluyor: ") + string.Join(" + ", new[] { j.Choice.Ios16 ? "iOS 16" : null, j.Choice.Ios26 ? "iOS 26" : null, j.Choice.Watch ? "watchOS" : null }.Where(x => x != null));
+                    runHead.Text = L.T("Installing ", "Kuruluyor: ") + string.Join(" + ", new[] { j.Choice.Ios16 ? "iOS 16" : null, j.Choice.Ios26 ? "iOS 26" : null, j.Choice.Watch ? "watchOS" : null, j.Choice.Vision ? "visionOS" : null }.Where(x => x != null));
                     runSub.Text = L.T($"{L.Duration(el.TotalSeconds)} so far · about {L.Duration(left)} left", $"{L.Duration(el.TotalSeconds)} geçti · yaklaşık {L.Duration(left)} kaldı") + (j.PauseAsked ? L.T(" · pausing after this step", " · bu adımdan sonra duraklayacak") : "");
                     break;
             }
@@ -605,12 +635,12 @@ namespace ASoftware.Views
             {
                 lastStepsHash = h;
                 runSteps.Children.Clear();
-                foreach (var os in new[] { "ios16", "ios26", "watch" })
+                foreach (var os in Guests.Ids)
                 {
                     var steps = j.Plan.Where(s => s.Os == os).ToList();
                     if (steps.Count == 0) continue;
                     var rows = steps.Select(s => StepRow(s)).ToArray();
-                    runSteps.Children.Add(Ui.Group(Head(os), rows));
+                    runSteps.Children.Add(Ui.Group(Head(os, j.Choice), rows));
                 }
             }
             if (logBox != null && j.Runner != null)

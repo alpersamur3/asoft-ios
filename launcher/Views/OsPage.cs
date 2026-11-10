@@ -29,16 +29,28 @@ namespace ASoftware.Views
 
         public OsPage(string os, MainWindow main, string tab)
         {
-            this.os = os; this.main = main; this.tab = tab ?? "settings";
+            this.os = os; this.main = main;
+            this.tab = Tabs().Any(t => t.id == tab) ? tab : "settings";
             Build();
         }
 
         public void Retext() => Build();
 
+        /// <summary>The page's tabs: Saves only for a system with saves (Guests.HasQuickSave), Apps not for visionOS
+        /// (no .ipa install there, and nothing planned to say about one).</summary>
+        IEnumerable<(string id, string label)> Tabs()
+        {
+            yield return ("settings", L.K("Settings"));
+            if (Guests.HasQuickSave(os)) yield return ("saves", L.K("Saves"));
+            if (os != "vision") yield return ("apps", L.K("Apps"));
+            yield return ("logs", L.K("Logs"));
+        }
+
         void Build()
         {
             body = new ContentControl();
-            device = new DeviceArt { Os = os, Height = 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 24, 0) };
+            // (the headset is wide: at a phone's height it would push the title away)
+            device = new DeviceArt { Os = os, Height = os == "vision" ? 96 : 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 24, 0) };
             stateDot = Ui.Dot("Idle");
             stateDot.Margin = new Thickness(0, 1, 8, 0);
             stateText = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
@@ -84,7 +96,7 @@ namespace ASoftware.Views
             root.Children.Add(headRow);
 
             // the tabs
-            var tabs = Ui.Seg(new[] { ("settings", L.K("Settings")), ("saves", L.K("Saves")), ("apps", L.K("Apps")), ("logs", L.K("Logs")) }, tab, t => { tab = t; Show(); });
+            var tabs = Ui.Seg(Tabs(), tab, t => { tab = t; Show(); });
             tabs.Margin = new Thickness(0, 18, 0, 16);
             Grid.SetRow(tabs, 1);
             root.Children.Add(tabs);
@@ -112,7 +124,7 @@ namespace ASoftware.Views
                 bool busy = run.Busy == "saving" || run.Busy == "stopping";
                 stateText.Text = (run.Busy == "saving" ? L.T("Saving…", "Kaydediliyor…") : run.Busy == "stopping" ? L.T("Turning off…", "Kapatılıyor…") : L.T("Running", "Çalışıyor")) + $" · {run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB";
                 tone = busy ? "Warn" : "Good";
-                if (run.Disk != "" && run.QuickBoot) AddAction(Ui.Btn(L.K("SaveClose"), () => main.SaveClose(os), "BtnPrimary"), "page-saveclose");
+                if (Guests.HasQuickSave(os) && run.Disk != "" && run.QuickBoot) AddAction(Ui.Btn(L.K("SaveClose"), () => main.SaveClose(os), "BtnPrimary"), "page-saveclose");
                 AddAction(Ui.Btn(L.K("TurnOff"), () => main.TurnOff(os), actions.Children.Count == 0 ? "BtnPrimary" : "Btn"), "page-turnoff");
             }
             else if (Guests.Installed(os))
@@ -122,7 +134,7 @@ namespace ASoftware.Views
                 AddAction(Ui.Btn(L.K("Start"), () => main.StartOs(os), "BtnPrimary"), "page-start");
                 // the quick save a start resumed already: going back to it is asked for (MainWindow.GoBack)
                 var way = main.QuickOf(os);
-                if (main.IsWayBack(os, way))
+                if (Guests.HasQuickSave(os) && main.IsWayBack(os, way))
                 {
                     var back = AddAction(Ui.Btn(L.K("GoBack") + " · " + Guests.When(way.When), () => main.GoBack(os), "Btn"), "page-goback");
                     back.ToolTip = Guests.Hardware(os, Guests.SaveShape(os, LauncherConfig.Current.FindSave(Guests.SaveDisk(os), Guests.QuickName)));
@@ -173,7 +185,7 @@ namespace ASoftware.Views
             var before = shapeSeen;
             shapeSeen = Guests.Shape(os);
             if (Machines.Runs.ContainsKey(os)) main.Snack(L.T("Saved: it applies at the next start.", "Kaydedildi: sonraki açılışta geçerli olur."), "info");
-            else if (before != null && before != shapeSeen) NoteShape(before);
+            else if (before != null && before != shapeSeen && Guests.HasQuickSave(os)) NoteShape(before);
         }
 
         /// <summary>A change of a setting the quick save depends on: the next start boots afresh with it, and the save stays as
@@ -187,6 +199,27 @@ namespace ASoftware.Views
             if (note != null) Dialog.Show(main, L.T("Saved", "Kaydedildi"), note, L.K("OK"));
         }
 
+        /// <summary>visionOS's sound switched: the next start opens the other disk, which has its own saves. What that start
+        /// does (goes on from that disk's save, or boots it), and that the disk left keeps its own save.</summary>
+        async void NoteSound(string left)
+        {
+            var now = Guests.SaveDisk(os);
+            if (Machines.Runs.ContainsKey(os) || now == "" || string.Equals(now, left, StringComparison.OrdinalIgnoreCase)) return;
+            var q = (await Task.Run(() => Guests.Snapshots(os, now))).FirstOrDefault(s => s.Quick);
+            var old = left == "" ? null : (await Task.Run(() => Guests.Snapshots(os, left))).FirstOrDefault(s => s.Quick);
+            bool sound = C.Sound;
+            bool goesOn = q != null && C.QuickBoot && !q.WayBack && Guests.Fits(os, LauncherConfig.Current.FindSave(now, Guests.QuickName), Guests.Shape(os));
+            string text = goesOn
+                ? (sound ? L.T($"The next start opens the sound disk and goes on from its save of {Guests.When(q.When, true)}.", $"Sonraki açılış ses diskini açar ve onun {Guests.When(q.When, true)} kaydından sürer.")
+                         : L.T($"The next start opens the silent disk and goes on from its save of {Guests.When(q.When, true)}.", $"Sonraki açılış sessiz diski açar ve onun {Guests.When(q.When, true)} kaydından sürer."))
+                : (sound ? L.T("The next start boots the sound disk, a cold boot (about 5 to 7 minutes to Home).", "Sonraki açılış ses diskini soğuk başlatır (Home'a yaklaşık 5–7 dakika).")
+                         : L.T("The next start boots the silent disk, a cold boot (about 5 to 7 minutes to Home).", "Sonraki açılış sessiz diski soğuk başlatır (Home'a yaklaşık 5–7 dakika)."));
+            if (old != null)
+                text += " " + (sound ? L.T($"The silent disk keeps its save of {Guests.When(old.When, true)}.", $"Sessiz disk {Guests.When(old.When, true)} kaydını saklar.")
+                                     : L.T($"The sound disk keeps its save of {Guests.When(old.When, true)}.", $"Ses diski {Guests.When(old.When, true)} kaydını saklar."));
+            Dialog.Show(main, L.T("Saved", "Kaydedildi"), text, L.K("OK"));
+        }
+
         // --- settings -------------------------------------------------------------------------------
         void ShowSettings()
         {
@@ -195,10 +228,15 @@ namespace ASoftware.Views
             shapeSeen = Guests.Shape(os);
             if (!Guests.Installed(os))
                 p.Children.Add(Ui.Note("Warn", L.T("Not installed here yet: install it, or point the folders below at an existing install.", "Burada henüz kurulu değil: kurun ya da aşağıdaki klasörleri var olan bir kuruluma yöneltin.")));
+            // visionOS's minutes of a dark window, said plainly so that nobody takes it for a hang
+            if (os == "vision")
+                p.Children.Add(Ui.Note("Info", L.T("A research preview on an emulated CPU, so it is slow. A start from cold takes about 5 to 7 minutes to Home on 8 vCPUs, and its window stays dark for about 4.5 of them: it has not hung. A start after the window was closed goes on from there in about 15 seconds.",
+                                                   "Öykünülen bir işlemcide çalışan bir araştırma önizlemesi, bu yüzden yavaş. Soğuk açılış 8 vCPU ile Home'a yaklaşık 5–7 dakika sürer ve pencere bunun yaklaşık 4,5 dakikasında karanlık kalır: donmuş değildir. Pencere kapatıldıktan sonraki açılış yaklaşık 15 saniyede kaldığı yerden sürer.")));
 
             // the guest
-            var cpus = Ui.Seg(new[] { (4, "4"), (8, "8") }, c.Smp, v => { c.Smp = v; Changed(); });
+            var cpus = Ui.Seg(Guests.CpuChoices(os).Select(n => (n, n.ToString())), c.Smp, v => { c.Smp = v; Changed(); });
             var cpuDesc = os == "ios16" ? L.T("4 boots faster: every broadcast TLB flush stops all vCPUs.", "4 daha hızlı açılır: her TLB temizliği tüm vCPU'ları durdurur.")
+                        : os == "vision" ? L.T("8 is the start script's default; the boot times on this page are for 8. A save goes on only with the vCPUs it was made with.", "Başlatma betiğinin varsayılanı 8; bu sayfadaki açılış süreleri 8 içindir. Bir kayıt yalnız alındığı vCPU sayısıyla sürer.")
                         : L.T("8 gives apps more room; the boot is not faster.", "8 uygulamalara daha çok yer açar; açılış hızlanmaz.");
             UIElement ram;
             string ramDesc;
@@ -214,13 +252,23 @@ namespace ASoftware.Views
             }
             else
             {
-                ram = Ui.Text("7 GB", "H3");
-                ramDesc = L.T("Fixed by iOS 16's device tree.", "iOS 16'nın aygıt ağacıyla sabit.");
+                ram = Ui.Text($"{Guests.DefaultRam(os) / 1024.0:0.#} GB", "H3");
+                ramDesc = os == "vision" ? L.T("Fixed by visionOS's device tree.", "visionOS'un aygıt ağacıyla sabit.")
+                                         : L.T("Fixed by iOS 16's device tree.", "iOS 16'nın aygıt ağacıyla sabit.");
             }
             var mem = Native.Memory();
-            p.Children.Add(Ui.Group(L.T("The guest", "Konuk"),
+            var guest = new List<UIElement>
+            {
                 Ui.Row(L.K("Vcpus"), cpuDesc + " " + L.T($"This PC: {Environment.ProcessorCount} logical processors.", $"Bu PC: {Environment.ProcessorCount} mantıksal işlemci."), cpus),
-                Ui.Row(L.K("Ram"), ramDesc + " " + L.T($"This PC: {mem.total / 1073741824.0:0} GB.", $"Bu PC: {mem.total / 1073741824.0:0} GB."), ram)));
+                Ui.Row(L.K("Ram"), ramDesc + " " + L.T($"This PC: {mem.total / 1073741824.0:0} GB.", $"Bu PC: {mem.total / 1073741824.0:0} GB."), ram)
+            };
+            // (only an install made with the audio plug-in has the sound disk)
+            if (os == "vision" && Guests.HasSoundDisk())
+                guest.Add(Ui.Row(L.T("Sound", "Ses"),
+                    L.T("A speaker on Windows' default output. It starts the sound disk (visionos\\vision.qcow2), a disk of its own with its own saves: what visionOS wrote on the silent one is not on it. Sound costs about one vCPU.",
+                        "Windows'un varsayılan çıkışında bir hoparlör. Ses diskiyle (visionos\\vision.qcow2) açılır; bu, kendi kayıtları olan ayrı bir disktir: visionOS'un sessiz diske yazdıkları onda yoktur. Ses yaklaşık bir vCPU harcar."),
+                    Ui.Switch(c.Sound, v => { var left = Guests.SaveDisk(os); c.Sound = v; Changed(); NoteSound(left); })));
+            p.Children.Add(Ui.Group(L.T("The guest", "Konuk"), guest.ToArray()));
 
             // the disk
             var quick = Ui.Switch(c.QuickBoot, v => { c.QuickBoot = v; Changed(); }, null, c.DiskMode != "throwaway");
@@ -228,19 +276,36 @@ namespace ASoftware.Views
                 v => { c.DiskMode = v; quick.IsEnabled = v != "throwaway"; Changed(); });
             var diskDesc = os == "watch"
                 ? L.T("Keep: what the watch writes stays in watchos\\watch.qcow2. Throwaway: a temporary disk.", "Sakla: saatin yazdıkları watchos\\watch.qcow2'de kalır. Atılan: geçici bir disk.")
+                : os == "vision" && Guests.HasSoundDisk()
+                ? L.T("Keep: what visionOS writes stays in visionos\\vision-silent.qcow2 (with sound, visionos\\vision.qcow2). Throwaway: a temporary disk.", "Sakla: visionOS'un yazdıkları visionos\\vision-silent.qcow2'de kalır (sesle visionos\\vision.qcow2). Atılan: geçici bir disk.")
+                : os == "vision"
+                ? L.T("Keep: what visionOS writes stays in visionos\\vision-silent.qcow2. Throwaway: a temporary disk.", "Sakla: visionOS'un yazdıkları visionos\\vision-silent.qcow2'de kalır. Atılan: geçici bir disk.")
                 : L.T("Keep: settings and apps stay in a user disk over the installed one. Throwaway: dropped when it closes.", "Sakla: ayarlar ve uygulamalar kurulu diskin üstündeki kullanıcı diskinde kalır. Atılan: kapanınca silinir.");
-            p.Children.Add(Ui.Group(L.T("Disk", "Disk"),
-                Ui.Row(L.K("DiskMode"), diskDesc, disk),
-                Ui.Row(L.K("QuickBoot"), L.T($"Closing the window saves {Guests.Name(os)} as it is (about {Guests.Ram(os) / 1024.0:0.#} GB on the disk) and the next start resumes it in seconds.",
-                                             $"Pencereyi kapatmak {Guests.Name(os)}'u olduğu gibi kaydeder (diskte yaklaşık {Guests.Ram(os) / 1024.0:0.#} GB) ve sonraki açılış saniyeler içinde oradan sürer."), quick)));
+            var diskRows = new List<UIElement> { Ui.Row(L.K("DiskMode"), diskDesc, disk) };
+            if (Guests.HasQuickSave(os))
+                diskRows.Add(Ui.Row(L.K("QuickBoot"), L.T($"Closing the window saves {Guests.Name(os)} as it is (about {Guests.Ram(os) / 1024.0:0.#} GB on the disk) and the next start resumes it in seconds.",
+                                                          $"Pencereyi kapatmak {Guests.Name(os)}'u olduğu gibi kaydeder (diskte yaklaşık {Guests.Ram(os) / 1024.0:0.#} GB) ve sonraki açılış saniyeler içinde oradan sürer."), quick));
+            p.Children.Add(Ui.Group(L.T("Disk", "Disk"), diskRows.ToArray()));
 
             // the window and the system
             var rows = new List<UIElement>
             {
                 Ui.Row(L.K("Network"), os == "ios26" ? L.T("QEMU's user network (NAT): Safari, the App Store's pages.", "QEMU'nun kullanıcı ağı (NAT): Safari, App Store sayfaları.")
-                                                     : L.T("QEMU's user network (NAT).", "QEMU'nun kullanıcı ağı (NAT)."), Ui.Switch(c.Net, v => { c.Net = v; Changed(); })),
-                Ui.Row(L.K("Sharpness"), L.T("The window scales the screen with the sharper filter (the side bar's Sharpness).", "Pencere ekranı daha keskin süzgeçle ölçekler (yan çubuktaki Keskinlik)."), Ui.Switch(c.Sharp, v => { c.Sharp = v; Changed(); }))
+                                                     : L.T("QEMU's user network (NAT).", "QEMU'nun kullanıcı ağı (NAT)."), Ui.Switch(c.Net, v => { c.Net = v; Changed(); }))
             };
+            if (os == "vision")
+            {
+                rows.Add(Ui.Row(L.T("The drawn headset", "Çizilmiş Vision Pro"),
+                    L.T("The window draws an Apple Vision Pro around the picture; off, the picture alone, as large as the window lets it be. F9 switches it in the window.",
+                        "Pencere resmin çevresine bir Apple Vision Pro çizer; kapalıyken yalnız resim, pencerenin izin verdiği kadar büyük. Pencerede F9 ile değişir."),
+                    Ui.Switch(c.Frame, v => { c.Frame = v; Changed(); })));
+                // one choice of the PC's GPU for the guests reims-vgpu draws: iOS 26's (Start-visionOS.ps1 -HostGpu)
+                var hg = LauncherConfig.Current.Ios26.HostGpu;
+                rows.Add(Ui.Row(L.T("The PC's GPU", "PC'nin GPU'su"), L.T("visionOS draws on the one chosen in iOS 26's settings.", "visionOS, iOS 26 ayarlarında seçilende çizer."),
+                    Ui.Text(hg == "integrated" ? L.T("Integrated", "Tümleşik") : hg == "discrete" ? L.T("Graphics card", "Ekran kartı") : L.T("Auto", "Otomatik"), "H3")));
+            }
+            else
+                rows.Add(Ui.Row(L.K("Sharpness"), L.T("The window scales the screen with the sharper filter (the side bar's Sharpness).", "Pencere ekranı daha keskin süzgeçle ölçekler (yan çubuktaki Keskinlik)."), Ui.Switch(c.Sharp, v => { c.Sharp = v; Changed(); })));
             if (os == "ios26")
             {
                 bool hasColl = File.Exists(Path.Combine(Guests.Work(os), "root-collections.qcow2"));
@@ -254,11 +319,25 @@ namespace ASoftware.Views
             }
             p.Children.Add(Ui.Group(L.T("Window and system", "Pencere ve sistem"), rows.ToArray()));
 
-            if (os != "watch") p.Children.Add(TimeGroup(c));
+            if (os == "vision") p.Children.Add(VisionKeys());
+            if (os != "watch" && os != "vision") p.Children.Add(TimeGroup(c));
             if (os == "ios26") p.Children.Add(GpuGroup(c));
             p.Children.Add(FolderGroup(c));
             body.Content = p;
         }
+
+        /// <summary>visionOS's window, in short: what the mouse and the keys do there (its QEMU's usb-touchscreen walk mode
+        /// and the GTK window's keys, as Start-visionOS.ps1 lists them).</summary>
+        static UIElement VisionKeys() => Ui.Group(L.T("In its window", "Penceresinde"),
+            Ui.Row(L.T("Look and tap", "Bakmak ve dokunmak"),
+                L.T("The pointer is where your eyes look; a click is a pinch.", "İşaretçi gözlerinizin baktığı yerdir; tıklama parmak kıstırmadır (pinch)."), null),
+            Ui.Row(L.T("Look around and walk", "Etrafa bakmak ve yürümek"),
+                L.T("Hold the right button and move the mouse to look around; while it is held W A S D walk, R and F go up and down, and with Shift they turn. The middle button turns walk mode on and off.",
+                    "Etrafa bakmak için sağ tuşu basılı tutup fareyi oynatın; basılıyken W A S D yürütür, R ve F yukarı ve aşağı götürür, Shift ile döndürür. Orta tuş yürüme kipini açıp kapatır."), null),
+            Ui.Row(L.T("Buttons", "Düğmeler"),
+                L.T("F1 Digital Crown (hold: recentre), F2 top button, F3 / F4 volume down / up.", "F1 Digital Crown (basılı tutunca görüşü ortalar), F2 üst düğme, F3 / F4 sesi kısar / açar."), null),
+            Ui.Row(L.T("The window", "Pencere"),
+                L.T("F9 the drawn headset on or off, F11 full screen, F12 shows the keys you press.", "F9 çizilmiş Vision Pro'yu açar / kapatır, F11 tam ekran, F12 bastığınız tuşları gösterir."), null));
 
         UIElement TimeGroup(OsConfig c)
         {
@@ -382,6 +461,7 @@ namespace ASoftware.Views
                     { c.Work = was; return; }
                     // (the watch follows iOS 26's folder when it had none: its picture was of another disk too)
                     if (os == "ios26" && LauncherConfig.Current.Watch.Work == "") { LauncherConfig.Current.Watch.Work = f; Thumbs.Drop("watch"); }
+                    if (os == "ios26" && LauncherConfig.Current.Vision.Work == "") { LauncherConfig.Current.Vision.Work = f; Thumbs.Drop("vision"); }
                     // another install's disk: the screen of the one before does not stand for it
                     if (!string.Equals(was, f, StringComparison.OrdinalIgnoreCase)) Thumbs.Drop(os);
                     Changed(); ShowSettings();

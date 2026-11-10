@@ -53,10 +53,15 @@ namespace ASoftware.Engine
         public static string Args(InstallChoice c, string mode)
         {
             var a = new List<string>();
-            // watchOS without iOS 26: Setup makes only the base they share
-            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : c.Watch ? (c.Ios16 ? "ios16-watchos" : "watchos") : "ios16";
+            // watchOS or visionOS without iOS 26: Setup makes only the base they share
+            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : c.Watch ? (c.Ios16 ? "ios16-watchos" : "watchos") : c.Vision ? (c.Ios16 ? "ios16-visionos" : "visionos") : "ios16";
             a.Add("-Version"); a.Add(ver);
-            if (c.Ios26 || c.Watch) { a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no"); a.Add("-Linux"); a.Add(c.Linux); }
+            if (c.Ios26 || c.Watch || c.Vision)
+            {
+                a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no");
+                a.Add("-Vision"); a.Add(c.Vision ? "yes" : "no");
+                a.Add("-Linux"); a.Add(c.Linux);
+            }
             a.Add("-Dir"); a.Add(Runner.Q(c.Dir));
             a.Add("-Lang"); a.Add(L.Lang);
             if (mode != null) a.Add(mode);
@@ -68,8 +73,50 @@ namespace ASoftware.Engine
                 var wq = WatchQemu(c);
                 if (wq != "") { a.Add("-WatchQemu"); a.Add(Runner.Q(wq)); }
             }
+            // visionOS's QEMU (the one every guest runs on, with visionOS's options): a build this PC has, as Setup's
+            // -VisionQemu (else Setup takes work\qemu or the package's qemu\bin when they have the options)
+            if (c.Vision)
+            {
+                var vq = Environment.GetEnvironmentVariable("ASOFT_VISION_QEMU");
+                if (!string.IsNullOrEmpty(vq) && File.Exists(Path.Combine(vq, "qemu-system-aarch64.exe"))) { a.Add("-VisionQemu"); a.Add(Runner.Q(vq)); }
+            }
             return string.Join(" ", a);
         }
+
+        // Install-visionOS.ps1's steps in Turkish (the installer writes its titles in English)
+        static readonly Dictionary<string, string> VisionTr = new Dictionary<string, string>
+        {
+            ["check"] = "Üzerine kurulduğu iOS 26 tabanı, WSL ve araçları, betikler",
+            ["qemu"] = "Tüm konukların çalıştığı QEMU, visionOS seçenekleriyle (qemu\\)",
+            ["rooms"] = "Altı sentetik oda, Apple'ın visionOS Simulator Runtime'ından",
+            ["ipsw"] = "visionOS 27.2 IPSW: trust cache, aygıt ağacı, OS kalıbının anahtarı ve dizini",
+            ["firmware"] = "visionOS çekirdeği ve aygıt ağaçları (4, 6 ve 8 vCPU)",
+            ["gpu"] = "visionOS için konuk GPU sürücüsü",
+            ["rootfs"] = "Kök disk, Apple'ın OS kalıbından okunur (visionos\\rootv.qcow2)",
+            ["audio"] = "virtio-snd ses eklentisi (VPhoneVirtIOSound), varsa",
+            ["patches"] = "Üstüne yamalar, tercihler, uygulamalar, odalar, klavye kamerası ve GPU sürücüsü",
+            ["trustcache"] = "Trust cache'i (visionos\\rootv.tc)",
+            ["firstboot"] = "İlk açılış (visionos\\rootv-b.qcow2)",
+            ["persona"] = "Persona, MobileGestalt, etkinleştirme ve visionOS tercihleri",
+            ["homeboot"] = "İkinci açılış, Home'a kadar",
+            ["disks"] = "Sessiz ve sesli diskler",
+            ["cleanup"] = "Yalnız kurulumun gerektirdiklerini sil",
+            ["shortcut"] = "Start-visionOS.cmd ve Başlat menüsü kısayolu",
+        };
+
+        // what its two boots say while they wait (pct lines)
+        static readonly Dictionary<string, string> VisionTextTr = new Dictionary<string, string>
+        {
+            ["waiting for the persona manifest"] = "persona bildirimi bekleniyor",
+            ["waiting for Home"] = "Home bekleniyor",
+        };
+
+        /// <summary>A step's title in the launcher's language: the installer's own, or for visionOS's steps in Turkish ours.</summary>
+        static string Title(string os, string id, string given) =>
+            os == "vision" && L.Tr && VisionTr.TryGetValue(id, out var tr) ? tr : given;
+
+        static string StepText(string os, string given) =>
+            os == "vision" && L.Tr && VisionTextTr.TryGetValue(given ?? "", out var tr) ? tr : given;
 
         /// <summary>A QEMU with the watch's devices this PC has: the install's own (work\qemu-watch) or a known one.</summary>
         public static string WatchQemu(InstallChoice c)
@@ -106,7 +153,7 @@ namespace ASoftware.Engine
             switch (f[0])
             {
                 case "plan" when f.Length >= 9:
-                    e.Plan.Add(new PlanStep { Os = f[1], Id = f[2], Seconds = D(f[3]), Download = (long)D(f[4]), AddGB = D(f[5]), KeepGB = D(f[6]), State = f[7] == "1" ? "skip" : "pending", Title = f[8] });
+                    e.Plan.Add(new PlanStep { Os = f[1], Id = f[2], Seconds = D(f[3]), Download = (long)D(f[4]), AddGB = D(f[5]), KeepGB = D(f[6]), State = f[7] == "1" ? "skip" : "pending", Title = Title(f[1], f[2], f[8]) });
                     break;
                 case "option" when f.Length >= 6:
                     e.Options[f[1]] = new[] { D(f[2]), D(f[3]), D(f[4]), D(f[5]) };
@@ -134,9 +181,10 @@ namespace ASoftware.Engine
             if (c.Ios16 && !Guests.Installed("ios16")) Thumbs.Drop("ios16");
             if (c.Ios26 && !Guests.Installed("ios26")) Thumbs.Drop("ios26");
             if (c.Watch && !Guests.Installed("watch")) Thumbs.Drop("watch");
+            if (c.Vision && !Guests.Installed("vision")) Thumbs.Drop("vision");
             // iOS 26's setup asks where its GPU driver comes from: the wizard's answer, in its config
             var conf = LauncherConfig.Current;
-            if (c.Ios26 || c.Watch)
+            if (c.Ios26 || c.Watch || c.Vision)
             {
                 conf.Ios26.GpuMode = c.GpuMode;
                 conf.Ios26.GpuDriver = c.GpuMode == "gpu" ? c.GpuDriver : "";
@@ -146,6 +194,7 @@ namespace ASoftware.Engine
             if (c.Ios16 && (conf.Ios16.Work == "" || !Guests.Installed("ios16"))) { conf.Ios16.Work = Path.Combine(c.Dir, "work"); conf.Ios16.App = c.Dir; }
             if (c.Ios26 && (conf.Ios26.App == "" || !Guests.Installed("ios26"))) conf.Ios26.App = c.Dir;
             if (c.Watch && (conf.Watch.Work == "" || !Guests.Installed("watch"))) { conf.Watch.Work = j.Ios26Work; conf.Watch.App = c.Dir; }
+            if (c.Vision && (conf.Vision.Work == "" || !Guests.Installed("vision"))) { conf.Vision.Work = j.Ios26Work; conf.Vision.App = c.Dir; }
             c.Started = DateTime.Now.ToString("s");
             c.Stage = "running";
             conf.Install = c;
@@ -172,7 +221,7 @@ namespace ASoftware.Engine
                     lock (Plan)
                     {
                         if (!sawPlan) { Plan.Clear(); sawPlan = true; }
-                        Plan.Add(new PlanStep { Os = f[1], Id = f[2], Seconds = D(f[3]), Download = (long)D(f[4]), State = f[7] == "1" ? "skip" : "pending", Title = f[8] });
+                        Plan.Add(new PlanStep { Os = f[1], Id = f[2], Seconds = D(f[3]), Download = (long)D(f[4]), State = f[7] == "1" ? "skip" : "pending", Title = Title(f[1], f[2], f[8]) });
                     }
                     break;
                 case "step" when f.Length >= 7:
@@ -194,7 +243,7 @@ namespace ASoftware.Engine
                         var s = Find(f[1], f[2]);
                         if (s == null) break;
                         s.Pct = int.TryParse(f[3], out var n) ? n : -1;
-                        s.Text = f[4];
+                        s.Text = StepText(f[1], f[4]);
                     }
                     break;
                 case "paused": Result = "paused"; break;
@@ -290,6 +339,8 @@ namespace ASoftware.Engine
                 : p.Os == "ios26" && p.Id == "iphone" ? Path.Combine(w, "iphone")
                 : p.Os == "ios26" && p.Id == "cloudos" ? Path.Combine(w, "cloudos")
                 : p.Os == "watch" && p.Id == "download" ? Path.Combine(w, "watchos", "ipsw")
+                // (the runtime's .dmg as it streams in: steps\rooms.sh writes it there, then deletes it)
+                : p.Os == "vision" && p.Id == "rooms" ? Path.Combine(w, "visionos", "build", "rooms")
                 : null;
             if (dir == null || !Directory.Exists(dir)) return lastBytes = -1;
             long sum = 0;

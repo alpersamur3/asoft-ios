@@ -44,7 +44,7 @@ namespace ASoftware.Views
 
         static IEnumerable<(string value, string label)> Areas() => new[]
         {
-            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"),
+            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"), ("vision", "visionOS"),
             ("install", L.T("Install", "Kurulum")), ("phone", L.T("Phone", "Telefon")), ("launcher", L.T("Launcher", "Başlatıcı"))
         };
 
@@ -111,7 +111,7 @@ namespace ASoftware.Views
         {
             try
             {
-                var os = area == "ios16" || area == "ios26" || area == "watch" ? area : null;
+                var os = Array.IndexOf(Guests.Ids, area) >= 0 ? area : null;
                 zip = await Task.Run(() => LogPack.Make(os));
                 Keep(); Build();
                 System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + zip + "\"");

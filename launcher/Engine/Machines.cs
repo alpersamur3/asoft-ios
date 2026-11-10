@@ -21,6 +21,8 @@ namespace ASoftware.Engine
         public string Shape = "";      // the settings it runs with (Guests.Shape); "" when adopted (not known)
         public string QuickAtStart = ""; // the quick save's key when it started: another at the end was made in this run
         public string RunFolder = "";
+        /// <summary>The start resumes a save (as the launcher asked, unless the script said the state did not load).</summary>
+        public bool Resumed;
         public DateTime Started = DateTime.Now;
         public string Busy = "";       // "saving", "stopping": a request is on its way
     }
@@ -113,6 +115,19 @@ namespace ASoftware.Engine
                     if (c.NoGeneratedCommands) a.Add("-NoGeneratedCommands");
                     Time();
                     break;
+                case "vision":
+                    // (Start-visionOS.ps1: a device tree for 4, 6 and 8 vCPUs, its RAM the tree's; quick boot on unless
+                    // -NoQuickBoot, as Start-watchOS.ps1's; the sound disk and the silent one have each their own saves)
+                    a.AddRange(new[] { "-Cpus", (smp == 4 || smp == 6 ? smp : 8).ToString() });
+                    if (Guests.Sound(os)) a.Add("-Sound");
+                    if (!keep) a.Add("-Snapshot");
+                    else if (!c.QuickBoot) a.Add("-NoQuickBoot");
+                    if (!netOn) a.Add("-NoNet");
+                    if (!c.Frame) a.Add("-NoFrame");
+                    // the PC's GPU is iOS 26's setting (one choice for the guests reims-vgpu draws), or the save's
+                    var visionGpu = sp.TryGetValue("gpu", out var vg) ? vg : Guests.HostGpu(os);
+                    if (visionGpu == "integrated" || visionGpu == "discrete") a.AddRange(new[] { "-HostGpu", visionGpu });
+                    break;
                 default:
                     // (Start-watchOS.ps1: quick boot is on unless -NoQuickBoot)
                     a.AddRange(new[] { "-Smp", smp.ToString() });
@@ -138,10 +153,11 @@ namespace ASoftware.Engine
             var ports = PortProblems(os);
             if (ports.Count > 0) throw new InvalidOperationException(string.Join("; ", ports) + L.T(". Close what holds it first.", ". Önce onu tutan programı kapatın."));
             var disk = Guests.SaveDisk(os);
-            int ram = Guests.Ram(os), smp = c.Smp;
-            bool quick = c.DiskMode != "throwaway" && c.QuickBoot;
-            string shape = Guests.Shape(os);
-            var snaps = disk == "" ? new List<Guests.Snap>() : await Task.Run(() => Guests.Snapshots(os, disk));
+            int ram = Guests.Ram(os), smp = Guests.Smp(os);
+            bool saves = Guests.HasQuickSave(os);
+            bool quick = saves && c.DiskMode != "throwaway" && c.QuickBoot;
+            string shape = Guests.Shape(os, 0, smp);
+            var snaps = disk == "" || !saves ? new List<Guests.Snap>() : await Task.Run(() => Guests.Snapshots(os, disk));
             string quickAtStart = snaps.FirstOrDefault(s => s.Quick)?.Key ?? "";
             // The quick save is resumed by itself once; then it is the way back, which only loads when asked (loadState
             // asoft-quick, MainWindow.GoBack). It loads only into the machine it was made on: made with other settings than
@@ -180,7 +196,7 @@ namespace ASoftware.Engine
             if (mem.block != null) throw new InvalidOperationException(mem.block);
             if (mem.warn != null && !ignoreRamWarning) throw new RamWarning(mem.warn);
 
-            var run = new GuestRun { Os = os, RamMiB = ram, Smp = smp, Disk = disk, QuickBoot = quick, Ours = true, Shape = shape, QuickAtStart = quickAtStart };
+            var run = new GuestRun { Os = os, RamMiB = ram, Smp = smp, Disk = disk, QuickBoot = quick, Ours = true, Shape = shape, QuickAtStart = quickAtStart, Resumed = resumes != null };
             var env = new Dictionary<string, string> { ["ASOFT_SHARP"] = c.Sharp ? "1" : "0" };
             var log = Path.Combine(AppPaths.LocalData, "logs", os + "-start.log");
             var r = new Runner(script, StartArgs(os, ram, smp, loadState, shape), log);
@@ -190,6 +206,8 @@ namespace ASoftware.Engine
             {
                 var m = StartedLine.Match(l);
                 if (m.Success) { run.QemuPid = int.Parse(m.Groups[2].Value); run.RunFolder = m.Groups[3].Value.Trim(); got.TrySetResult(true); }
+                // (Start-visionOS.ps1 / Start-watchOS.ps1: a state that did not load, after which the guest boots)
+                else if (l.Contains("could not be resumed")) run.Resumed = false;
             };
             r.Exited += code =>
             {
@@ -264,12 +282,13 @@ namespace ASoftware.Engine
         {
             Task.Run(async () =>
             {
+                bool saves = run.Disk != "" && Guests.HasQuickSave(run.Os);
                 // (a guest found running: the quick save it has now is not one made since the launcher looked)
-                if (!run.Ours && run.Disk != "") run.QuickAtStart = Guests.Snapshots(run.Os, run.Disk).FirstOrDefault(s => s.Quick)?.Key ?? "";
+                if (!run.Ours && saves) run.QuickAtStart = Guests.Snapshots(run.Os, run.Disk).FirstOrDefault(s => s.Quick)?.Key ?? "";
                 while (Native.Alive(run.QemuPid)) await Task.Delay(1500);
                 // iOS 16's script ends with it (its ipa server too)
                 if (run.Script != null && run.Script.Running) run.Script.Wait(15000);
-                if (run.Disk != "")
+                if (saves)
                 {
                     // a quick save made in this run (Save and close, the watch's automatic save): what it was made with
                     var quick = Guests.Snapshots(run.Os, run.Disk).FirstOrDefault(s => s.Quick);
@@ -301,6 +320,8 @@ namespace ASoftware.Engine
                     QuickBoot = cmd.Contains("quick-boot=on"),
                     Disk = Guests.SaveDisk(os),
                 };
+                // visionOS: the disk it was started on (sound or silent), not the one the settings would take now
+                if (os == "vision") run.Disk = Guests.VisionDisk(cmd);
                 if (cmd.Contains("-snapshot")) run.Disk = "";
                 Runs[os] = run;
                 Watch(run);
@@ -312,7 +333,7 @@ namespace ASoftware.Engine
         /// <summary>Saves the guest as its quick save and closes it, as the window's close button does with quick boot.</summary>
         public static async Task SaveAndClose(string os)
         {
-            if (!Runs.TryGetValue(os, out var run)) return;
+            if (!Runs.TryGetValue(os, out var run) || !Guests.HasQuickSave(os)) return;
             if (run.Disk == "" || !run.QuickBoot) throw new InvalidOperationException(L.T("This start keeps nothing (throwaway disk or quick boot off): turn it off instead.", "Bu açılış hiçbir şey saklamıyor (atılan disk ya da hızlı açılış kapalı): onun yerine kapatın."));
             // (QEMU deletes the quick save it replaces first: the new one reuses its room)
             var old = (await Task.Run(() => Guests.Snapshots(os, run.Disk))).FirstOrDefault(s => s.Quick);
@@ -338,8 +359,8 @@ namespace ASoftware.Engine
             await WaitEnd(run, 600);
         }
 
-        /// <summary>Turns the guest off: iOS 16 powers down (its power key); iOS 26 and watchOS sync their disk on the
-        /// root shell, then QEMU quits.</summary>
+        /// <summary>Turns the guest off: iOS 16 powers down (its power key); iOS 26, watchOS and visionOS sync their disk on
+        /// the root shell (their serial console), then QEMU quits.</summary>
         public static async Task TurnOff(string os)
         {
             if (!Runs.TryGetValue(os, out var run)) return;
@@ -367,7 +388,7 @@ namespace ASoftware.Engine
             }
             // the next start boots afresh: a quick save made while it ran (the watch's automatic one) is the way back now,
             // as the one it resumed is (the start scripts mark that)
-            if (ended && run.Disk != "") await Task.Run(() => Guests.MarkWayBack(os, run.Disk));
+            if (ended && run.Disk != "" && Guests.HasQuickSave(os)) await Task.Run(() => Guests.MarkWayBack(os, run.Disk));
         }
 
         /// <summary>Ends a guest the launcher started, by its process ids (what QEMU had not written is lost).</summary>

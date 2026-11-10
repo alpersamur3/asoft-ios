@@ -58,7 +58,6 @@ namespace ASoftware.Engine
                 B("Fill", "#F5F5F7"); B("FillHover", "#D9D9DE"); B("FillPressed", "#C2C2C8"); B("FillText", "#0B0B0D");
                 r["DeviceShadow"] = null;
                 r["DeviceFaint"] = 0.32;
-                r["DeviceLater"] = 0.55;
             }
             else
             {
@@ -77,7 +76,6 @@ namespace ASoftware.Engine
                 s.Freeze();
                 r["DeviceShadow"] = s;
                 r["DeviceFaint"] = 0.17;
-                r["DeviceLater"] = 0.9;     // on a light page half of a dark glass is a grey blob
             }
             foreach (Window w in Application.Current.Windows) TitleBar(w);
             Changed?.Invoke();

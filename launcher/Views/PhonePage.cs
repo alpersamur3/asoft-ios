@@ -39,7 +39,7 @@ namespace ASoftware.Views
         public PhonePage(MainWindow main)
         {
             this.main = main;
-            os = Guests.Ids.FirstOrDefault(Guests.Installed);
+            os = Guests.PhoneIds.FirstOrDefault(Guests.Installed);
             if (PhoneJob.Current != null && PhoneJob.Current.Running) os = PhoneJob.Current.Os;
             folder = DefaultFolder(os);
             Build();
@@ -226,7 +226,7 @@ namespace ASoftware.Views
             var job = PhoneJob.Current;
             bool busy = job != null && job.Running;
             var cards = new WrapPanel();
-            foreach (var g in Guests.Ids)
+            foreach (var g in Guests.PhoneIds)
             {
                 var id = g;
                 bool have = Guests.Installed(g);
@@ -241,7 +241,7 @@ namespace ASoftware.Views
             var outer = new StackPanel { Margin = new Thickness(0, 0, 0, 22) };
             outer.Children.Add(Ui.Dyn(new TextBlock { Text = L.T("3 · What to send", "3 · Ne gönderilsin"), Style = Ui.S("H3"), FontSize = 12.5, Margin = new Thickness(4, 0, 0, 8) }, TextBlock.ForegroundProperty, "Text2"));
             outer.Children.Add(cards);
-            if (Guests.Ids.Any(g => !Guests.Installed(g)))
+            if (Guests.PhoneIds.Any(g => !Guests.Installed(g)))
                 outer.Children.Add(Ui.Text(L.T("What is not on this PC can also be installed by the app itself, from Apple: open it on the phone and choose Set up.",
                     "Bu PC'de olmayanı uygulama kendisi de Apple'dan kurabilir: telefonda açıp Kurulum'u seçin."), "Faint", 2));
             var rows = new List<UIElement>();

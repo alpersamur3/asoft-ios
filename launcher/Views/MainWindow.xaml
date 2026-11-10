@@ -18,7 +18,7 @@
                     <RowDefinition Height="Auto" SharedSizeGroup="Info"/>
                     <RowDefinition Height="Auto" SharedSizeGroup="Actions"/>
                 </Grid.RowDefinitions>
-                <v:DeviceArt Os="{Binding Os}" Height="{Binding DeviceHeight}" Shot="{Binding Shot}" Present="{Binding Present}" Awake="{Binding Awake}" Later="{Binding Later, Mode=OneTime}"
+                <v:DeviceArt Os="{Binding Os}" Height="{Binding DeviceHeight}" Shot="{Binding Shot}" Present="{Binding Present}" Awake="{Binding Awake}"
                              Progress="{Binding DeviceProgress}" Command="{Binding DeviceCmd}" VerticalAlignment="Bottom" HorizontalAlignment="Center"/>
                 <StackPanel Grid.Row="1" Margin="12,14,12,0">
                     <TextBlock Text="{Binding Name}" FontFamily="{StaticResource DisplayFont}" FontSize="21" FontWeight="SemiBold" Foreground="{DynamicResource Text}" HorizontalAlignment="Center"/>
@@ -35,7 +35,7 @@
                     </StackPanel>
                     <ProgressBar Style="{StaticResource Bar}" Width="160" Margin="0,8,0,0" Maximum="100" Value="{Binding Progress}" Visibility="{Binding ShowProgress, Converter={StaticResource Vis}}"/>
                 </StackPanel>
-                <StackPanel Grid.Row="2" Margin="0,12,0,0" Visibility="{Binding HasActions, Converter={StaticResource Vis}}">
+                <StackPanel Grid.Row="2" Margin="0,12,0,0">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <Button x:Name="PrimaryButton" Style="{Binding PrimaryStyle}" Content="{Binding Primary}" Command="{Binding PrimaryCmd}" IsEnabled="{Binding PrimaryEnabled}" MinWidth="112"
                                 AutomationProperties.AutomationId="{Binding PrimaryId}" AutomationProperties.Name="{Binding Primary}"/>
@@ -44,8 +44,8 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,0" Visibility="{Binding Running, Converter={StaticResource Vis}}">
                         <Button Style="{StaticResource BtnLink}" Content="{Binding SaveCloseText}" Command="{Binding SaveCloseCmd}" IsEnabled="{Binding CanSave}"
-                                AutomationProperties.AutomationId="{Binding SaveId}"/>
-                        <Button Style="{StaticResource BtnDanger}" Content="{Binding TurnOffText}" Command="{Binding TurnOffCmd}" Margin="22,0,0,0"
+                                Visibility="{Binding SaveCloseVisibility, Mode=OneTime}" AutomationProperties.AutomationId="{Binding SaveId}"/>
+                        <Button Style="{StaticResource BtnDanger}" Content="{Binding TurnOffText}" Command="{Binding TurnOffCmd}" Margin="{Binding TurnOffMargin, Mode=OneTime}"
                                 AutomationProperties.AutomationId="{Binding OffId}"/>
                     </StackPanel>
                 </StackPanel>

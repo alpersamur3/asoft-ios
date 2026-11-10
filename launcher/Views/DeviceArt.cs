@@ -10,10 +10,11 @@ namespace ASoftware.Views
     /// <summary>One system's device, drawn the way the app's logo draws its iPhone (as the Android app's DeviceView): a
     /// metal frame, a black front, and on its screen what the system last showed (Engine\Thumbs). iOS 26 is an iPhone
     /// with the island; iOS 16 the iPhone X its 1080x2400 screen belongs to (a notch); watchOS a watch with its crown,
-    /// side button and band; visionOS the headset its QEMU window draws (its glass is its screen). Without a picture
-    /// the screen is a home screen in the logo's colours (the watch: its rings); not installed, an empty faint device
-    /// with a plus; while it is installed, a black screen with a thin progress bar, as on an iPhone being restored; a
-    /// system that comes later, half seen with a dark screen. Its height sets its size.</summary>
+    /// side button and band; visionOS the headset its QEMU window draws (its glass is its screen: the 1920x1080 picture
+    /// fills it, the glass's outline cuts its corners). Without a picture the screen is a home screen in the logo's
+    /// colours (the watch: its rings; the headset: icons in a dim room); not installed, an empty faint device with a
+    /// plus; while it is installed, a black screen with a thin progress bar, as on an iPhone being restored. Its height
+    /// sets its size.</summary>
     public class DeviceArt : FrameworkElement
     {
         static FrameworkPropertyMetadata Meta(object def, bool measure = false) =>
@@ -29,9 +30,6 @@ namespace ASoftware.Views
         /// <summary>How much of a faint device shows (the theme's DeviceFaint: on the light page dark metal at the dark
         /// page's level reads as a grey block).</summary>
         public static readonly DependencyProperty FaintProperty = DependencyProperty.Register(nameof(Faint), typeof(double), typeof(DeviceArt), Meta(0.32));
-        public static readonly DependencyProperty LaterProperty = DependencyProperty.Register(nameof(Later), typeof(bool), typeof(DeviceArt), Meta(false));
-        /// <summary>How much of a device that comes later shows (the theme's DeviceLater).</summary>
-        public static readonly DependencyProperty LaterOpacityProperty = DependencyProperty.Register(nameof(LaterOpacity), typeof(double), typeof(DeviceArt), Meta(0.5));
 
         /// <summary>ios26, ios16, watch or vision.</summary>
         public string Os { get => (string)GetValue(OsProperty); set => SetValue(OsProperty, value); }
@@ -46,9 +44,6 @@ namespace ASoftware.Views
         /// <summary>What a click does; a device with one lifts a little under the pointer.</summary>
         public ICommand Command { get => (ICommand)GetValue(CommandProperty); set => SetValue(CommandProperty, value); }
         public double Faint { get => (double)GetValue(FaintProperty); set => SetValue(FaintProperty, value); }
-        /// <summary>A system that comes in a later version: half seen, its screen dark.</summary>
-        public bool Later { get => (bool)GetValue(LaterProperty); set => SetValue(LaterProperty, value); }
-        public double LaterOpacity { get => (double)GetValue(LaterOpacityProperty); set => SetValue(LaterOpacityProperty, value); }
 
         enum Kind { Island, Notch, Watch, Headset }
         Kind K => Os == "ios26" ? Kind.Island : Os == "ios16" ? Kind.Notch : Os == "watch" ? Kind.Watch : Kind.Headset;
@@ -72,23 +67,22 @@ namespace ASoftware.Views
             RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
             RenderTransform = lift;
             SetResourceReference(FaintProperty, "DeviceFaint");
-            SetResourceReference(LaterOpacityProperty, "DeviceLater");
             Shade();
         }
 
         bool IsFaint => !Present && Progress < 0;
 
-        /// <summary>A soft shadow on the light page (none on the dark one); a faint device, or one to come, casts none.</summary>
+        /// <summary>A soft shadow on the light page (none on the dark one); a faint device casts none.</summary>
         void Shade()
         {
-            if (IsFaint || Later) Effect = null;
+            if (IsFaint) Effect = null;
             else SetResourceReference(EffectProperty, "DeviceShadow");
         }
 
         protected override void OnPropertyChanged(DependencyPropertyChangedEventArgs e)
         {
             base.OnPropertyChanged(e);
-            if (e.Property == OsProperty || e.Property == PresentProperty || e.Property == ProgressProperty || e.Property == LaterProperty) Shade();
+            if (e.Property == OsProperty || e.Property == PresentProperty || e.Property == ProgressProperty) Shade();
         }
 
         static Color C(int rgb, byte a = 0xFF) => Color.FromArgb(a, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
@@ -136,9 +130,9 @@ namespace ASoftware.Views
             // (the whole box takes the pointer, so the lift does not flicker at the device's edge)
             dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
             var k = K;
-            bool dim = IsFaint || Later;
+            bool dim = IsFaint;
             plusAt = Rect.Empty;
-            if (dim) dc.PushOpacity(Later ? LaterOpacity : Faint);
+            if (dim) dc.PushOpacity(Faint);
             switch (k)
             {
                 case Kind.Watch: Watch(dc, w, h); break;
@@ -389,7 +383,6 @@ namespace ASoftware.Views
                 plusPen = Math.Max(1.4, 1.6 * u);
                 return;
             }
-            if (Later) return;
             if (Shot != null)
             {
                 dc.DrawRectangle(ShotBrush(s), null, s);
@@ -489,7 +482,6 @@ namespace ASoftware.Views
                 plusAt = s; plusPen = pen;
             }
             else if (Shot != null) dc.DrawRectangle(ShotBrush(s), null, s);
-            else if (Later) dc.DrawRectangle(Empty, null, s);
             else if (kind == Kind.Watch) Rings(dc, s);
             else HomeScreen(dc, s, kind);
             if (Present && !Awake && !installing) dc.DrawRectangle(Scrim, null, s);

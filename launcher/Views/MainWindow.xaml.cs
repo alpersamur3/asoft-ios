@@ -72,9 +72,9 @@ namespace ASoftware.Views
                     var q = Guests.FindRunning(os, qemus);
                     if (q != null) Machines.Adopt(os, q);
                 }
-                foreach (var c in cards.Where(c => !c.Later))
+                foreach (var c in cards)
                 {
-                    if (c.Test == null && (DateTime.Now - c.QuickLooked).TotalSeconds > 45 && Guests.Installed(c.Os) && !Machines.Runs.ContainsKey(c.Os))
+                    if (c.Test == null && Guests.HasQuickSave(c.Os) && (DateTime.Now - c.QuickLooked).TotalSeconds > 45 && Guests.Installed(c.Os) && !Machines.Runs.ContainsKey(c.Os))
                     {
                         c.QuickLooked = DateTime.Now;
                         var os = c.Os;
@@ -281,7 +281,7 @@ namespace ASoftware.Views
                 Machines.Runs[c.Os] = new GuestRun
                 {
                     Os = c.Os, QemuPid = t == "starting" ? 0 : me, Ours = true, Smp = Guests.Cfg(c.Os).Smp, RamMiB = Guests.Ram(c.Os),
-                    Disk = Guests.SaveDisk(c.Os), QuickBoot = true, Started = DateTime.Now.AddMinutes(-14), Busy = t == "saving" ? "saving" : t == "stopping" ? "stopping" : ""
+                    Disk = Guests.SaveDisk(c.Os), QuickBoot = Guests.HasQuickSave(c.Os), Started = DateTime.Now.AddMinutes(-14), Busy = t == "saving" ? "saving" : t == "stopping" ? "stopping" : ""
                 };
             }
         }
@@ -303,13 +303,17 @@ namespace ASoftware.Views
         {
             try
             {
-                try { await Machines.Start(os, loadState); }
+                GuestRun run;
+                try { run = await Machines.Start(os, loadState); }
                 catch (Machines.RamWarning w)
                 {
                     if (Dialog.Show(this, L.T("Memory is short", "Bellek az"), w.Message, L.T("Start anyway", "Yine de başlat"), L.K("Cancel")) != 0) return;
-                    await Machines.Start(os, loadState, true);
+                    run = await Machines.Start(os, loadState, true);
                 }
-                Snack(L.T($"{Guests.Name(os)} is starting in its own window.", $"{Guests.Name(os)} kendi penceresinde açılıyor."), "good");
+                // (visionOS from cold: minutes of a dark window, said so that nobody takes it for a hang)
+                Snack(os == "vision" && !run.Resumed
+                    ? L.T("visionOS is starting in its own window: Home comes after about 5 to 7 minutes (the window stays dark for about 4.5).", "visionOS kendi penceresinde açılıyor: Home yaklaşık 5–7 dakikada gelir (pencere yaklaşık 4,5 dakika karanlık kalır).")
+                    : L.T($"{Guests.Name(os)} is starting in its own window.", $"{Guests.Name(os)} kendi penceresinde açılıyor."), "good");
             }
             catch (Exception ex)
             {
@@ -325,7 +329,7 @@ namespace ASoftware.Views
 
         public async void SaveClose(string os)
         {
-            if (!leaving.Add(os)) return;
+            if (!Guests.HasQuickSave(os) || !leaving.Add(os)) return;
             try
             {
                 // its screen as it is left, for its device (at most a few seconds; it never stops the save)
@@ -371,7 +375,7 @@ namespace ASoftware.Views
             {
                 why = L.T("The next start boots it afresh.", "Sonraki açılış baştan başlar.");
                 var disk = run.Disk;
-                var q = (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(s => s.Quick);
+                var q = !Guests.HasQuickSave(os) ? null : (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(s => s.Quick);
                 if (q != null) why += " " + L.T($"The last save ({Guests.When(q.When)}) stays as a way back until the next Save and close.",
                                                 $"Son kayıt ({Guests.When(q.When)}) bir sonraki Kaydet ve kapat'a kadar geri dönüş noktası olarak kalır.");
                 if (run.QuickBoot) why += " " + L.T("Save and close instead keeps it where it is.", "Kaydet ve kapat ise olduğu yerde saklar.");
@@ -443,7 +447,7 @@ namespace ASoftware.Views
                 case "settings": ShowPage(new SettingsPage(this)); break;
                 case "phone": OpenPhone(); break;
                 case "report": OpenReport(); break;
-                case "ios16": case "ios26": case "watch": OpenOs(page, tab); break;
+                case "ios16": case "ios26": case "watch": case "vision": OpenOs(page, tab); break;
                 case "devices": ShowPage(TestDevices()); break;
                 default: GoHome(); break;     // (dialog: the home page under it)
             }
@@ -452,14 +456,14 @@ namespace ASoftware.Views
         /// <summary>-page devices (screenshots only): every device in each state it draws, for a look at the drawings.</summary>
         FrameworkElement TestDevices()
         {
-            var states = new (string name, bool present, bool awake, bool shot, double progress, bool later)[]
+            var states = new (string name, bool present, bool awake, bool shot, double progress)[]
             {
-                (L.T("picture, running", "resim, çalışıyor"), true, true, true, -1, false), (L.T("picture, off", "resim, kapalı"), true, false, true, -1, false),
-                (L.T("no picture, running", "resim yok, çalışıyor"), true, true, false, -1, false), (L.T("installing 40 %", "kuruluyor %40"), false, false, false, 40, false),
-                (L.T("not installed", "kurulu değil"), false, false, false, -1, false), (L.T("coming later", "yakında"), true, false, false, -1, true)
+                (L.T("picture, running", "resim, çalışıyor"), true, true, true, -1), (L.T("picture, off", "resim, kapalı"), true, false, true, -1),
+                (L.T("no picture, running", "resim yok, çalışıyor"), true, true, false, -1), (L.T("installing 40 %", "kuruluyor %40"), false, false, false, 40),
+                (L.T("not installed", "kurulu değil"), false, false, false, -1)
             };
             var rows = new StackPanel { Margin = new Thickness(30, 0, 30, 20) };
-            foreach (var os in new[] { "vision" }.Concat(Guests.Ids))
+            foreach (var os in Guests.Ids)
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
                 var pic = Thumbs.Get(os);
@@ -468,7 +472,7 @@ namespace ASoftware.Views
                     var cell = new StackPanel { Width = 190 };
                     var d = new DeviceArt
                     {
-                        Os = os, Height = os == "watch" ? 136 : os == "vision" ? 89 : 160, Present = s.present, Awake = s.awake, Progress = s.progress, Later = s.later,
+                        Os = os, Height = os == "watch" ? 136 : os == "vision" ? 89 : 160, Present = s.present, Awake = s.awake, Progress = s.progress,
                         Shot = s.shot ? pic : null, HorizontalAlignment = HorizontalAlignment.Center
                     };
                     d.VerticalAlignment = VerticalAlignment.Bottom;
@@ -709,6 +713,12 @@ namespace ASoftware.Views
                 await Task.Delay(int.TryParse(Program.Arg("-wait"), out var ms) ? ms : 2500);
                 Poll();
                 await Task.Delay(1200);
+                // -scroll PX: the page's scrolling part moved down, for what a window as tall as the screen does not show
+                if (double.TryParse(Program.Arg("-scroll"), out var down))
+                {
+                    var sv = FirstScroller(Page.Visibility == Visibility.Visible ? (DependencyObject)Page : Home);
+                    if (sv != null) { sv.ScrollToVerticalOffset(down); sv.UpdateLayout(); await Task.Delay(400); }
+                }
                 var root = (FrameworkElement)Content;
                 var dpi = VisualTreeHelper.GetDpi(this);
                 var bmp = new RenderTargetBitmap((int)(root.ActualWidth * dpi.DpiScaleX), (int)(root.ActualHeight * dpi.DpiScaleY), 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
@@ -734,6 +744,20 @@ namespace ASoftware.Views
             }
             catch (Exception ex) { Log.Write("shot: " + ex); }
             Quit();
+        }
+
+        /// <summary>The outermost scroll viewer under @e that has something to scroll (breadth first).</summary>
+        static ScrollViewer FirstScroller(DependencyObject e)
+        {
+            var q = new Queue<DependencyObject>();
+            q.Enqueue(e);
+            while (q.Count > 0)
+            {
+                var d = q.Dequeue();
+                if (d is ScrollViewer s && s.ScrollableHeight > 0) return s;
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++) q.Enqueue(VisualTreeHelper.GetChild(d, i));
+            }
+            return null;
         }
     }
 
