@@ -241,18 +241,19 @@ is `-Work D:\ios26` for `Start-iOS26.ps1`. In MSYS the sources folder is a path 
 ### 1. QEMU and the GPU library (MSYS2 UCRT64, started from PowerShell)
 
 ```
-git clone -b asoft https://github.com/alpersamur3/qemu-sptm %ASOFT26_SRC%\qemu-sptm
-git clone -b windows https://github.com/alpersamur3/reims-vgpu %ASOFT26_SRC%\reims-vgpu
-git clone -b windows https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\metal2vulkan-win
+git clone -b asoft-release https://github.com/alpersamur3/qemu-sptm %ASOFT26_SRC%\qemu-sptm
+git clone -b asoft/release-win https://github.com/alpersamur3/reims-vgpu %ASOFT26_SRC%\reims-vgpu
+git clone -b asoft/release-win https://github.com/alpersamur3/metal2vulkan %ASOFT26_SRC%\metal2vulkan-win
 ```
 
-qemu-sptm's branch was `ios26` until 2026-11-01: in an older clone, `git fetch -p`, `git branch -m
-ios26 asoft` and `git branch -u origin/asoft` (in `%ASOFT26_SRC%\qemu-sptm`) move it over.
+These are the branches the release is built from (`asoft` and `windows` before 0.3.0): in an older
+clone, `git fetch` and `git switch asoft-release` (`asoft/release-win` in the other two) move it over.
 
 1. `win-nettle.sh`: a static nettle 3.10.1 (put GNU's `nettle-3.10.1.tar.gz` in `deps\dl` first).
 2. `ucrt.ps1 ios26\scripts\reims-build.sh`: reims-vgpu → `reims-dist`.
 3. `win-build.sh`: QEMU → `dist`. Copy it to `<ASOFT26>\qemu`. The same build runs iOS 16 with
-   `-M virt` (the top-level README's [QEMU](../README.md#qemu)): one QEMU for both.
+   `-M virt`, and watchOS and visionOS with `-M vresearch` (the top-level README's
+   [QEMU](../README.md#qemu)): one QEMU for all four.
 
 ### 2. Apple's files (WSL)
 
@@ -348,7 +349,7 @@ Every binary you change or add needs its CDHash in the trust cache: get it with 
    4. `apply-apps.sh`, then `root26-nowatchdog.py`.
    5. Add the patched subcache's CDHash.
    6. The wallpaper: iOS 26's default poster, MercuryPoster (`space.dynamic`), is a 3D scene its
-      Metal draws; it needs metal2vulkan's `windows` branch at 56705098 or later (before that it
+      Metal draws; it needs metal2vulkan at 56705098 or later, which `asoft/release-win` has (before that it
       drew black: its uniforms are bound 4 bytes past a multiple of 16, which iOS allows and the
       translator read 4 bytes early). Boot once with `-Keep` and leave it for 6 minutes:
       PosterBoard's first run writes the poster store, and the throwaway overlay of a normal start
