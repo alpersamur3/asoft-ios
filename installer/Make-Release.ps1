@@ -9,12 +9,41 @@
 param(
     [Parameter(Mandatory = $true)] [string]$Version,
     [string]$QemuDist = 'C:\asoft-build\ios26\dist-win',
-    [string]$Out = "$PSScriptRoot\..\release"
+    [string]$Out = "$PSScriptRoot\..\release",
+    # a package whose QEMU lacks visionOS's options, made on purpose (its visionOS installs need -VisionQemu)
+    [switch]$NoVision
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
 $name = "ASoftware-iOS-$Version"
 $stage = Join-Path $Out $name
+
+if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "no QEMU build in $QemuDist" }
+# visionOS runs on the same QEMU: a build with usb-touchscreen's walk-hold-key and -cpu x-tlbi-filter, which
+# Install-visionOS.ps1's qemu step checks; a package without them makes a visionOS install ask for -VisionQemu,
+# so it is made only with -NoVision (checked before anything is built)
+# A QEMU's output to a probe, stdout and stderr, as Setup-ASoftware.ps1's Qemu-Probe (Windows PowerShell 5.1
+# turns a native tool's stderr into errors; a probe that does not end is stopped by its PID)
+function Qemu-Probe([string]$exe, [string[]]$argv) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $exe
+    $psi.Arguments = $argv -join ' '
+    $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.CreateNoWindow = $true
+    $p = [Diagnostics.Process]::Start($psi)
+    $err = $p.StandardError.ReadToEndAsync(); $o = $p.StandardOutput.ReadToEndAsync()
+    if (-not $p.WaitForExit(20000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; return '' }
+    $o.Result + "`n" + $err.Result
+}
+$lacks = @()
+if ((Qemu-Probe "$QemuDist\qemu-system-aarch64.exe" @('-device', 'usb-touchscreen,help')) -cnotmatch '\bwalk-hold-key=') { $lacks += 'usb-touchscreen walk-hold-key' }
+# (a machine-less start whose last, unknown CPU option ends it at once: a QEMU without x-tlbi-filter names that one instead)
+$cpu = Qemu-Probe "$QemuDist\qemu-system-aarch64.exe" @('-M', 'none', '-cpu', 'max,x-tlbi-filter=on,x-asoft-probe=on', '-display', 'none', '-S', '-nodefaults')
+if ($cpu -cnotmatch 'x-asoft-probe' -or $cpu -cmatch "x-tlbi-filter' not found") { $lacks += '-cpu x-tlbi-filter' }
+if ($lacks) {
+    $why = "$QemuDist's QEMU has no $($lacks -join ' and ') (visionOS's options): visionOS installs from this package would need -VisionQemu"
+    if (-not $NoVision) { throw "$why. Give a build that has them with -QemuDist (qemu-sptm asoft-release, win-build.sh's dist), or -NoVision to make such a package on purpose" }
+    Write-Warning "$why (-NoVision)"
+}
+
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 if (git -C $repo status --porcelain) { throw 'commit first: the package takes the committed files' }
@@ -41,13 +70,6 @@ Copy-Item "$helper\Image.gz", "$helper\initrd.gz" "$stage\installer\helper\out\"
 $kernel = Get-ChildItem "$repo\xnu\out-*\kernel.development.sweet" | Sort-Object { $_.Directory.Name } | Select-Object -Last 1
 New-Item -ItemType Directory -Force "$stage\xnu\$($kernel.Directory.Name)" | Out-Null
 Copy-Item $kernel.FullName "$stage\xnu\$($kernel.Directory.Name)\"
-if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "no QEMU build in $QemuDist" }
-# (visionOS runs on the same QEMU: a build with usb-touchscreen's walk-hold-key and -cpu x-tlbi-filter, which
-# Install-visionOS.ps1's qemu step checks; a package without them makes a visionOS install ask for -VisionQemu)
-$ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-$probe = @(& "$QemuDist\qemu-system-aarch64.exe" -device 'usb-touchscreen,help' 2>&1 | ForEach-Object { "$_" })
-$ErrorActionPreference = 'Stop'
-if (-not ($probe | Where-Object { $_ -cmatch '\bwalk-hold-key=' })) { Write-Warning "$QemuDist's QEMU has no usb-touchscreen walk-hold-key: visionOS installs from this package need -VisionQemu" }
 robocopy $QemuDist "$stage\qemu\bin" /MIR /XD backup-* /NFL /NDL /NJH /NJS /NP | Out-Null
 # (BUILD.txt's first line is the build's stamp, the commits it was built from; the lines under it are notes)
 $qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { "$(Get-Content "$QemuDist\BUILD.txt" -TotalCount 1)".Trim() } else { '' }
