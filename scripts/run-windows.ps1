@@ -18,8 +18,9 @@ param(
     [string]$Qemu = $(if (Test-Path "$Work\qemu\qemu-system-aarch64.exe") { "$Work\qemu\qemu-system-aarch64.exe" }
                       else { "$Work\qemu\v11.1.2-asoft\qemu-system-aarch64.exe" }),
     # 0102 tells QEMU when iOS turns the display off (side bar: Screen off, Wake); 0103 sets the
-    # clock from the host's after a pause or a quick boot
-    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0103\kernel.development.sweet",
+    # clock from the host's after a pause or a quick boot; 0104 issues and consumes sandbox
+    # extension tokens, so TCC grants hold (assetsd no longer aborts at every boot)
+    [string]$Kernel = "$PSScriptRoot\..\xnu\out-0104\kernel.development.sweet",
     # New user disks start from v5. Layers, each an overlay on the one before (never write a layer
     # that others sit on): the base image as built; v2, its LaunchServices database rebuilt with
     # kernel 0099 so wallpaper posters and widgets are registered; v3, asoftinstalld that starts at

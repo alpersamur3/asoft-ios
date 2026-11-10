@@ -154,7 +154,7 @@
         }
       },
       "kernel": {
-        "from": "xnu/out-0103/kernel.development.sweet",
+        "from": "xnu/out-0104/kernel.development.sweet",
         "note": "our XNU build: in the PC package and the app"
       },
       "bootArgs": "debug=0xc serial=3 cpus=4 keepsyms=1 -enable_kprintf_spam -noprogress rd=vblkroot0 vblkrw=1 rootrw=1 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin launchd_unsecure_cache=1 wdt=-1 sweetfb_hz=30 launchd_disable_all_timeouts=1 sweetfb_noconsole=1 sweetfb_keepon=1",
