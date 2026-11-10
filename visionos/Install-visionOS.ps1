@@ -17,13 +17,15 @@
 #                         visionOS's options; else the release package asoft-setup.json names
 #     -AudioPlugin FOLDER the virtio-snd HAL plug-in (VPhoneVirtIOSound.driver, or a folder with it, as the CI's
 #                         artifact has it), checked by its pinned SHA-256s; else the release below; without one
-#                         visionOS is installed silent only (no sound disk)
+#                         visionOS is installed silent only (no sound disk). Given (or published) after a silent
+#                         install was finished, it adds the sound disk; the silent disk stays as it is
 #     -CdnEdge IP         an Apple CDN edge (17.253.x.x) for the 7.65 GB runtime, where this network's DNS answer
 #                         is slow; TLS still checks the host name
 #     -KeepBuildFiles     keep the runtime's .dmg and the build's leftovers
 # The Linux steps run in the iOS 26 install's WSL distro (its -Linux helper mode is not supported here).
 # Redoing a disk step (-From/-Only rootfs ... disks) after a finished install keeps the user disks as
-# visionos\vision.qcow2.old and vision-silent.qcow2.old: the new ones start afresh.
+# visionos\vision.qcow2.old and vision-silent.qcow2.old (an earlier .old stays: .old2, .old3, ...): the new ones
+# start afresh.
 param(
     [string]$Work = '',
     [string]$Config = (Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json'),
@@ -226,7 +228,8 @@ function Mark-File([string]$id) { In-Work "install\vision-$id.done" }
 function Get-Mark([string]$id) { $f = Mark-File $id; if (Test-Path $f) { (Get-Content $f -Raw).Trim() } else { $null } }
 function Set-Mark([string]$id, [string]$sig) { Set-Content -Path (Mark-File $id) -Value $sig -Encoding UTF8 }
 function Clear-Mark([string]$id) { Remove-Item (Mark-File $id) -ErrorAction SilentlyContinue }
-# the audio step's: whether there is a plug-in to install (so a plug-in given later redoes the disk chain from it)
+# the audio step's: whether there is a plug-in to install (so a plug-in given later redoes the disk chain from it,
+# unless the install is finished: then the sound disk is added, see Sound-Later)
 function Step-Sig([string]$id) { if ($id -ceq 'audio') { "audio $(Audio-State)" } else { 'done' } }
 
 # --- The guest (the install's two boots) ---------------------------------------------------------
@@ -470,8 +473,10 @@ function Do-Qemu {
     if (-not $DryRun -and (Test-Path $build)) { foreach ($l in Get-Content $build) { Say $l } }
 }
 function Do-Rooms {
-    Need-Space $Space.rooms
     $b = In-Vision 'build\rooms'
+    # (a download that stopped has that much of the .dmg there already: rooms.sh goes on with it)
+    $part = Join-Path $b 'rt.dmg'
+    Need-Space ($Space.rooms - $(if (Test-Path $part) { (Get-Item $part).Length / 1e9 } else { 0 }))
     $asset = Join-Path $b 'asset.json'
     if (-not $DryRun) { New-Item -ItemType Directory -Force $b | Out-Null }
     # Apple's asset server: the runtime's URL and its archive key (the answer must name the pinned archive)
@@ -561,7 +566,8 @@ function Need-Gpu {
 }
 # The user disks (vision.qcow2 on rootv-a, vision-silent.qcow2 on rootv-s, both on rootv-b on rootv-p on rootv) before
 # a step replaces them or a layer under them: a disk the install finished (<disk>.ready) is kept as <disk>.old, with
-# what visionOS wrote (on the old layers: mountable with them only), one the install did not finish goes
+# what visionOS wrote (on the old layers: mountable with them only), one the install did not finish goes. An .old
+# an earlier redo kept is never written over: this one gets the next free name (.old2, .old3, ...)
 function Retire-Vision {
     foreach ($n in 'vision.qcow2', 'vision-silent.qcow2') {
         $disk = In-Vision $n
@@ -569,8 +575,10 @@ function Retire-Vision {
         if (-not (Test-Path $disk)) { Remove-Item $ready -ErrorAction SilentlyContinue; continue }
         Need-NoVision
         if (Test-Path $ready) {
-            Say "visionos\$n, a disk visionOS ran from, rests on what this step replaces: kept as visionos\$n.old (a new one starts afresh)" Yellow
-            if (-not $DryRun) { Move-Item $disk "$disk.old" -Force; Remove-Item $ready -Force }
+            $old = "$disk.old"
+            for ($k = 2; (Test-Path $old); $k++) { $old = "$disk.old$k" }
+            Say "visionos\$n, a disk visionOS ran from, rests on what this step replaces: kept as visionos\$(Split-Path $old -Leaf) (a new one starts afresh)" Yellow
+            if (-not $DryRun) { Move-Item $disk $old; Remove-Item $ready -Force }
         } else {
             Show-Cmd "del visionos\$n   (an unfinished install's)"
             if (-not $DryRun) { Remove-Item $disk -Force }
@@ -595,6 +603,14 @@ function Audio-State {
     if (Test-Path (In-Vision 'audio\hash.txt')) { return 'plugin' }
     'none'
 }
+# A finished install (its disks step done, the silent disk ready) is not taken apart for the plug-in: its disk chain
+# is not redone when the audio step's signature changes. A plug-in that came after it (given now, or published since)
+# only adds the sound disk: rootv-a.qcow2 on the finished rootv-b.qcow2 with the plug-in on it, vision.qcow2 on that,
+# and rootv.tc gains the plug-in's CDHash. vision-silent.qcow2, every layer under it and its saves stay as they are.
+# (-From audio redoes the disk chain with the plug-in in the root instead, as an install that had it from the start:
+# the finished disks are then kept as .old on layers that are rebuilt, which they cannot boot from.)
+function Install-Finished { ((Get-Mark 'disks') -ceq 'done') -and (Test-Path (In-Vision 'vision-silent.qcow2.ready')) }
+function Sound-Later { (Install-Finished) -and ((Audio-State) -ceq 'plugin') -and -not (Test-Path (In-Vision 'vision.qcow2.ready')) }
 # VPhoneVirtIOSound.driver in a folder: the folder itself, or where the CI's artifact puts it
 function Find-Driver([string]$dir) {
     foreach ($rel in '', 'VPhoneVirtIOSound.driver', 'xros\VPhoneVirtIOSound.driver', 'VPhoneVirtIOSound\xros\VPhoneVirtIOSound.driver') {
@@ -638,7 +654,7 @@ function Do-Audio {
     if (-not $src) {
         Say ('No audio plug-in (VPhoneVirtIOSound): it is not published yet and -AudioPlugin <folder> was not given. ' +
              'visionOS is installed SILENT ONLY: there will be no sound disk (Start-visionOS.cmd -Sound refuses). Give the ' +
-             'plug-in later with -AudioPlugin and run this installer again: it redoes the disk steps from this one.') Yellow
+             'plug-in later with -AudioPlugin and run this installer again: it adds the sound disk, and the silent one stays as it is.') Yellow
         if (-not $DryRun) { Remove-Item (In-Vision 'audio') -Recurse -Force -ErrorAction SilentlyContinue }
         return
     }
@@ -760,12 +776,31 @@ function Do-Disks {
     Need-Input 'rootv-b.qcow2' 'firstboot'
     Need-NoVision
     Need-Space $Space.disks
-    Retire-Vision
     $audio = Audio-Wsl
-    $null = Run-Wsl 'disks' (Step-Body 'disks').Replace('{AUDIO}', $audio)
+    if ($SoundOnly) {
+        # the plug-in came after the silent install was finished (Sound-Later): only the sound disk is made
+        Say ('The audio plug-in came after this silent install was finished: the sound disk is added on its finished layers ' +
+             '(rootv-a.qcow2 with the plug-in, vision.qcow2 on it); vision-silent.qcow2, the layers under it and its saves ' +
+             'stay as they are. (-From audio would redo the disk chain with the plug-in in the root instead: the finished ' +
+             'disks would then be kept as .old on rebuilt layers, which they cannot boot from.)') Yellow
+        Need-Input 'audio\hash.txt' 'audio'
+        if (Test-Path (In-Vision 'vision.qcow2')) { Show-Cmd 'del visionos\vision.qcow2   (an unfinished one)'; if (-not $DryRun) { Remove-Item (In-Vision 'vision.qcow2') -Force } }
+    } else {
+        Retire-Vision
+    }
+    if ($audio) {
+        # rootv.tc has the plug-in's CDHash (the trustcache step's, when the plug-in came first; one that came later
+        # gets it here): made from itself, so every entry a disk boots with stays
+        $tc = In-Vision 'rootv.tc'
+        $null = Py 'mktc.py' @('-2', "$tc.new", $tc, (In-Vision 'audio\hash.txt'))
+        Show-Cmd 'replace visionos\rootv.tc with rootv.tc.new'
+        # (no backup: [NullString], as PowerShell passes $null to a string as '')
+        if (-not $DryRun) { [IO.File]::Replace("$tc.new", $tc, [NullString]::Value) }
+    }
+    $null = Run-Wsl 'disks' (Step-Body 'disks').Replace('{AUDIO}', $audio).Replace('{SOUND_ONLY}', $(if ($SoundOnly) { '1' } else { '' }))
     # the disks are the user's now: a later redo keeps them (Retire-Vision); the launcher starts only these
     if (-not $DryRun) {
-        Set-Content (In-Vision 'vision-silent.qcow2.ready') (Get-Date -Format s)
+        if (-not $SoundOnly) { Set-Content (In-Vision 'vision-silent.qcow2.ready') (Get-Date -Format s) }
         if ($audio) { Set-Content (In-Vision 'vision.qcow2.ready') (Get-Date -Format s) }
     }
 }
@@ -849,13 +884,15 @@ if (-not $Py) { $Py = 'python.exe' }
 
 if ($List) {
     $tm = 0; $tg = 0
+    $later = Sound-Later
     foreach ($s in $Steps) {
-        $m = if ($s.Kind -ceq 'always') { 'every run' } elseif ((Get-Mark $s.Id) -ceq (Step-Sig $s.Id)) { 'done' } elseif (Get-Mark $s.Id) { 'redo' } else { '-' }
+        $m = if ($s.Kind -ceq 'always') { 'every run' } elseif ($later -and $s.Id -ceq 'disks') { 'add sound' } elseif ((Get-Mark $s.Id) -ceq (Step-Sig $s.Id)) { 'done' } elseif (Get-Mark $s.Id) { 'redo' } else { '-' }
         Say ("{0,-11} {1,-6} {2,-10} {3,6} {4,9}  {5}" -f $s.Id, $s.Kind, $m, $(if ($s.Min) { "$($s.Min) min" } else { '' }),
              $(if ($s.GB -ge 0.01) { '{0:N2} GB' -f $s.GB } elseif ($s.GB) { '< 0.01 GB' } else { '' }), $s.Title)
         $tm += $s.Min; $tg += $s.GB
     }
     Say ("whole run about {0} h {1} min on our PC, {2:N1} GB from Apple and our releases (audio plug-in: {3})" -f [Math]::Floor($tm / 60), ($tm % 60), $tg, (Audio-State)) DarkGray
+    if ($later) { Say 'the audio plug-in came after this silent install was finished: a run adds the sound disk, and vision-silent.qcow2 and the layers under it stay as they are' Yellow }
     exit 0
 }
 
@@ -864,9 +901,13 @@ Write-Host "ASoftware visionOS installer$(if ($DryRun) { ' (dry run: nothing is 
 Write-Host "  Work $Work (WSL: $(To-Wsl $Work)), WSL distro $Distro, Linux scratch $LinuxDir"
 $fromIdx = if ($From) { [array]::IndexOf($ids, $From) } else { -1 }
 $chainRedone = $false
+# A finished install keeps its disks when the audio step runs again (its chain is not redone), and a plug-in that came
+# after it only adds the sound disk (Sound-Later); -From and -Only redo what they name, as before
+$keepDisks = -not $From -and -not $Only -and (Install-Finished)
+$SoundOnly = $keepDisks -and (Sound-Later)
 for ($i = 0; $i -lt $Steps.Count; $i++) {
     $s = $Steps[$i]
-    $forced = ($From -and $i -ge $fromIdx) -or ($Only -ceq $s.Id)
+    $forced = ($From -and $i -ge $fromIdx) -or ($Only -ceq $s.Id) -or ($SoundOnly -and $s.Id -ceq 'disks')
     $label = "{0}/{1} {2}: {3}" -f ($i + 1), $Steps.Count, $s.Id, $s.Title
     if ($s.Kind -cne 'always' -and -not $forced) {
         if ($Only -or ($From -and $i -lt $fromIdx)) { continue }
@@ -892,14 +933,15 @@ for ($i = 0; $i -lt $Steps.Count; $i++) {
         Add-Content $script:Log ("`n=== {0:yyyy-MM-dd HH:mm:ss} {1}" -f (Get-Date), $label)
     }
     try {
-        if ($s.Kind -ceq 'chain') {
+        if ($s.Kind -ceq 'chain' -and -not ($keepDisks -and $s.Id -ceq 'audio')) {
             $chainRedone = $true
             for ($j = $i + 1; $j -lt $Steps.Count; $j++) {
                 if ($Steps[$j].Kind -ceq 'chain' -and -not $DryRun) { Clear-Mark $Steps[$j].Id }
             }
         }
-        # its own marker too: a redone step that fails (what it replaces may be gone) is redone next time
-        if ($s.Kind -cne 'always' -and -not $DryRun) { Clear-Mark $s.Id }
+        # its own marker too: a redone step that fails (what it replaces may be gone) is redone next time. Not the
+        # disks step's when it only adds the sound disk: that marker stands for the silent disk, which stays
+        if ($s.Kind -cne 'always' -and -not $DryRun -and -not ($SoundOnly -and $s.Id -ceq 'disks')) { Clear-Mark $s.Id }
         Invoke-Step $s.Id
     } catch {
         Write-Host ''

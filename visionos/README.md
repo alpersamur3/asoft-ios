@@ -28,7 +28,9 @@ It needs:
   names; a folder without them is refused before anything is copied. Replacing it needs every guest closed
 - for sound, the virtio-snd HAL plug-in (VPhoneVirtIOSound, from vphone-cli, MIT, built for xrOS on macOS CI):
   not published yet, so `-AudioPlugin <folder>` (`VPhoneVirtIOSound.driver`, or the CI artifact's folder); its
-  three files are checked against pinned SHA-256s and its CDHash. Without it visionOS is installed silent only
+  three files are checked against pinned SHA-256s and its CDHash. Without it visionOS is installed silent only;
+  given (or published) after that install is finished, a new run adds the sound disk and leaves the silent one as
+  it is
 
 About 2 h 10 min on our PC (i7-13700HX, ~7 MB/s from Apple's CDN): rootfs 75 min and rooms 22 min of it, the
 two boots about 18. Like the other installers it leaves a marker per step (`work\install\vision-*.done`) and
@@ -40,22 +42,23 @@ your DNS's is slow.
 |---|---|
 | check | the base (its files, WSL distro, GPU driver, plain kernel) and visionOS's apt packages in WSL (fusepy, cryptography, liblzfse, venv); copies `ios26\scripts`, two of `watchos\scripts` and `visionos\scripts` into `work\visionos\scripts`, where the steps run them |
 | qemu | checks `work\qemu` for visionOS's options; replaces it when they are missing |
-| rooms | asks Apple's asset server for the runtime (TLS checked against Apple Root CA, the answer pinned by size and path), streams its .dmg onto the work drive, copies the six rooms (checked by `rooms.sha256`) and strips their acoustic prims (`usdacoustic.py`, usd-core 26.11) |
+| rooms | asks Apple's asset server for the runtime (TLS checked against Apple Root CA, the answer pinned by size and path), streams its .dmg onto the work drive (a download that stopped goes on where it stopped: the finished parts, noted with their SHA-256 in `rt.dmg.parts`, are checked and kept), copies the six rooms (checked by `rooms.sha256`) and strips their acoustic prims (`usdacoustic.py`, usd-core 26.11) |
 | ipsw | the IPSW's trust cache and N301AP device tree; the OS image's AEA key from Apple's key service and the index of its 67 clusters (pinned) |
 | firmware | `kc-vision.py`: iOS 26's plain kernel + 13 checked patches (iOS 27's, IOGPU timeouts, sandbox syscall filters off), SHA-256 pinned; `dt-vision.py`: the Vision Pro's identity on the 4, 6 and 8 CPU trees |
 | gpu | the GPU driver (`work\gpu-driver`), retargeted to visionOS, signed, into `visionos\gpu` (kept) |
 | rootfs | `mk-rootx.sh`: the partitioned HFS+ root (`rootv.qcow2`, 17.4 GB) copied out of the OS image mounted over HTTP |
-| audio | the audio plug-in, when there is one, checked, into `visionos\audio`; given later, it redoes the disk steps from here |
+| audio | the audio plug-in, when there is one, checked, into `visionos\audio`; given later to an unfinished install, it redoes the disk steps from here, to a finished one only the disks step's sound disk is added (below) |
 | patches | `rootx-patch.sh` on a new overlay, `rootv-p.qcow2`: launchd jobs and launchd's sandbox check, keybag, IOMobileFramebuffer and libxpc shared-cache patches, the staged apps built in, RealityLauncher's long press, prefs, feature flags, churn cuts, the rooms, the GPU driver, the audio plug-in, the keyboard camera |
 | trustcache | `rootv.tc`: Apple's trust cache + the signed sysroot, patched binaries, GPU driver and audio plug-in (3,266 entries) |
 | firstboot | boots once on `rootv-b.qcow2` until usermanagerd has written the persona manifest (about 6 min) |
 | persona | the persona manifest, MobileGestalt, activation record, keyboard intro, environments' first-use gates, the audio ProductID |
 | homeboot | boots again until Home is up (4-6 min), then 2 min more |
-| disks | the Accessibility Shortcut off; `rootv-s.qcow2` (silent: VirtualAudio off, churn3) and, with the plug-in, `rootv-a.qcow2` (sound); on them the disks you use, `vision-silent.qcow2` and `vision.qcow2` |
+| disks | the Accessibility Shortcut off; `rootv-s.qcow2` (silent: VirtualAudio off, churn3) and, with the plug-in, `rootv-a.qcow2` (sound); on them the disks you use, `vision-silent.qcow2` and `vision.qcow2`. A plug-in that came after a finished silent install makes only `rootv-a.qcow2` (with the plug-in on it) and `vision.qcow2`, and `rootv.tc` gains its CDHash: `vision-silent.qcow2`, the layers under it and its saves stay as they are |
 | cleanup, shortcut | removes the build's leftovers; Start menu "ASoftware visionOS" |
 
-Redoing a disk step after a finished install keeps your disks as `visionos\vision.qcow2.old` and
-`vision-silent.qcow2.old` (what visionOS wrote, on the old layers) and starts new ones.
+Redoing a disk step after a finished install (`-From`/`-Only`) keeps your disks as `visionos\vision.qcow2.old` and
+`vision-silent.qcow2.old` (what visionOS wrote, on the old layers) and starts new ones; an `.old` an earlier redo
+kept stays, and the next one is `.old2`, `.old3`, ...
 
 ## Use
 
