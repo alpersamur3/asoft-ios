@@ -9,8 +9,9 @@
 #                   [-Disk base.qcow2] [-Tc base.tc] [-AppsDisk out.qcow2] [-AppsTc out.tc]
 #                   [-Linux wsl|helper] [-WslDistro name]
 #
-# -Linux, -WslDistro: as the installer's, whose config has them. Left to itself, WSL if it has the
-# distro, else the helper VM in <Work>\tools\helper.
+# -Linux, -WslDistro: as the installer's, whose config has them. The config's LinuxMode gives way
+# to the other one when it cannot run here and the other can; -Linux does not. Left to itself, WSL
+# if it has the distro, else the helper VM in <Work>\tools\helper.
 #
 # It writes an "apps" overlay (<base>-apps.qcow2) and trust cache (<base-tc>-apps.tc) next to the
 # base, accumulating every .ipa installed, and prints the pair to boot with:
@@ -68,25 +69,58 @@ $qemuImg = @("$here\qemu\qemu-img.exe", "$Work\qemu\qemu-img.exe", 'C:\Program F
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $qemuImg) { Fail 'no qemu-img.exe (looked next to the launcher and in Program Files)' }
 
-# where the offline edit runs
+# where the offline edit runs: -Linux as given; else the config's LinuxMode, or the other one when
+# that one cannot run here and the other can (a config from another PC or install); else WSL if it
+# has the distro, else the helper VM
 $cfgFile = Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json'
 $cfg = if (Test-Path $cfgFile) { Get-Content $cfgFile -Raw | ConvertFrom-Json } else { $null }
+$distroFrom = if ($WslDistro) { '-WslDistro' } elseif ($cfg -and $cfg.Distro) { "Distro in $cfgFile" } else { 'the default' }
 if (-not $WslDistro) { $WslDistro = if ($cfg -and $cfg.Distro) { [string]$cfg.Distro } else { 'ios-emu' } }
-if (-not $Linux -and $cfg -and $cfg.LinuxMode -in 'wsl', 'helper') { $Linux = [string]$cfg.LinuxMode }
-if (-not $Linux) {
-    $Linux = 'helper'
-    if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
-        $env:WSL_UTF8 = '1'
-        $ErrorActionPreference = 'Continue'
-        $distros = @(& wsl.exe -l -q 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() })
-        if ($LASTEXITCODE -eq 0 -and $distros -ccontains $WslDistro) { $Linux = 'wsl' }
-        $ErrorActionPreference = 'Stop'
-    }
-}
 $helperDir = "$Work\tools\helper"
-if ($Linux -ceq 'helper') {
-    foreach ($f in @("$helperDir\Image.gz", "$helperDir\initrd.gz", "$Work\qemu\qemu-system-aarch64.exe")) {
-        if (-not $Work -or -not (Test-Path $f)) { Fail "no WSL distro $WslDistro, and the helper VM's $f is missing (give -Work; the installer's linux step puts it there)" }
+# Why WSL or the helper VM cannot run here ('' when it can)
+function Wsl-Lacks {
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return 'there is no WSL (wsl.exe)' }
+    $env:WSL_UTF8 = '1'
+    $ErrorActionPreference = 'Continue'
+    $distros = @(& wsl.exe -l -q 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() })
+    $listed = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = 'Stop'
+    if ($listed -and $distros -ccontains $WslDistro) { return '' }
+    "WSL has no distro $WslDistro ($distroFrom)$(if (-not $listed) { " (wsl -l -q: $(@($distros | Where-Object { $_ }) -join ' '))" })"
+}
+function Helper-Lacks {
+    if (-not $Work) { return 'the helper VM needs -Work (its tools\helper and qemu)' }
+    $miss = @(@("$helperDir\Image.gz", "$helperDir\initrd.gz", "$Work\qemu\qemu-system-aarch64.exe") | Where-Object { -not (Test-Path $_) })
+    if (-not $miss) { return '' }
+    "the helper VM's $($miss -join ', ') $(if ($miss.Count -gt 1) { 'are' } else { 'is' }) missing" +
+        $(if (@($miss | Where-Object { $_.StartsWith($helperDir) })) { " (the installer's linux step puts the helper VM in $helperDir)" })
+}
+function Lacks([string]$mode) { if ($mode -ceq 'wsl') { Wsl-Lacks } else { Helper-Lacks } }
+$modeName = @{ wsl = 'WSL'; helper = 'the helper VM' }
+if ($Linux) {
+    # as given, even when it cannot run here
+    $Linux = $Linux.ToLowerInvariant()
+    $why = Lacks $Linux
+    if ($why) { Fail "-Linux $Linux, but $why" }
+} elseif ($cfg -and "$($cfg.LinuxMode)" -cin 'wsl', 'helper') {
+    $Linux = [string]$cfg.LinuxMode
+    $why = Lacks $Linux
+    if ($why) {
+        $other = if ($Linux -ceq 'wsl') { 'helper' } else { 'wsl' }
+        $whyOther = Lacks $other
+        if ($whyOther) { Fail "LinuxMode $Linux in $cfgFile, but $why; and $whyOther, so $($modeName[$other]) cannot stand in either" }
+        Write-Host "LinuxMode $Linux in $cfgFile, but $why; using $($modeName[$other]) instead$(if ($other -ceq 'wsl') { " (distro $WslDistro)" } else { " (in $helperDir)" })"
+        $Linux = $other
+    }
+} else {
+    # auto: WSL if it has the distro, else the helper VM
+    $whyWsl = Wsl-Lacks
+    $Linux = 'wsl'
+    if ($whyWsl) {
+        $why = Helper-Lacks
+        $from = if (-not $cfg) { "no $cfgFile" } elseif ($cfg.LinuxMode) { "LinuxMode $($cfg.LinuxMode) in $cfgFile" } else { "no LinuxMode in $cfgFile" }
+        if ($why) { Fail "no -Linux and $from, so WSL or else the helper VM: $whyWsl, and $why" }
+        $Linux = 'helper'
     }
 }
 

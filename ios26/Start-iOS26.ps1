@@ -181,6 +181,34 @@ function Qemu-Why([string]$log) {
       Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
       ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
 }
+# One queued .ipa through Install-Ipa.ps1 ($installArgs: its arguments after -Ipa). Its output,
+# stdout and stderr, shows here as it comes; an .ipa from the folder ($inbox) then moves into
+# Installed\ or Failed\ with that output as <name>.log next to it (the launcher's Log button), and
+# gets the time of the install (Move-Item keeps the file's own, which the launcher lists them by).
+# True if it installed.
+function Install-QueuedIpa([IO.FileInfo]$ipa, [string]$installer, [string[]]$installArgs, [string]$inbox) {
+    Write-Host "Installing $($ipa.Name) (direct placement)..."
+    $out = [Collections.Generic.List[string]]::new()
+    # Windows PowerShell 5.1 turns a native tool's stderr into error records (thrown under Stop):
+    # here they are lines of the log
+    $ErrorActionPreference = 'Continue'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName @installArgs 2>&1 | ForEach-Object {
+        $l = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { "$_" }
+        $out.Add($l)
+        Write-Host $l
+    }
+    $ok = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = 'Stop'
+    if ($ipa.DirectoryName -eq $inbox) {
+        $done = Join-Path $inbox $(if ($ok) { 'Installed' } else { 'Failed' })
+        New-Item -ItemType Directory -Force $done | Out-Null
+        $moved = Join-Path $done $ipa.Name
+        Move-Item -LiteralPath $ipa.FullName -Destination $moved -Force
+        [IO.File]::SetLastWriteTime($moved, [DateTime]::Now)
+        [IO.File]::WriteAllLines([IO.Path]::ChangeExtension($moved, '.log'), [string[]]$out)
+    }
+    $ok
+}
 # .ipa installs by direct placement (the live installd path needs an APFS Data volume; this disk is
 # HFS+). ASOFT_IPA_DIR is set so the side bar's "Install .ipa..." is enabled; it copies files into
 # $IpaDir. The disk cannot be written while iOS runs, so each .ipa there (and -InstallIpa) is
@@ -206,16 +234,8 @@ if (-not $NoIpa) {
         # resumed after this, the quick save would undo the install: it stays as the way back
         Keep-WayBack $(if ($Persist) { $UserDisk } else { $appsDisk })
         foreach ($ipa in $queue) {
-            Write-Host "Installing $($ipa.Name) (direct placement)..."
-            & powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Ipa $ipa.FullName -Work $Work -Disk $Disk -Tc $Tc @into
-            $ok = ($LASTEXITCODE -eq 0)
-            if ($ipa.DirectoryName -eq $inbox) {
-                $done = Join-Path $IpaDir $(if ($ok) { 'Installed' } else { 'Failed' })
-                New-Item -ItemType Directory -Force $done | Out-Null
-                Move-Item $ipa.FullName (Join-Path $done $ipa.Name) -Force
-            } elseif (-not $ok) {
-                throw "Install-Ipa.ps1 failed for $($ipa.Name)"
-            }
+            $ok = Install-QueuedIpa $ipa $installer (@('-Work', $Work, '-Disk', $Disk, '-Tc', $Tc) + $into) $inbox
+            if (-not $ok -and $ipa.DirectoryName -ne $inbox) { throw "Install-Ipa.ps1 failed for $($ipa.Name)" }
         }
     }
     if (-not $Persist -and (Test-Path $appsDisk)) { $Disk = $appsDisk; $Tc = $appsTc; $Keep = $true }
