@@ -12,7 +12,8 @@ U='{URL}'
 [ -s rt.head ] || { curl -fsS --retry 5 -r 0-1048575 -o rt.head.new "$U" && mv rt.head.new rt.head; }
 [ -s rt.idx ] || { python3 -I $S/aearemote.py index "$U" 0 rt.key rt.head rt.idx.new && mv rt.idx.new rt.idx; }
 if [ ! -e rt.dmg.ok ]; then
-	rm -f rt.dmg
+	# (a download that stopped goes on where it stopped: rtdmg.py checks the parts rt.dmg.parts notes against
+	# rt.dmg, keeps those that match and fetches the rest)
 	EDGE='{EDGE}' python3 -I $S/rtdmg.py "$B/rt.idx" "$B/rt.dmg"
 	: > rt.dmg.ok
 fi
@@ -48,4 +49,4 @@ done
 (cd "$N" && sha256sum --quiet -c $S/rooms-noaudio.sha256) ||
 	echo "(the stripped usdc differ from the ones measured with usd-core 26.11: another usd-core build; they are used as they are)"
 rm -rf "$W/rooms-noaudio"; mv "$N" "$W/rooms-noaudio"
-[ -n '{KEEP}' ] || { rm -f "$B/rt.dmg" "$B/rt.dmg.ok"; echo "removed the runtime's .dmg"; }
+[ -n '{KEEP}' ] || { rm -f "$B/rt.dmg" "$B/rt.dmg.ok" "$B/rt.dmg.parts"; echo "removed the runtime's .dmg"; }
