@@ -84,19 +84,28 @@ foreach ($n in $need) { if (-not (Test-Path $n)) { throw "$n is missing: $goOn" 
 if ($userDisk -and -not (Test-Path ((In-Work $Disk) + '.ready'))) {
     throw "the visionOS install is not finished ($Disk has not been through its disks step): $goOn"
 }
-# what visionOS needs of the QEMU (Install-visionOS.ps1's qemu step put such a one in <work>\qemu)
-$ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-$probe = @(& (Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe') -device 'usb-touchscreen,help' 2>&1 | ForEach-Object { "$_" })
-$machineProbe = @(& (Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe') -M 'vresearch,help' 2>&1 | ForEach-Object { "$_" })
-$ErrorActionPreference = 'Stop'
+# what visionOS needs of the QEMU (Install-visionOS.ps1's qemu step put such a one in <work>\qemu). The probes have
+# a time limit, as Install-visionOS.ps1's: a console exe that hangs (a missing-DLL dialog, an antivirus hold) must
+# not hold the start for ever. Its output, or '' when it did not end in time (then it is stopped by its own PID, and
+# what the probe looks for counts as not there)
+function Qemu-Probe([string]$path, [string[]]$argv, [int]$ms = 20000) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $path
+    $psi.Arguments = ($argv | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.CreateNoWindow = $true
+    try { $p = [Diagnostics.Process]::Start($psi) } catch { return '' }
+    $err = $p.StandardError.ReadToEndAsync(); $out = $p.StandardOutput.ReadToEndAsync()
+    if (-not $p.WaitForExit($ms)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; $null = $p.WaitForExit(5000); return '' }
+    $out.Result + "`n" + $err.Result
+}
+$probeExe = Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe'
+if ((Qemu-Probe $probeExe @('-device', 'usb-touchscreen,help')) -cnotmatch '\bwalk-hold-key=') {
+    throw "$(Split-Path $Exe) is not a QEMU visionOS runs on (its usb-touchscreen has no walk mode): visionos\Install-visionOS.cmd -Only qemu replaces it"
+}
 # loadvm-date: a resumed state's clock is set by "date" on the root shell (the serial console). The QEMU's other
 # way, moving the machine's clock on by the time it was away, makes every timeout that was running at the save
 # run out: visionOS's compositor aborted a few seconds into a state resumed ten minutes or more after its save,
 # with every open app gone and two minutes of starting again. A QEMU without the option resumes its old way.
-$loadDate = [bool]($machineProbe | Where-Object { $_ -cmatch '\bloadvm-date=' })
-if (-not ($probe | Where-Object { $_ -cmatch '\bwalk-hold-key=' })) {
-    throw "$(Split-Path $Exe) is not a QEMU visionOS runs on (its usb-touchscreen has no walk mode): visionos\Install-visionOS.cmd -Only qemu replaces it"
-}
+$loadDate = (Qemu-Probe $probeExe @('-M', 'vresearch,help')) -cmatch '\bloadvm-date='
 # one visionOS at a time: the ports are fixed
 $busy = @(Get-NetTCPConnection -State Listen -LocalPort 4481, 4482, 4483 -ErrorAction SilentlyContinue)
 if ($busy) { throw ("ports 4481-4483 are in use (pid {0}): is visionOS running already?" -f (($busy | ForEach-Object OwningProcess | Sort-Object -Unique) -join ', ')) }

@@ -159,13 +159,20 @@ function Q([string]$a) { '"' + $a + '"' }
 # as iOS 26's and visionOS's are, and the machine's own clock stays where it was saved: no timeout that was running
 # at the save runs out at the load (the watch at its face took the older way, the clock moved on, without harm)
 $machine = 'vresearch,fb=352x430,ppi=326,unauth-root=on,pvg=reims,aks-stub=on,amfi-lc-off=on,aks-crypt=on,acm-stub=on,hfs-dp-stub=on'
-$probeExe = Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe'
-if (Test-Path $probeExe) {
-    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-    $machineProbe = @(& $probeExe -M 'vresearch,help' 2>&1 | ForEach-Object { "$_" })
-    $ErrorActionPreference = 'Stop'
-    if ($machineProbe | Where-Object { $_ -cmatch '\bloadvm-date=' }) { $machine += ',loadvm-date=on' }
+# A QEMU probe (it prints and ends) with a time limit, as Install-visionOS.ps1's: a console exe that hangs (a
+# missing-DLL dialog, an antivirus hold) must not hold the start for ever. Its output, or '' when it did not end in
+# time (then it is stopped by its own PID, and what the probe looks for counts as not there)
+function Qemu-Probe([string]$path, [string[]]$argv, [int]$ms = 20000) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $path
+    $psi.Arguments = ($argv | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true; $psi.CreateNoWindow = $true
+    try { $p = [Diagnostics.Process]::Start($psi) } catch { return '' }
+    $err = $p.StandardError.ReadToEndAsync(); $out = $p.StandardOutput.ReadToEndAsync()
+    if (-not $p.WaitForExit($ms)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; $null = $p.WaitForExit(5000); return '' }
+    $out.Result + "`n" + $err.Result
 }
+$probeExe = Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe'
+if ((Test-Path $probeExe) -and ((Qemu-Probe $probeExe @('-M', 'vresearch,help')) -cmatch '\bloadvm-date=')) { $machine += ',loadvm-date=on' }
 $qargs = @(
     '-name', (Q 'ASoftware watchOS 27.2'),
     '-M', $machine,
