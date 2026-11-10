@@ -2,24 +2,30 @@
 
 watchOS 27.2 (24S118) as an Apple Watch Series 9 (Watch7,1, 41 mm) on QEMU's `-M vresearch`, drawn
 by your PC's GPU (reims-vgpu and metal2vulkan, Vulkan), in a drawn watch case that hangs from the
-window and swings when you drag it. It is built on the iOS 26 install of this PC: its research kernel,
-SPTM, TXM, device tree, shell ramdisk, sysroot, GPU driver and WSL distro. Nothing of Apple's is in this
-repository: the installer downloads the watch's OS image from Apple.
+window and swings when you drag it. It does not need iOS 26, only the base it shares with it: cloudOS
+26.4b's research kernel, SPTM, TXM and device tree, the shell ramdisk, darwin-vm's sysroot, the GPU
+driver and the WSL distro (about 1 GB from Apple, no iPhone files). An iOS 26 install has that base
+already. Nothing of Apple's is in this repository: the installers download it from Apple.
 
 ## Install
 
-Choose **iOS 26** in `Install-ASoftware.cmd` and answer **yes** to watchOS, or, with iOS 26 installed
-already, run `watchos\Install-watchOS.cmd` (it finds the iOS 26 install through its config):
+Choose **watchOS 27.2 only** in `Install-ASoftware.cmd` (`-Version watchos`; `ios16-watchos` adds iOS
+16), or **iOS 26** and answer **yes** to watchOS. With iOS 26 (or the base) installed already, it goes
+into the same folder and downloads only the watch's files. By hand:
 
     watchos\Install-watchOS.cmd [-Work D:\ASoftware\work]
 
+finds the work folder through iOS 26's config; a work folder without the base gets it first (its check
+step runs `ios26\Install-iOS26.ps1 -Base`).
+
 It needs:
-- a finished iOS 26 install whose Linux steps ran in WSL 2, with a GPU driver (GPU-less iOS 26 is not
-  enough: the watch face needs Metal)
-- 5.0 GB from Apple (the IPSW's OS image, its trust cache and the watch's device tree), and
-  about 21 GB free on the install drive while it builds, 14 GB when it is done
-- our QEMU build with the watch's machine options (`qemu-watch\`): a copy of the QEMU this install runs
-  iOS 26 on, from the 0.3.0 package on. For an older install or a checkout give one with `-QemuFrom <folder>`
+- WSL 2 (its Linux steps run there) and a GPU driver: the base takes Apple's out of cloudOS unless iOS
+  26's settings chose another; a GPU-less iOS 26 is not enough, the watch face needs Metal
+- 5.0 GB from Apple (the IPSW's OS image, its trust cache and the watch's device tree), plus about 1 GB
+  for the base when it is not there yet, and about 21 GB free on the install drive while it builds,
+  14 GB when it is done (16 GB with the base)
+- our QEMU build with the watch's machine options (`qemu-watch\`): a copy of the work folder's `qemu\`
+  or of the package's `qemu\bin`, from the 0.3.0 package on. For an older install or a checkout give one with `-QemuFrom <folder>`
   (`Install-ASoftware.cmd -WatchQemu <folder>`); a folder without the watch's devices is refused before
   anything is copied
 
@@ -30,12 +36,12 @@ stopped; `-List` shows the steps, `-DryRun` the commands, `-From STEP` / `-Only 
 
 | Step | What it does |
 |---|---|
-| check | the iOS 26 install (its files, WSL distro, GPU driver, plain kernel); copies this version's `ios26\scripts` and `watchos\scripts` into `work\watchos\scripts`, where the steps run them |
+| check | the base it shares with iOS 26 (its files, WSL distro, GPU driver, plain kernel), made first when it is not there; copies this version's `ios26\scripts` and `watchos\scripts` into `work\watchos\scripts`, where the steps run them |
 | qemu | the watch QEMU into `qemu-watch\` |
 | download | `141-08453-168.dmg.aea` (5.03 GB), its `.trustcache`, `DeviceTree.n207sap.im4p` |
 | decrypt | the OS image (key from Apple's key service, as for iOS 26); the `.aea` goes |
-| firmware | `kc-watch.py`: iOS 26's plain kernel (`cloud\kernelcache.research.vphone600.decompressed`; its `fw\bootkc` has OpenGL ES's keys) + eight checked patches; `dt-watch.py`: the Series 9's identity on `dtree-smp4` and `dtree-smp8` |
-| gpu | the GPU driver (`work\gpu-driver`, else off the iOS 26 disk), retargeted to watchOS, signed, into `watchos\gpu` (kept) |
+| firmware | `kc-watch.py`: the base's plain kernel (`cloud\kernelcache.research.vphone600.decompressed`; an iOS 26 install's `fw\bootkc` has OpenGL ES's keys) + eight checked patches; `dt-watch.py`: the Series 9's identity on `dtree-smp4` and `dtree-smp8` |
+| gpu | the GPU driver (`work\gpu-driver`, which the base's gpudriver step leaves there; an older iOS 26 install's off its disk), retargeted to watchOS, signed, into `watchos\gpu` (kept) |
 | rootfs | `mk-rootw.sh`: the partitioned HFS+ root (`rootw.qcow2`); the image goes (redone later, it gets the image again) |
 | patches | `rootw-patch.sh` on a new overlay, `rootw-p.qcow2`: launchd jobs, keybag, three shared-cache patches, prefs, Setup skipped, the display kept on, the staged apps built in; the GPU driver |
 | trustcache | `rootw.tc`: Apple's trust cache + the signed sysroot, patched subcache and driver |

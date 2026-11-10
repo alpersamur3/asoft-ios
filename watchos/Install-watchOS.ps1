@@ -1,6 +1,7 @@
 # ASoftware watchOS installer: watchOS 27.2 (24S118) as an Apple Watch Series 9 (Watch7,1, 41 mm) on
-# -M vresearch, built on this PC's iOS 26 install or only its base (Install-iOS26.ps1's work folder; its
-# -Base is enough: iOS 26 itself is not needed). From it: cloudOS
+# -M vresearch, built on the base it shares with iOS 26 (Install-iOS26.ps1 -Base's work folder, or a
+# finished iOS 26 install's): iOS 26 itself is not needed. A work folder without the base gets it first
+# (the check step runs Install-iOS26.ps1 -Base: about 1 GB from Apple, no iPhone files). From it: cloudOS
 # 26.4b's research kernel (cloud\kernelcache.research.vphone600.decompressed, which kc-watch.py patches
 # into the watch's), SPTM, TXM, the device trees (dtree-smp4/8, which dt-watch.py gives the watch's
 # identity), the shell ramdisk, darwin-vm's sysroot, the guest GPU driver and the WSL distro. The
@@ -17,11 +18,12 @@
 #                      SHA-1), 141-08453-168.dmg.aea.trustcache, DeviceTree.n207sap.im4p or its unwrapped
 #                      DeviceTree.n207sap.raw; what none has is downloaded
 #     -QemuFrom auto|release|<folder>   the watch QEMU: auto = qemu-watch\ as it is, else a copy of this
-#                      install's qemu\ when it is a watch build (0.3.0 on), else the release package
-#                      below, else stop; <folder> copies a build you have (win-build.sh's dist),
-#                      checked for the watch's devices first
+#                      install's qemu\ when it is a watch build (0.3.0 on), else of this package's
+#                      qemu\bin when it is one, else the release package below, else stop; <folder>
+#                      copies a build you have (win-build.sh's dist), checked for the watch's devices
+#                      first (a base made here takes the same folder for its qemu\)
 #     -KeepBuildFiles  keep the decrypted image and the build's leftovers
-# The Linux steps run in the iOS 26 install's WSL distro (its -Linux helper mode is not supported here).
+# The Linux steps run in the base's WSL distro (Install-iOS26.ps1's -Linux helper mode is not supported here).
 # Redoing a disk step (-From/-Only rootfs, patches, trustcache, firstboot) after a finished install keeps
 # the watch's disk as watchos\watch.qcow2.old: the new one starts afresh.
 param(
@@ -61,9 +63,9 @@ $WatchFiles = [ordered]@{        # member = bytes; into <Work>\watchos\ipsw, wit
 # into extended-range textures (watchOS's backdrops). No separate package: the release package's QEMU is one.
 $QemuWatchRelease = @{ Version = ''; Url = ''; Sha256 = '' }
 $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
-# the kernel kc-watch.py starts from: the iOS 26 install's plain one (its fw\bootkc is that file only when
-# its gpu step did not add OpenGL ES's keys to it), kc-watch.py taking the first that is the stock kernel;
-# else the firmware step decompresses it again out of what iOS 26 downloaded (its cleanup keeps it)
+# the kernel kc-watch.py starts from: the base's plain one (fw\bootkc is that file only when iOS 26's gpu
+# step did not add OpenGL ES's keys to it), kc-watch.py taking the first that is the stock kernel; else
+# the firmware step decompresses it again out of what the base downloaded (iOS 26's cleanup keeps it)
 $KernelIn = @('cloud\kernelcache.research.vphone600.decompressed', 'fw\bootkc')
 $KernelPacked = 'cloudos\kernelcache.research.vphone600'
 # GB a step adds on the work folder's drive at most
@@ -294,20 +296,82 @@ function Stop-Watch($g, [switch]$NoSync) {
 function Stop-Here([string]$why) { if ($DryRun) { Say "(a real run stops here) $why" Yellow } else { Fail $why } }
 # An iOS 26 step's marker (install\<id>.done: the step's signature), or $null
 function Ios-Mark([string]$id) { $f = In-Work "install\$id.done"; if (Test-Path $f) { (Get-Content $f -Raw).Trim() } else { $null } }
+# A finished iOS 26 install's top disk, which has the GPU driver an older install kept nowhere else, or $null
+function Ios26-Disk { @('root.qcow2', 'root26-gpu.qcow2') | Where-Object { Test-Path (In-Work $_) } | Select-Object -First 1 }
+# The QEMU a base made here takes for its qemu\: the watch build -QemuFrom names, else this package's
+# qemu\bin (one QEMU for both, nothing downloaded), else '' (Install-iOS26.ps1's own choice)
+function Base-Qemu {
+    $dirs = @()
+    if ($QemuFrom -cnotin 'auto', 'release') { $dirs += [IO.Path]::GetFullPath($QemuFrom).TrimEnd('\') }
+    $dirs += Join-Path $repo 'qemu\bin'
+    foreach ($d in $dirs) { if (Test-Path -LiteralPath ([IO.Path]::Combine($d, 'qemu-system-aarch64.exe'))) { return $d } }
+    ''
+}
+# The base this builds on, made in this console by Install-iOS26.ps1 -Base (it resumes from its own
+# markers; its Linux steps in WSL, as this installer's)
+function Make-Base {
+    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'ios26\Install-iOS26.ps1'),
+           '-Work', $Work, '-Config', $Config, '-Linux', 'wsl', '-Base')
+    $q = Base-Qemu
+    if ($q) { $a += '-QemuFrom', $q }
+    Say 'the base watchOS shares with iOS 26 is not here: making it first (about 1 GB from Apple; iOS 26 itself is not needed)' Yellow
+    Show-Cmd ('powershell ' + (@($a | Select-Object -Skip 3 | ForEach-Object { Q $_ }) -join ' '))
+    if ($DryRun) { Say '(its own -DryRun shows its steps)' DarkGray; return }
+    # (its own process, as Setup-ASoftware.ps1 runs the installers: waited for itself only)
+    $p = Start-Process powershell.exe -ArgumentList ($a | ForEach-Object { Q $_ }) -NoNewWindow -PassThru
+    $null = $p.Handle
+    $p.WaitForExit()
+    if ($p.ExitCode -eq 5) {
+        Emit 'paused', 'watch', 'check'
+        Write-Host ''
+        Write-Host 'Paused while making the base (ASoftware.exe). Run this again to go on from it.' -ForegroundColor Yellow
+        exit 5
+    }
+    if ($p.ExitCode) { Fail "making the base stopped (Install-iOS26.ps1 -Base exited with $($p.ExitCode); its output is above): fix that and run this again, it goes on where it stopped" }
+    # its Python, there now
+    $own = In-Work 'tools\python\python.exe'
+    if (Test-Path $own) { $script:Py = $own }
+}
 function Do-Check {
-    # the iOS 26 install this builds on (its kernel: kc-watch.py --check below)
+    # the watch face needs Metal: the GPU driver the base leaves in gpu-driver\ (an older iOS 26 install
+    # has it on its disk); a GPU-less iOS 26 install has none to share (said before a base is made)
+    if (((Ios-Mark 'gpu') -ceq 'gpuless' -or (Ios-Mark 'gpudriver') -ceq 'gpuless') -and -not (Test-Path (In-Work "gpu-driver\$GpuBundle"))) {
+        # (a base made alone has no gpu step: running Install-iOS26.cmd plainly would build all of iOS 26)
+        if (Ios-Mark 'gpu') {
+            Stop-Here ('iOS 26 was installed GPU-less, and the watch face needs its GPU driver (Metal): choose one in ' +
+                       'ios26\Start-iOS26.cmd''s menu ([G]), run ios26\Install-iOS26.cmd again (it redoes its gpu step), then this')
+        } else {
+            Stop-Here ('the base was made GPU-less, and the watch face needs a GPU driver (Metal): choose one in ' +
+                       "ios26\Start-iOS26.cmd's menu ([G]), run ios26\Install-iOS26.cmd -Work $Work -Base -Only gpudriver, then this")
+        }
+    }
+    # the base it shares with iOS 26 (its kernel: kc-watch.py --check below); its GPU driver step not run
+    # yet when neither gpu-driver\ nor an iOS 26 disk has the driver
     $need = @('fw\sptm', 'fw\txm', 'dtree-smp4', 'rd-shell.hfs', 'downloads\ios_sysroot.tar.gz',
               'tools\qemu-sptm\scripts\darwin\vresearch_dt_fixup.py')
     $missing = @($need | Where-Object { -not (Test-Path (In-Work $_)) })
-    if ($missing) {
-        Stop-Here ("this has no iOS 26 base ($Work lacks $($missing -join ', ')): make it with Install-ASoftware.cmd -Version watchos " +
-                   '(or install iOS 26), or give its folder with -Work')
+    $noDriver = -not (Test-Path (In-Work "gpu-driver\$GpuBundle")) -and -not (Ios26-Disk) -and -not (Ios-Mark 'gpudriver')
+    # (a dry run does not make it: what the base makes is not looked for below then)
+    $planned = $false
+    if ($missing -or $noDriver) {
+        # the watch QEMU the qemu step will take, looked for first: without one the base would be fetched for nothing
+        $q = Base-Qemu
+        $haveQemu = $QemuWatchRelease.Url -or (Qemu-HasWatch (In-Work 'qemu-watch\qemu-system-aarch64.exe')) -or
+                    (Qemu-HasWatch (In-Work 'qemu\qemu-system-aarch64.exe')) -or ($q -and (Qemu-HasWatch (Join-Path $q 'qemu-system-aarch64.exe')))
+        if (-not $haveQemu) {
+            Stop-Here ('no QEMU with the watch''s devices (usb-crown) here, so nothing is fetched: install from the latest release package, ' +
+                       'or give a build with -QemuFrom <folder> (qemu-sptm asoft-release, win-build.sh''s dist)')
+        }
+        Make-Base
+        $planned = [bool]$DryRun
+        $missing = @($need | Where-Object { -not (Test-Path (In-Work $_)) })
+        if ($missing -and -not $DryRun) { Fail "the base has no $($missing -join ', ') in $Work (Install-iOS26.ps1 -Base's output is above)" }
     }
     # where its Linux steps ran: its linux step's marker has the mode it resolved (its config may say auto)
     $mode = Ios-Mark 'linux'
     if (-not $mode) { $mode = $LinuxMode }
-    if ($mode -ceq 'helper') {
-        Stop-Here 'the iOS 26 install ran its Linux steps in the helper VM; the watchOS installer needs WSL 2 (ios26\Install-iOS26.cmd -Linux wsl -Only linux sets it up)'
+    if ($mode -ceq 'helper' -and -not $planned) {
+        Stop-Here "the base's Linux steps ran in the helper VM; the watchOS installer needs WSL 2 (ios26\Install-iOS26.cmd -Work $Work -Linux wsl -Only linux sets it up)"
     }
     $env:WSL_UTF8 = '1'
     $distros = @()
@@ -316,15 +380,10 @@ function Do-Check {
         $distros = @(& wsl.exe -l -q 2>$null | ForEach-Object { ("$_" -replace "`0", '').Trim() } | Where-Object { $_ })
         $ErrorActionPreference = 'Stop'
     }
-    if ($distros -notcontains $Distro) {
-        Stop-Here "WSL has no distro $Distro, where the iOS 26 install ran its Linux steps (WSL lists: $(if ($distros) { $distros -join ', ' } else { 'none' })): ios26\Install-iOS26.cmd -Linux wsl -Only linux makes it"
+    if ($distros -notcontains $Distro -and -not $planned) {
+        Stop-Here "WSL has no distro $Distro, where the base ran its Linux steps (WSL lists: $(if ($distros) { $distros -join ', ' } else { 'none' })): ios26\Install-iOS26.cmd -Work $Work -Linux wsl -Only linux makes it"
     }
-    # the watch face needs Metal: the GPU driver iOS 26's gpu step leaves in gpu-driver\ (or on its disk)
-    if (((Ios-Mark 'gpu') -ceq 'gpuless' -or (Ios-Mark 'gpudriver') -ceq 'gpuless') -and -not (Test-Path (In-Work "gpu-driver\$GpuBundle"))) {
-        Stop-Here ('iOS 26 was installed GPU-less, and the watch face needs its GPU driver (Metal): choose one in ' +
-                   'ios26\Start-iOS26.cmd''s menu ([G]), run ios26\Install-iOS26.cmd again (it redoes its gpu step), then this')
-    }
-    Say "iOS 26 install: $Work; WSL distro $Distro, Linux scratch $LinuxDir"
+    Say "work folder $Work (the base it shares with iOS 26); WSL distro $Distro, Linux scratch $LinuxDir"
     # the scripts the watch's steps run, in watchos\scripts (WSL reads them there; bash wants LF): this
     # version's iOS 26 scripts (root26-do.sh, mktc.py, root26-prefs.py, ...), not the iOS 26 install's,
     # which may be an older release's, then the watch's own
@@ -347,7 +406,7 @@ function Do-Check {
         $null = Py 'kc-watch.py' (@('--check') + @($KernelIn | ForEach-Object { In-Work $_ })) -NoFail
         if ($script:Code) {
             if (-not (Test-Path (In-Work $KernelPacked))) {
-                Stop-Here "the iOS 26 install has no plain cloudOS 26.4b research kernel (see above), nor $KernelPacked to decompress it from"
+                Stop-Here "the base has no plain cloudOS 26.4b research kernel (see above), nor $KernelPacked to decompress it from"
             }
             Say "the firmware step decompresses it again out of $KernelPacked"
         }
@@ -368,6 +427,9 @@ function Do-Qemu {
     if ($QemuFrom -ceq 'auto' -and $have) { Say "have $dst (it has usb-crown)"; return }
     # the QEMU this install runs iOS 26 on is a watch build too from 0.3.0 on: a copy of it, nothing to download
     if ($QemuFrom -ceq 'auto' -and (Qemu-HasWatch (Join-Path (In-Work 'qemu') 'qemu-system-aarch64.exe'))) { $QemuFrom = In-Work 'qemu' }
+    # else the release package's own (qemu\bin beside this installer's folder), as Setup-ASoftware.ps1 takes it
+    $pkg = Join-Path $repo 'qemu\bin'
+    if ($QemuFrom -ceq 'auto' -and (Qemu-HasWatch (Join-Path $pkg 'qemu-system-aarch64.exe'))) { $QemuFrom = $pkg }
     if ($QemuFrom -cnotin 'auto', 'release') {
         $src = [IO.Path]::GetFullPath($QemuFrom).TrimEnd('\')
         # (Combine, not Join-Path, which throws on a drive that is not there)
@@ -391,7 +453,7 @@ function Do-Qemu {
         }
     } else {
         if (-not $QemuWatchRelease.Url) {
-            Stop-Here ('this install''s QEMU has no watch devices (usb-crown): install from the latest release package, ' +
+            Stop-Here ('no QEMU with the watch''s devices (usb-crown) here: install from the latest release package, ' +
                        'or give a build with -QemuFrom <folder> (qemu-sptm asoft-release, win-build.sh''s dist)')
             return
         }
@@ -465,7 +527,7 @@ function Do-Decrypt {
     }
 }
 function Do-Firmware {
-    # the kernel: cloudOS 26.4b's research kernel as the iOS 26 install has it, plain (kc-watch.py takes
+    # the kernel: cloudOS 26.4b's research kernel as the base has it, plain (kc-watch.py takes
     # the first of $KernelIn that is; else it is decompressed again out of $KernelPacked)
     $in = @($KernelIn | ForEach-Object { In-Work $_ })
     $null = Py 'kc-watch.py' (@('--check') + $in) -NoFail
@@ -475,7 +537,7 @@ function Do-Firmware {
         $in += In-Watch 'build\kc\kernel'
     }
     $null = Py 'kc-watch.py' (@((In-Watch 'bootkc-w')) + $in)
-    # the device trees: the iOS 26 install's dtree-smp4 (and dtree-smp8) with the Series 9's identity
+    # the device trees: the base's dtree-smp4 (and dtree-smp8) with the Series 9's identity
     if ($DryRun -or (Test-Path (In-Watch 'ipsw\DeviceTree.n207sap.im4p'))) {
         $body = Step-Body 'devicetree'
         $null = Run-Wsl 'devicetree' $body
@@ -490,16 +552,22 @@ function Do-Firmware {
     }
 }
 function Do-Gpu {
-    # the guest GPU driver, kept in <Work>\gpu-driver for every guest (Install-iOS26.ps1 keeps it there
-    # since its gpu step does; an older iOS 26 install has it only on its disk: copied off it, read only)
+    # the guest GPU driver, kept in <Work>\gpu-driver for every guest (the base's gpudriver step leaves it
+    # there, downloaded once for iOS 26 and watchOS; an older iOS 26 install has it only on its disk: copied
+    # off it, read only)
     $shared = In-Work "gpu-driver\$GpuBundle"
-    if ($DryRun -or -not (Test-Path $shared)) {
-        $top = @('root.qcow2', 'root26-gpu.qcow2') | Where-Object { $DryRun -or (Test-Path (In-Work $_)) } | Select-Object -First 1
-        if (-not $top) { Fail "no $shared and no iOS 26 disk with the GPU driver (root.qcow2): is iOS 26 GPU-less? Then the watch cannot draw (ClockFace needs Metal)" }
+    $top = Ios26-Disk
+    if (Test-Path $shared) { Say "have gpu-driver\$GpuBundle" }
+    elseif ($top) {
         # (copied under another name and renamed: an interrupted copy never looks like the driver)
         $body = Step-Body 'gpu-driver'
         $null = Run-Wsl 'gpu-driver' $body.Replace('{TOP}', $top).Replace('{BUNDLE}', $GpuBundle)
-    } else { Say "have gpu-driver\$GpuBundle" }
+    } elseif ($DryRun) {
+        Say "gpu-driver\$GpuBundle`: the base's gpudriver step puts it there" DarkGray
+    } else {
+        Fail ("no gpu-driver\$GpuBundle and no iOS 26 disk with the GPU driver: the base's gpudriver step makes it " +
+              "(ios26\Install-iOS26.cmd -Work $Work -Base -Only gpudriver); the watch cannot draw without it (ClockFace needs Metal)")
+    }
     # the watch's copy in watchos\gpu (the cleanup keeps it: the patches step copies it onto the disk, the
     # trust cache takes its hashes.txt): both Mach-Os retargeted to watchOS (dyld refuses an iOS one) and
     # ad-hoc signed
@@ -667,7 +735,7 @@ function Do-Shortcut {
 }
 
 $Steps = @(
-    @{ Id = 'check';      Kind = 'always'; Title = 'The iOS 26 install it builds on, WSL, the scripts' }
+    @{ Id = 'check';      Kind = 'always'; Title = 'The base it shares with iOS 26 (made if missing), WSL, the scripts' }
     @{ Id = 'qemu';       Kind = 'once';   Title = 'The watch QEMU (qemu-watch\)' }
     @{ Id = 'download';   Kind = 'once';   Title = 'watchOS 27.2 files (Apple, about 5 GB)' }
     @{ Id = 'decrypt';    Kind = 'once';   Title = 'Decrypt the OS image' }
@@ -692,12 +760,19 @@ function Invoke-Step([string]$id) {
     }
 }
 
-# --- The iOS 26 install's settings ---------------------------------------------------------------
+# --- The settings it shares with iOS 26 (its config) -------------------------------------------------
 $cfg = $null
 if (Test-Path $Config) { try { $cfg = Get-Content $Config -Raw | ConvertFrom-Json } catch { } }
 if (-not $Work -and $cfg) { $Work = [string]$cfg.Work }
-if (-not $Work) { throw "no iOS 26 install found ($Config has no work folder): install iOS 26 first, or give -Work" }
+if (-not $Work) {
+    throw ("no work folder ($Config names none): give one with -Work (a new one gets the base watchOS shares with " +
+           'iOS 26 first, about 1 GB from Apple; iOS 26 is not needed), or install with Install-ASoftware.cmd -Version watchos')
+}
 $Work = [IO.Path]::GetFullPath($Work).TrimEnd('\')
+# WSL reaches it as /mnt/<drive>/..., in scripts that do not quote every path (as Install-iOS26.ps1 checks)
+if ($Work -cnotmatch '^[A-Za-z]:\\[^\s''"`$;&|<>()]+$') {
+    throw "the work folder must be a drive-letter path without spaces or shell characters (WSL scripts use it): $Work"
+}
 $Distro = if ($cfg -and $cfg.Distro) { [string]$cfg.Distro } else { 'ios-emu' }
 $LinuxDir = if ($cfg -and $cfg.Linux) { [string]$cfg.Linux } else { '/root/ios26' }
 $LinuxMode = if ($cfg -and $cfg.LinuxMode) { [string]$cfg.LinuxMode } else { 'wsl' }

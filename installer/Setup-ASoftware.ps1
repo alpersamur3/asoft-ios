@@ -1,4 +1,5 @@
-﻿# ASoftware iOS setup: one installer for iOS 16, iOS 26 or both, and watchOS 27.2 on iOS 26
+﻿# ASoftware iOS setup: one installer for iOS 16, iOS 26 or both, and watchOS 27.2 with iOS 26 or
+# without it (then only the base it shares with iOS 26: Install-iOS26.ps1 -Base, about 1 GB from Apple)
 # (Install-ASoftware.cmd runs it).
 # It asks which, and for iOS 26 how the build runs its Linux tools: in WSL (fast; installing WSL
 # needs an administrator and a restart) or in a small Linux VM in our QEMU (no WSL). Before
@@ -6,8 +7,8 @@
 # installers' own tables), the disk space at the peak and after, and the time (measured per step on
 # our PC, scaled by this PC's cores and a 10 MB probe of Apple's CDN). Then it runs the two
 # installers as they are, each still usable on its own:
-#   installer\Install-ASoftware.ps1 (iOS 16), ios26\Install-iOS26.ps1 (iOS 26) and
-#   watchos\Install-watchOS.ps1 (watchOS, on what iOS 26 installed)
+#   installer\Install-ASoftware.ps1 (iOS 16), ios26\Install-iOS26.ps1 (iOS 26, or its -Base) and
+#   watchos\Install-watchOS.ps1 (watchOS, on that base)
 # from the install folder, in one work folder (<Dir>\work) that holds our QEMU once for both.
 # Both resume where they stopped, and so does this after a stop or a restart: its choices are in
 # %LOCALAPPDATA%\ASoftware\setup.json. While it runs, the window title shows the step, the time
@@ -15,9 +16,11 @@
 #
 #   Install-ASoftware.cmd [-Version ios16|ios26|both|watchos|ios16-watchos] [-Watch yes|no] [-Linux wsl|helper] [-Dir D:\ASoftware]
 #                         [-Lang en|tr] [-Yes] [-Estimate] [-List] [-Check] [-DryRun]
-#     -Version, -Watch, -Linux   the answers to the questions (else it asks; -Watch needs iOS 26)
+#     -Version, -Watch, -Linux   the answers to the questions (else it asks; -Watch is for ios26 and
+#                        both, watchos and ios16-watchos install watchOS without iOS 26)
 #     -Dir               the install folder: the app, and work\ for both iOS (default: <the fixed
-#                        drive with the most room>:\ASoftware; no spaces, as iOS 26's build wants)
+#                        drive with the most room>:\ASoftware; no spaces, as iOS 26's build wants;
+#                        watchOS without iOS 26: the folder whose work\ has the base already, if any)
 #     -Yes               ask nothing: the defaults, and the answer to the WSL question is -IfNoWsl
 #     -IfNoWsl install|nowsl   when WSL is missing: install it now, or go on without it
 #     -Estimate          print the estimates and stop
@@ -100,6 +103,8 @@ $WatchDirs = Split-WatchDirs
 $Pretends = @($Pretend -split '[,\s]+' | Where-Object { $_ })
 foreach ($p in $Pretends) { if (@('nowsl', 'novirt', 'helper') -cnotcontains $p) { Fail "-Pretend $p`: nowsl, novirt or helper" } }
 $ReadOnly = $Estimate -or $List -or $Check -or $DryRun
+# iOS 26's settings (Install-iOS26.ps1's -Config), which the base watchOS shares with it names too
+$Cfg26File = if ($Ios26Config) { [IO.Path]::GetFullPath($Ios26Config) } else { Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json' }
 
 # --- Running tools ---------------------------------------------------------------------------
 # A native tool's output lines and exit code; Windows PowerShell 5.1 turns its stderr into
@@ -167,7 +172,7 @@ function Watch-Qemu([string]$work) {
     $r
 }
 $T16 = Read-Tables $Inst16 @('ipswUrl', 'ipswSize', 'pythonUrl', 'QemuRelease', 'space', 'Steps')
-$T26 = Read-Tables $Inst26 @('BaseSteps', 'QemuRelease', 'Pin', 'CloudOsUrl', 'IPhoneUrl', 'CloudOsFiles', 'CloudOsGpuImage', 'OsImage',
+$T26 = Read-Tables $Inst26 @('BaseSteps', 'QemuRelease', 'Pin', 'CloudOsUrl', 'IPhoneUrl', 'CloudOsFiles', 'CloudOsGpuImage', 'ReleaseKernel', 'OsImage',
                              'SysOsImage', 'AppOsImage', 'IPhoneFiles', 'GpuPluginRelease', 'Space', 'Steps')
 # watchOS (on what iOS 26 installed), where this version has its installer
 $TW = if (Test-Path $InstW) { Read-Tables $InstW @('WatchUrl', 'OsImage', 'WatchFiles', 'QemuWatchRelease', 'Space', 'Steps') } else { $null }
@@ -312,7 +317,11 @@ function Plan-26([string]$how, [bool]$qemuShared, [string]$wslState) {
             'python' { $dl = $Bytes.Python }
             'qemu' { if ($qemuShared -and -not $QemuDist) { $add = 0.13; $keep = 0.13 } elseif ($qemuShared) { $add = 0; $keep = 0 } elseif (-not $QemuDist) { $dl = $Bytes.Qemu } }
             'sysroot' { $dl = $Bytes.Sysroot }
-            'cloudos' { if (-not $CloudOsIpsw) { $dl = $cloud } }
+            # (-Base leaves out the release kernel, which only iOS 26's kexts list reads)
+            'cloudos' {
+                if (-not $CloudOsIpsw) { $dl = $cloud }
+                if ($BaseOnly -and $dl -and $T26.ReleaseKernel) { $dl -= $T26.CloudOsFiles[$T26.ReleaseKernel] }
+            }
             'iphone' { if (-not $IPhoneIpsw) { $dl = $phone } }
             'devicetree' { $dl = $Bytes.DtFixup }
             'gpudriver' { if (-not $GpuPlugin) { $dl = $Bytes.GpuPlugin } }
@@ -523,6 +532,22 @@ $Want16 = $Version -ceq 'ios16' -or $Version -ceq 'both' -or $Version -ceq 'ios1
 $BaseOnly = $Version -ceq 'watchos' -or $Version -ceq 'ios16-watchos'
 $Want26 = $Version -cne 'ios16'
 if ($BaseOnly) { $Watch = 'yes'; if (-not $Linux) { $Linux = 'wsl' } }
+# watchOS without iOS 26, no -Dir: the folder that has the base already (an iOS 26 install, or a base made
+# before: the work folder iOS 26's settings name, with its cloudos step done), so none of it is fetched again
+if ($BaseOnly -and -not $Dir) {
+    $w26 = ''
+    if (Test-Path $Cfg26File) { try { $w26 = "$((Get-Content $Cfg26File -Raw | ConvertFrom-Json).Work)" } catch { } }
+    if ($w26 -and [IO.Path]::IsPathRooted($w26) -and (Test-Path -LiteralPath ([IO.Path]::Combine($w26, 'install\cloudos.done')))) {
+        $w26 = [IO.Path]::GetFullPath($w26).TrimEnd('\')
+        # (this setup's layout: <Dir>\work; another one is the watch installer's to use)
+        if ((Split-Path $w26 -Leaf) -ieq 'work') {
+            $Dir = Split-Path $w26
+            Write-Host ('  ' + (L "The base watchOS shares with iOS 26 is in $w26 already: watchOS goes there (-Dir chooses another folder)." "watchOS'un iOS 26 ile paylaştığı taban $w26 içinde zaten var: watchOS oraya kurulur (başka klasör için -Dir).")) -ForegroundColor DarkGray
+        } else {
+            Write-Host ('  ' + (L "The base watchOS shares with iOS 26 is in $w26 already: watchos\Install-watchOS.cmd -Work $w26 builds watchOS there without fetching it again." "watchOS'un iOS 26 ile paylaştığı taban $w26 içinde zaten var: watchos\Install-watchOS.cmd -Work $w26 watchOS'u onu yeniden indirmeden orada kurar.")) -ForegroundColor DarkGray
+        }
+    }
+}
 
 # --- 1b. watchOS on iOS 26 ---------------------------------------------------------------------
 $WantWatch = $false
@@ -541,7 +566,7 @@ if ($Want26 -and $TW) {
     if ($Watch -eq 'yes' -and $wq.Why) { Fail ((L 'watchOS cannot be installed here: ' 'watchOS burada kurulamaz: ') + $wq.Why + (L ' (or -Watch no)' ' (ya da -Watch no)')) 2 }
     $WantWatch = $Watch -eq 'yes'
 } elseif ($Watch -eq 'yes') {
-    Fail (L '-Watch yes needs iOS 26 (-Version ios26 or both): watchOS is built on it' '-Watch yes iOS 26 ister (-Version ios26 ya da both): watchOS onun üstüne kurulur')
+    Fail (L '-Watch yes goes with -Version ios26 or both; watchOS without iOS 26 is -Version watchos (with iOS 16: ios16-watchos)' '-Watch yes, -Version ios26 ya da both ile kullanılır; iOS 26''sız watchOS için -Version watchos (iOS 16 ile: ios16-watchos)')
 }
 
 # --- 2. iOS 26: WSL or not ---------------------------------------------------------------------
@@ -649,7 +674,6 @@ elseif (-not $NoProbe -and -not $List -and -not $Check) {
 if (-not $bps) { $bps = 50e6 / 8; $bwNote = L '50 Mbit/s assumed (no measurement)' '50 Mbit/s varsayıldı (ölçülmedi)' }
 # the build's distro (Install-iOS26.ps1: its config's Distro, else ios-emu) there already
 $Distro26 = 'ios-emu'
-$Cfg26File = if ($Ios26Config) { [IO.Path]::GetFullPath($Ios26Config) } else { Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json' }
 if (Test-Path $Cfg26File) { try { $d = (Get-Content $Cfg26File -Raw | ConvertFrom-Json).Distro; if ($d) { $Distro26 = "$d" } } catch { } }
 # none: the wsl step makes it; bare: it is there but the wsl step still sets it up (apt, the hfsplus
 # module); set: it has the module (wsl-setup.sh's KO path)
@@ -666,7 +690,9 @@ if ($Want16) { $Plans['ios16'] = @(Plan-16 $QemuThere) }
 if ($Want26) {
     $shared = $Want16 -or $QemuThere
     $Plans['ios26-wsl'] = @(Plan-26 'wsl' $shared $wslState)
-    $Plans['ios26-helper'] = @(Plan-26 'helper' $shared 'none')
+    # (watchOS's installer needs WSL: its base has no row without it, unless that was chosen, which the
+    # preflight stops)
+    if (-not $BaseOnly -or $Linux -eq 'helper') { $Plans['ios26-helper'] = @(Plan-26 'helper' $shared 'none') }
 }
 if ($WantWatch) { $Plans['watch'] = @(Plan-Watch) }
 function Row-Name([string]$k) {
@@ -760,7 +786,8 @@ if ($WantWatch) {
     if (Test-Path $Cfg26File) { try { $gm = "$((Get-Content $Cfg26File -Raw | ConvertFrom-Json).GpuMode)" } catch { } }
     if ($gm -ceq 'gpuless' -and -not (Test-Path (Join-Path $Work 'gpu-driver\AppleParavirtGPUMetalIOGPUFamily.bundle'))) {
         $stop += L "a GPU driver for iOS 26, which watchOS needs (iOS 26's settings say GPU-less): choose one in ios26\Start-iOS26.cmd's menu ([G]), or -Watch no" "watchOS'un ihtiyaç duyduğu iOS 26 GPU sürücüsü (iOS 26 ayarı GPU'suz diyor): ios26\Start-iOS26.cmd menüsünden ([G]) birini seçin ya da -Watch no"
-    } elseif (-not $gm -and -not $Yes) {
+    } elseif (-not $gm -and -not $Yes -and -not $BaseOnly) {
+        # (the base alone does not ask: Install-iOS26.ps1 -Base takes Apple's driver)
         $warn += L "watchOS needs iOS 26's GPU driver: when iOS 26's setup asks for one, do not choose None" "watchOS, iOS 26'nın GPU sürücüsünü ister: iOS 26 kurulumu sorduğunda Yok'u seçmeyin"
     }
 }
@@ -862,7 +889,7 @@ $titlePlan = @($Chosen | ForEach-Object { @{ Ver = $_.Ver; Id = $_.Id; Est = $(i
 # (not $watch: PowerShell's names ignore case, and -Watch is a [string] parameter)
 $titler = [powershell]::Create()
 [void]$titler.AddScript({
-    param($sync, $plan, $work, $drive, $t0, $tr, $always, $dir)
+    param($sync, $plan, $work, $drive, $t0, $tr, $always, $dir, $name26)
     function T([double]$s) {
         $m = [Math]::Max(0, [Math]::Round($s / 60)); $h = [Math]::Floor($m / 60); $m -= 60 * $h
         if ($tr) { if ($h) { "$h sa $m dk" } else { "$m dk" } } else { if ($h) { "$h h $m min" } else { "$m min" } }
@@ -914,7 +941,7 @@ $titler = [powershell]::Create()
                     $in = ((Get-Date) - $since).TotalSeconds
                     $left = [Math]::Max($plan[$idx].Est - $in, 0.1 * $plan[$idx].Est)
                     for ($i = $idx + 1; $i -lt $plan.Count; $i++) { $left += $plan[$i].Est }
-                    $name = switch ($plan[$idx].Ver) { 'ios16' { 'iOS 16' } 'watch' { 'watchOS' } default { 'iOS 26' } }
+                    $name = switch ($plan[$idx].Ver) { 'ios16' { 'iOS 16' } 'watch' { 'watchOS' } default { $name26 } }
                     $el = T ((Get-Date) - $t0).TotalSeconds
                     [Console]::Title = if ($tr) { "ASoftware $name - adım $($idx + 1)/$($plan.Count) $($plan[$idx].Id) - $el geçti, ~$(T $left) kaldı" }
                                        else { "ASoftware $name - step $($idx + 1)/$($plan.Count) $($plan[$idx].Id) - $el elapsed, ~$(T $left) left" }
@@ -923,7 +950,7 @@ $titler = [powershell]::Create()
         } catch { }
         Start-Sleep -Seconds 5
     }
-}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir)
+}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir).AddArgument($(if ($BaseOnly) { L 'watchOS base' 'watchOS tabanı' } else { 'iOS 26' }))
 $titlerRun = $null
 if (-not $DryRun) { $titlerRun = $titler.BeginInvoke() }
 $net0 = $null
@@ -986,7 +1013,7 @@ $lines += (L 'ASoftware iOS setup' 'ASoftware iOS kurulumu') + " $(Version-Name 
 $lines += (L 'Time' 'Süre') + ": $(Fmt-Time ($t1 - $t0).TotalSeconds) (" + (L 'estimate' 'tahmin') + " $(Fmt-Time $Total.S))"
 foreach ($v in $results.Keys) {
     $r = $results[$v]
-    $name = switch ($v) { 'app' { L 'The app and our QEMU' "Uygulama ve QEMU'muz" } 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'watch' { 'watchOS' } }
+    $name = switch ($v) { 'app' { L 'The app and our QEMU' "Uygulama ve QEMU'muz" } 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L 'The base watchOS shares with iOS 26' 'watchOS''un iOS 26 ile paylaştığı taban' } else { 'iOS 26' } } 'watch' { 'watchOS' } }
     $lines += "  $name`: $(Fmt-Time ($r.End - $r.Start).TotalSeconds)$(if ($r.Code) { ', ' + (L "stopped (exit $($r.Code))" "durdu (çıkış $($r.Code))") })"
     # per step: when each began (iOS 16: work\install16.log; iOS 26: the === lines of its step logs),
     # the first time in this run

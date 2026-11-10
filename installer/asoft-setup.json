@@ -96,7 +96,7 @@
         "ramdisk",
         "gpudriver"
       ],
-      "note": "Install-iOS26.ps1 -Base runs only these: all watchOS needs from iOS 26. iOS 26 can follow on the same work folder."
+      "note": "Install-iOS26.ps1 -Base runs only these: all watchOS needs from iOS 26. iOS 26 can follow on the same work folder. -Base leaves out kernelcache.release.vphone600 (as the phone does), takes GpuMode cloudos when none is chosen and stops on gpuless. Install-watchOS.ps1's check step runs it when its work folder has no base."
     }
   },
   "os": {
@@ -838,7 +838,7 @@
       "steps": [
         {
           "id": "check",
-          "title": "The iOS 26 install it builds on, WSL, the scripts",
+          "title": "The base it shares with iOS 26 (made if missing), WSL, the scripts",
           "kind": "always"
         },
         {

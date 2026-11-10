@@ -37,8 +37,9 @@ English · [Türkçe](#turkce)
 
 Is it really the GPU? See [the measurements](ios26/README.md#is-it-really-the-gpu).
 
-**watchOS 27.2** (research preview) builds on an iOS 26 install: an Apple Watch Series 9 in a drawn
-case, on the same GPU path. See [`watchos/`](watchos/README.md).
+**watchOS 27.2** (research preview): an Apple Watch Series 9 in a drawn case, on the same GPU path. It
+does not need iOS 26, only the base it shares with it (cloudOS's kernel and firmware, the GPU driver:
+about 1 GB from Apple), which an iOS 26 install has already. See [`watchos/`](watchos/README.md).
 
 **`ASoftware.exe`** is the launcher: it installs, starts and closes each system, holds its settings and
 saves, sends iOS to an Android phone ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
@@ -84,7 +85,7 @@ Not yet: audio, GPU acceleration, the App Store and Apple ID services.
 
 ## Install
 
-One installer for both versions: `Install-ASoftware.cmd`. Run it from a checkout of `main`, or
+One installer for all of them: `Install-ASoftware.cmd`. Run it from a checkout of `main`, or
 from `ASoftware-iOS-*-win64.zip` ([Releases](https://github.com/alpersamur3/asoft-ios/releases)), or
 in PowerShell:
 
@@ -94,7 +95,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-
 
 It asks two things:
 
-1. **Which iOS:** iOS 16, iOS 26, or both (one QEMU for both, downloaded once).
+1. **Which system:** iOS 16, iOS 26, both (one QEMU for both, downloaded once), or watchOS 27.2 alone
+   (only the base it shares with iOS 26, not iOS 26 itself; it needs WSL). With iOS 26 it also asks
+   whether to add watchOS.
 2. **For iOS 26, where its build runs Linux tools:** *Fast install (WSL)*, or *Install without
    WSL* (a small Linux VM in our QEMU; no administrator, no restart).
    - WSL is the default when it works.
@@ -117,6 +120,7 @@ On our PC (i7-13700HX, 24 threads, NVMe SSD, 40 Mbit/s):
 | iOS 26, fast install (WSL) | 11.4 GB | 49 GB / 25 GB | about 1 h 45 min (measured: 75 min of steps, plus the 11 GB from Apple, about 30 min at 52 Mbit/s) |
 | iOS 26, without WSL | 11.4 GB | 49 GB / 25 GB | about 2 h 35 min (measured end to end: 107 min of steps, plus the 11 GB from Apple, 47 min at about 32 Mbit/s) |
 | Both (WSL) | 17.6 GB | 62 GB / 38 GB | about 2 h 50 min |
+| watchOS alone (WSL) | 6.2 GB | 23 GB / 16 GB | about 1 h (measured end to end: 56 min, of which 32 min for the 6.2 GB from Apple at about 30 Mbit/s and 16 min for the watch's first start) |
 
 A new WSL distro for iOS 26 adds 0.9 GB to the download, about 15 minutes (the hfsplus module is
 built for your WSL kernel) and about 7 GB on the drive WSL keeps its distros on.
@@ -128,7 +132,7 @@ Stopped, or restarted for WSL? Run it again: it goes on where it stopped.
 
 | Option | Does |
 | --- | --- |
-| `-Version ios16\|ios26\|both`, `-Linux wsl\|helper` | Answers the two questions |
+| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos`, `-Watch yes\|no`, `-Linux wsl\|helper` | Answers the questions (`watchos`: watchOS without iOS 26) |
 | `-Dir D:\ASoftware` | The install folder |
 | `-Yes` | Asks nothing |
 | `-Estimate` | Shows what it takes and stops |
@@ -259,8 +263,9 @@ refresh was measured against (2026-10-21).
 
 Gerçekten ekran kartı mı? [Ölçümler](ios26/README.md#is-it-really-the-gpu).
 
-**watchOS 27.2** (araştırma önizlemesi) bir iOS 26 kurulumunun üzerine kurulur: çizilmiş bir kasa
-içinde Apple Watch Series 9, aynı GPU yolunda. Bkz. [`watchos/`](watchos/README.md).
+**watchOS 27.2** (araştırma önizlemesi): çizilmiş bir kasa içinde Apple Watch Series 9, aynı GPU yolunda.
+iOS 26 gerekmez, yalnız onunla paylaştığı taban (cloudOS'un çekirdeği ve ürün yazılımı, GPU sürücüsü:
+Apple'dan yaklaşık 1 GB); iOS 26 kuruluysa bu taban zaten vardır. Bkz. [`watchos/`](watchos/README.md).
 
 **`ASoftware.exe`** başlatıcıdır: her sistemi kurar, açar ve kapatır, ayarlarını ve kayıtlarını tutar,
 iOS'u Android telefona gönderir ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
@@ -306,7 +311,7 @@ Henüz yok: ses, GPU hızlandırma, App Store ve Apple Kimliği hizmetleri.
 
 ### Kurulum
 
-İki sürüm için tek kurucu: `Install-ASoftware.cmd`. `main`'in bir kopyasından, ya da
+Hepsi için tek kurucu: `Install-ASoftware.cmd`. `main`'in bir kopyasından, ya da
 [Releases](https://github.com/alpersamur3/asoft-ios/releases) sayfasındaki `ASoftware-iOS-*-win64.zip`'ten
 çalıştırın; ya da PowerShell'de:
 
@@ -316,7 +321,9 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-
 
 İki şey sorar:
 
-1. **Hangi iOS:** iOS 16, iOS 26 ya da ikisi (ikisine tek QEMU, bir kez indirilir).
+1. **Hangi sistem:** iOS 16, iOS 26, ikisi (ikisine tek QEMU, bir kez indirilir) ya da yalnız watchOS
+   27.2 (iOS 26'nın kendisi değil, yalnız onunla paylaştığı taban; WSL ister). iOS 26 seçilince
+   watchOS'un da eklenip eklenmeyeceğini sorar.
 2. **iOS 26 için, derleme Linux araçlarını nerede çalıştırsın:** *Hızlı kurulum (WSL)* ya da
    *WSL'siz kurulum* (QEMU'muzda küçük bir Linux VM; yönetici izni ve yeniden başlatma gerekmez).
    - WSL çalışıyorsa varsayılan WSL'dir.
@@ -339,6 +346,7 @@ Bizim bilgisayarda (i7-13700HX, 24 iş parçacığı, NVMe SSD, 40 Mbit/s):
 | iOS 26, hızlı kurulum (WSL) | 11,4 GB | 49 GB / 25 GB | yaklaşık 1 sa 45 dk (ölçülen: 75 dk adım süresi, artı Apple'dan 11 GB, 52 Mbit/s'de ~30 dk) |
 | iOS 26, WSL'siz | 11,4 GB | 49 GB / 25 GB | yaklaşık 2 sa 35 dk (uçtan uca ölçülen: 107 dk adım süresi, artı Apple'dan 11 GB, ~32 Mbit/s'de 47 dk) |
 | İkisi (WSL) | 17,6 GB | 62 GB / 38 GB | yaklaşık 2 sa 50 dk |
+| Yalnız watchOS (WSL) | 6,2 GB | 23 GB / 16 GB | yaklaşık 1 sa (uçtan uca ölçüldü: 56 dk; 32 dakikası Apple'dan 6,2 GB, yaklaşık 30 Mbit/s ile, 16 dakikası saatin ilk açılışı) |
 
 iOS 26 için yeni bir WSL dağıtımı indirmeye 0,9 GB, süreye yaklaşık 15 dakika (hfsplus modülü WSL
 çekirdeğinize göre derlenir) ve WSL'in dağıtımları tuttuğu sürücüde yaklaşık 7 GB ekler.
@@ -350,7 +358,7 @@ başlatıldı mı? Yeniden çalıştırın: kaldığı yerden sürer.
 
 | Seçenek | Ne yapar |
 | --- | --- |
-| `-Version ios16\|ios26\|both`, `-Linux wsl\|helper` | İki soruyu yanıtlar |
+| `-Version ios16\|ios26\|both\|watchos\|ios16-watchos`, `-Watch yes\|no`, `-Linux wsl\|helper` | Soruları yanıtlar (`watchos`: iOS 26'sız watchOS) |
 | `-Dir D:\ASoftware` | Kurulum klasörü |
 | `-Yes` | Hiçbir şey sormaz |
 | `-Estimate` | Ne gerektirdiğini gösterip durur |

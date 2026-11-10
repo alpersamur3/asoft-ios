@@ -25,7 +25,9 @@
 #                    default): WSL if it is installed, else the helper VM. Remembered
 #     -DryRun        print every command the steps would run; runs nothing
 #     -Base          only what watchOS shares with iOS 26 (cloudOS's firmware, the device trees, the
-#                    ramdisk, the sysroot, the GPU driver): $BaseSteps below. iOS 26 itself can follow later
+#                    ramdisk, the sysroot, the GPU driver): $BaseSteps below, about 1 GB from Apple, no
+#                    iPhone files. With no GPU driver chosen it takes Apple's (cloudos); GPU-less stops,
+#                    as watchOS needs one. iOS 26 itself can follow later on the same work folder
 #     -From STEP     redo STEP and every step after it; -Only STEP redoes just that one (a disk
 #                    step: the disk steps after it are redone on the next run)
 #     -Collections   also build the lighter Collections wallpaper disk (README.md 5.3.6), as when
@@ -128,6 +130,7 @@ $CloudOsFiles = [ordered]@{    # member = bytes; into <Work>\cloudos, as in the 
     'Firmware/094-39278-029.dmg.aea.trustcache'      = 6287
 }
 $CloudOsGpuImage = '094-39278-029.dmg'    # the cloudOS OS (AEA; its key is in its own header)
+$ReleaseKernel = 'kernelcache.release.vphone600'    # not fetched for -Base (nothing boots it)
 $OsImage = '094-97246-090.dmg'       # the OS (AEA)
 $SysOsImage = '094-95368-092.dmg'    # the SystemOS cryptex (AEA)
 $AppOsImage = '094-96441-094.dmg'    # the AppOS cryptex
@@ -556,6 +559,9 @@ function Gpu-Route {
     $c = Read-Config
     if ($c -and "$($c.GpuMode)" -ceq 'cloudos') { return 'cloudos' }
     if (Gpu-Driver) { return 'folder' }
+    # -Base with no choice made yet: the default, Apple's (watchOS cannot do without a driver; the setup
+    # step saves it, so this holds in a dry run too)
+    if ($Base -and -not ($c -and "$($c.GpuMode)")) { return 'cloudos' }
     $null
 }
 # The compiler plugin GpuMode cloudos adds: -GpuPlugin's file, else the release's download
@@ -900,6 +906,20 @@ function Hashes([string[]]$lines) { @($lines | ForEach-Object { if ("$_" -cmatch
 # --- The steps ---------------------------------------------------------------------------------
 function Do-Setup {
     $menu = Join-Path $here 'Start-iOS26-Menu.ps1'
+    # -Base: watchOS draws only with a GPU driver. With none chosen yet, Apple's out of cloudOS is saved
+    # before the menu runs (it would ask an iPhone question); GPU-less stops here, not after the base
+    if ($Base) {
+        $c = Read-Config
+        $mode = if ($c) { "$($c.GpuMode)" } else { '' }
+        if ($mode -ceq 'gpuless' -and -not (Test-Path (In-Work "gpu-driver\$GpuBundle"))) {
+            $why = ("$Config says GPU-less, and watchOS draws only with a GPU driver (Metal): choose one with " +
+                    'ios26\Start-iOS26.cmd''s menu ([G]), or take the GpuMode line out of that file, then run this again')
+            if ($DryRun) { Say "(a real run stops here) $why" Yellow } else { Fail $why }
+        } elseif (-not $mode) {
+            Show-Cmd "config: GpuMode=cloudos   (-Base: Apple's GPU driver out of cloudOS; the menu's [G] changes it)"
+            if (-not $DryRun) { Save-Keys @{ GpuMode = 'cloudos'; GpuDriver = '' } }
+        }
+    }
     Show-Cmd "md $Work"
     Show-Cmd "powershell -File $(Q $menu) -SetupOnly -Config $(Q $Config) -Work $Work"
     Show-Cmd "config: Distro=$Distro Src=$Src Linux=$LinuxDir LinuxMode=$Linux"
@@ -959,8 +979,14 @@ function Do-Prereq([switch]$Report) {
         if (-not (Get-Command $t -ErrorAction SilentlyContinue)) { $bad += "$t (Windows 10 1803 and later have it)" }
     }
     $free = Free-GB
-    $color = if ($free -lt 56) { 'Yellow' } else { 'Gray' }
-    Say ("{0:N1} GB free on {1}: a build from nothing needs about 49 GB there at its peak and keeps about 25 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
+    if ($Base) {
+        # (the base alone; watchOS on it adds its own, Install-watchOS.ps1 checks that per step)
+        $color = if ($free -lt 24) { 'Yellow' } else { 'Gray' }
+        Say ("{0:N1} GB free on {1}: the base needs about 3 GB there at its peak and keeps about 2 GB; watchOS on it about 21 GB more at its peak" -f $free, [IO.Path]::GetPathRoot($Work)) $color
+    } else {
+        $color = if ($free -lt 56) { 'Yellow' } else { 'Gray' }
+        Say ("{0:N1} GB free on {1}: a build from nothing needs about 49 GB there at its peak and keeps about 25 GB" -f $free, [IO.Path]::GetPathRoot($Work)) $color
+    }
     $w = Get-Wsl
     if ($LinuxMode -ceq 'helper') {
         Say "the Linux steps: the helper VM (-Linux helper$(if (-not $w.Ok) { '; WSL is not installed' }))"
@@ -1186,6 +1212,8 @@ function Do-Sysroot {
 function Do-CloudOs {
     Need-Space $Space.cloudos
     foreach ($m in $CloudOsFiles.Keys) {
+        # the release kernel only lists its kexts (kdec.sh); the base's watchOS boots the research one
+        if ($Base -and $m -ceq $ReleaseKernel) { Say "$m`: not needed for the base" DarkGray; continue }
         # the OS image only for a GPU layer still to be made from it (the gpu step gets it again if
         # it is not here)
         if ($m -ceq "$CloudOsGpuImage.aea") {
@@ -1240,6 +1268,8 @@ function Do-Firmware {
     if (-not $DryRun) { New-Item -ItemType Directory -Force (In-Work 'cloud'), (In-Work 'fw') | Out-Null }
     $null = Ipsw @('img4', 'im4p', 'extract', (In-Work 'cloudos\Firmware\all_flash\DeviceTree.vphone600ap.im4p'), '-o', (In-Work 'cloud\vphone600ap.adt'))
     foreach ($k in 'research', 'release') {
+        # (-Base does not fetch the release kernel: kdec.sh skips it too)
+        if ($k -ceq 'release' -and -not $DryRun -and -not (Test-Path (In-Work "cloudos\$ReleaseKernel"))) { Say "no cloudos\$ReleaseKernel`: its kexts are not listed" DarkGray; continue }
         $null = Ipsw @('kernel', 'dec', (In-Work "cloudos\kernelcache.$k.vphone600"), '-o', (In-Work 'cloud'))
         $kexts = Ipsw @('kernel', 'kexts', (In-Work "cloud\kernelcache.$k.vphone600.decompressed")) -Quiet
         if (-not $DryRun) { Set-Content (In-Work "cloud\kexts.$k.txt") $kexts; Say "kexts.$k.txt: $(@($kexts).Count) lines" }

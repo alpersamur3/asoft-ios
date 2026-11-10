@@ -1,7 +1,8 @@
 # ASoftware iOS, one command: download the newest release and run its installer.
 #   powershell -ExecutionPolicy Bypass -c "irm https://github.com/alpersamur3/asoft-ios/releases/latest/download/Get-ASoftware.ps1 | iex"
-# Run as a file, its arguments go to the installer: Setup-ASoftware.ps1, which asks for iOS 16, iOS 26
-# or both (e.g. -Version both -Dir D:\ASoftware); a package without it, Install-ASoftware.ps1 (iOS 16).
+# Run as a file, its arguments go to the installer: Setup-ASoftware.ps1, which asks for iOS 16, iOS 26,
+# both or watchOS alone (e.g. -Version both -Dir D:\ASoftware, or -Version watchos: no iOS 26 needed); a
+# package without it, Install-ASoftware.ps1 (iOS 16).
 $ErrorActionPreference = 'Stop'
 $repo = 'alpersamur3/asoft-ios'
 $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing

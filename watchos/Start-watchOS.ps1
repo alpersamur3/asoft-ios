@@ -1,5 +1,5 @@
 # ASoftware watchOS launcher: watchOS 27.2 (Apple Watch Series 9) in a drawn watch case, from the work
-# folder Install-watchOS.ps1 built it in (the iOS 26 install's, with its watchos\ folder).
+# folder Install-watchOS.ps1 built it in (the base it shares with iOS 26, with its watchos\ folder).
 #   Start-watchOS.cmd [-Work D:\ios26] [-Snapshot] [-Name RUN] [-NoNet] [-Smp 4|8] [-NoQuickBoot] [-NoAutoSave]
 # The mouse is the touchscreen; the wheel over the watch, or a drag on the drawn crown, turns the
 # Digital Crown; a click on the crown presses it (hold: Siri); the side button opens Control Center.
@@ -41,7 +41,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $Work) {
     if (Test-Path $Config) { try { $Work = [string](Get-Content $Config -Raw | ConvertFrom-Json).Work } catch { } }
 }
-$installIt = 'run Install-ASoftware.cmd and answer yes to watchOS (it is built on iOS 26), or watchos\Install-watchOS.cmd on an iOS 26 install'
+$installIt = 'install it with Install-ASoftware.cmd (watchOS alone needs only the base it shares with iOS 26, not iOS 26), or watchos\Install-watchOS.cmd -Work <folder>'
 if (-not $Work -or -not (Test-Path -LiteralPath ([IO.Path]::Combine($Work, 'watchos')))) {
     throw "no watchOS install found$(if ($Work) { " in $Work" }): $installIt (or give -Work)"
 }
