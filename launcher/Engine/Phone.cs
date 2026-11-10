@@ -235,7 +235,7 @@ namespace ASoftware.Engine
         // ##asoft|step|phone|N|OF|ID|start|TITLE   pct|phone|ID|0-100|   push|DEST|BYTES
         void OnProgress(string[] f)
         {
-            if (f[0] == "step" && f.Length >= 7 && f[6] == "start") { Step = f[5]; Pct = -1; Changed?.Invoke(); }
+            if (f[0] == "step" && f.Length >= 6 && f[5] == "start") { Step = f[4]; Pct = -1; Changed?.Invoke(); }
             else if (f[0] == "pct" && f.Length >= 5 && double.TryParse(f[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var p)) Pct = p;
             else if (f[0] == "push" && f.Length >= 3) { Dest = f[1]; double.TryParse(f[2], out var b); DestBytes = b; }
         }

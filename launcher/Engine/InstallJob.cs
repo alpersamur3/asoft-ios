@@ -224,18 +224,19 @@ namespace ASoftware.Engine
                         Plan.Add(new PlanStep { Os = f[1], Id = f[2], Seconds = D(f[3]), Download = (long)D(f[4]), State = f[7] == "1" ? "skip" : "pending", Title = Title(f[1], f[2], f[8]) });
                     }
                     break;
-                case "step" when f.Length >= 7:
+                // step|OS|N|OF|ID|STATE|TITLE (the failure's text in place of the title when STATE is fail)
+                case "step" when f.Length >= 6:
                     {
-                        var s = Find(f[1], f[5]);
+                        var s = Find(f[1], f[4]);
                         if (s == null) break;
-                        var st = f[6];
+                        var st = f[5];
                         if (st == "start")
                         {
                             foreach (var p in Plan.Where(p => p.State == "running" && p != s)) p.State = "done";
                             s.State = "running"; s.Started = DateTime.Now; s.Pct = -1; s.Text = "";
                         }
                         else s.State = st;
-                        if (st == "fail" && f.Length > 7) Message = f[7];
+                        if (st == "fail" && f.Length > 6) Message = f[6];
                     }
                     break;
                 case "pct" when f.Length >= 5:
