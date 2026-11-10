@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace ASoftware.Engine
 {
@@ -19,6 +20,9 @@ namespace ASoftware.Engine
         public string LogFile { get; }
         public DateTime Started { get; private set; }
         readonly List<string> lines = new List<string>();
+        // each output stream's end (its null line): all its lines are in by then
+        readonly ManualResetEventSlim outEnded = new ManualResetEventSlim(), errEnded = new ManualResetEventSlim();
+        readonly object logGate = new object();
         Process proc;
 
         public event Action<string> Line;          // every output line (not progress lines)
@@ -54,14 +58,18 @@ namespace ASoftware.Engine
             File.AppendAllText(LogFile, $"\r\n# {DateTime.Now:yyyy-MM-dd HH:mm:ss} powershell -File {Script} {Args}\r\n", Encoding.UTF8);
             Log.Write($"run {Script} {Args}");
             proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            proc.OutputDataReceived += (s, e) => { if (e.Data != null) Got(e.Data); };
-            proc.ErrorDataReceived += (s, e) => { if (e.Data != null) Got(e.Data); };
+            proc.OutputDataReceived += (s, e) => { if (e.Data != null) Got(e.Data); else outEnded.Set(); };
+            proc.ErrorDataReceived += (s, e) => { if (e.Data != null) Got(e.Data); else errEnded.Set(); };
             proc.Exited += (s, e) =>
             {
-                // the last lines first
-                try { proc.WaitForExit(); } catch { }
+                // the last lines first: both streams' ends, at most 3 s. (Not WaitForExit(): it waits for them with no limit,
+                // and what the script started with inherited handles (QEMU through Start-Process -Redirect...) holds
+                // them open for as long as it runs. Lines that come later still go to the log and Lines.)
+                var t = Stopwatch.StartNew();
+                if (!outEnded.Wait(3000) || !errEnded.Wait(Math.Max(0, 3000 - (int)t.ElapsedMilliseconds)))
+                    Log.Write($"{Path.GetFileName(Script)} ended; a process it started still holds its output open");
                 ExitCode = proc.ExitCode;
-                File.AppendAllText(LogFile, $"# exit {ExitCode} at {DateTime.Now:HH:mm:ss}\r\n", Encoding.UTF8);
+                Append($"# exit {ExitCode} at {DateTime.Now:HH:mm:ss}");
                 Log.Write($"exit {ExitCode}: {Path.GetFileName(Script)}");
                 Exited?.Invoke(ExitCode.Value);
             };
@@ -76,7 +84,7 @@ namespace ASoftware.Engine
         void Got(string l)
         {
             l = l.Replace("\0", "").TrimEnd();
-            try { File.AppendAllText(LogFile, l + "\r\n", Encoding.UTF8); } catch { }
+            Append(l);
             int i = l.IndexOf("##asoft|", StringComparison.Ordinal);
             if (i >= 0)
             {
@@ -87,12 +95,19 @@ namespace ASoftware.Engine
             Line?.Invoke(l);
         }
 
+        // (the two streams' lines, and a late one with the exit line, come on different threads: one writer at a time)
+        void Append(string l)
+        {
+            lock (logGate) try { File.AppendAllText(LogFile, l + "\r\n", Encoding.UTF8); } catch { }
+        }
+
         /// <summary>Stops this script and what it started (by process id, never by name).</summary>
         public void Kill()
         {
             if (Running) Native.KillTree(Pid);
         }
 
+        // (a finite wait: on .NET Framework only WaitForExit(-1) also waits for the output streams' end)
         public bool Wait(int ms) => proc == null || proc.WaitForExit(ms);
     }
 }
