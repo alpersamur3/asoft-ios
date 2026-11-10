@@ -111,11 +111,39 @@ function Step([string]$text) {
     }
 }
 # Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1: ##asoft|kind|field|..., one line each
-# (step|ios16|N|6|ID|start/done|TITLE, pct|ios16|ID|0-100|TEXT, paused|ios16|ID, end|ios16|CODE)
+# (step|ios16|N|6|ID|start/done|TITLE, pct|ios16|ID|0-100|TEXT, paused|ios16|ID, stop|TEXT, end|ios16|CODE)
 function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
 # ASoftware.exe's "pause after this step": the file ASOFT_PAUSE_FILE names is there before a step starts
 function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Show([string]$text) { Write-Host "  > $text" -ForegroundColor DarkGray }
+# Our QEMU in a folder: BUILD.txt's first line (the commits it was built from), or ''
+function Qemu-Stamp([string]$dir) {
+    $b = Join-Path $dir 'BUILD.txt'
+    if (Test-Path -LiteralPath $b) { "$(Get-Content -LiteralPath $b -TotalCount 1)".Trim() } else { '' }
+}
+# Two folders with the same QEMU build: by their BUILD.txt's first line, or by the exe's SHA-256 when one has none
+function Qemu-Same([string]$a, [string]$b) {
+    $sa = Qemu-Stamp $a; $sb = Qemu-Stamp $b
+    if ($sa -and $sb) { return $sa -ceq $sb }
+    (Get-FileHash -LiteralPath (Join-Path $a 'qemu-system-aarch64.exe') -Algorithm SHA256).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $b 'qemu-system-aarch64.exe') -Algorithm SHA256).Hash
+}
+# A QEMU with the watch's devices (usb-crown), as Install-watchOS.ps1 checks it
+function Qemu-HasWatch([string]$exe) {
+    if (-not (Test-Path -LiteralPath $exe)) { return $false }
+    $ErrorActionPreference = 'Continue'
+    [bool](@(& $exe -device help 2>&1 | ForEach-Object { "$_" }) | Where-Object { $_ -cmatch '"usb-crown"' })
+}
+# The processes whose program is in a folder (a QEMU, its qemu-img, anything started from there), by the path it
+# runs from, never by its name: their files cannot be replaced under them
+function Running-From([string]$dir) {
+    $pre = $dir.TrimEnd('\') + '\'
+    @(Get-CimInstance Win32_Process | Where-Object {
+            $exe = $_.ExecutablePath
+            # (no path for some processes: their command line, when there is one, starts with the program)
+            if (-not $exe -and $_.CommandLine) { $exe = if ($_.CommandLine -match '^\s*"([^"]+)"') { $Matches[1] } else { ($_.CommandLine.Trim() -split '\s+')[0] } }
+            $exe -and $exe.StartsWith($pre, [StringComparison]::OrdinalIgnoreCase)
+        })
+}
 
 if ($List) {
     Write-Host "iOS 16 install folder: $Dir"
@@ -212,12 +240,44 @@ if ($src.Path -ne $Dir) {
             if (Test-Path "$src\$folder") { robocopy "$src\$folder" "$Dir\$folder" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null }
         }
         New-Item -ItemType Directory -Force "$Dir\installer\helper\out", "$Dir\xnu" | Out-Null
-        Copy-Item "$src\installer\*.ps1" "$Dir\installer\" -Force
+        # (asoft-setup.json too: the visionOS installer and Setup-ASoftware.ps1 run from here read the release
+        # packages it names, such as visionOS's QEMU)
+        Copy-Item "$src\installer\*.ps1", "$src\installer\asoft-setup.json" "$Dir\installer\" -Force
         Copy-Item "$src\installer\helper\out\Image.gz", "$src\installer\helper\out\initrd.gz" "$Dir\installer\helper\out\" -Force
         # the newest kernel build
         $kernel = Get-ChildItem "$src\xnu\out-*\kernel.development.sweet" | Sort-Object { $_.Directory.Name } | Select-Object -Last 1
         if (-not $kernel) { throw "no kernel in $src\xnu\out-*" }
         robocopy $kernel.Directory.FullName "$Dir\xnu\$($kernel.Directory.Name)" kernel.development.sweet /NFL /NDL /NJH /NJS /NP | Out-Null
+    }
+}
+# An install over an older one: its work\qemu, and the watch's copy of it (work\qemu-watch), become this
+# package's QEMU when they hold another build (iOS 26's and the watch's qemu steps run once, and an older build
+# lacks what newer guests need, such as visionOS's options). Saved states of the older build load in the newer
+# one. A program running from there holds its files: then this stops and says so, it never stays on the older one
+if ($QemuDist -and (Test-Path "$QemuDist\qemu-system-aarch64.exe") -and [IO.Path]::GetFullPath($QemuDist).TrimEnd('\') -ne $qemuDir) {
+    foreach ($to in $qemuDir, "$work\qemu-watch") {
+        if (-not (Test-Path "$to\qemu-system-aarch64.exe") -or (Qemu-Same $QemuDist $to)) { continue }
+        # (the watch's copy only from a QEMU with the watch's devices: else it keeps its own)
+        if ($to -ne $qemuDir -and -not (Qemu-HasWatch "$QemuDist\qemu-system-aarch64.exe")) {
+            Write-Host "  $QemuDist's QEMU has no watch devices (usb-crown): $to keeps its own" -ForegroundColor Yellow
+            continue
+        }
+        $old = Qemu-Stamp $to; $new = Qemu-Stamp $QemuDist
+        Show "robocopy $QemuDist $to /MIR /XD backup-* v11.1.2-asoft   (another QEMU build there: $(if ($old) { $old } else { 'no BUILD.txt' }); this one: $(if ($new) { $new } else { 'no BUILD.txt' }))"
+        $busy = @(Running-From $to)
+        if ($busy) {
+            $why = "$($busy[0].Name) runs from $to (pid $(($busy | ForEach-Object ProcessId) -join ', ')): close it (iOS 16, iOS 26, watchOS or visionOS; " +
+                   "its saved states stay and load in the new QEMU), then run this again: it puts this package's QEMU there in place of the older one"
+            if (-not $DryRun) { Emit 'stop', $why; throw $why }
+            Write-Host "  (a real run stops here) $why" -ForegroundColor Yellow
+            continue
+        }
+        if (-not $DryRun) {
+            # (/R /W: a file in use fails in seconds, not after robocopy's million retries)
+            Invoke-Tool robocopy.exe $QemuDist $to /MIR /XD 'backup-*' 'v11.1.2-asoft' /R:2 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { $why = "robocopy $QemuDist -> $to failed ($LASTEXITCODE): is a program running from $to?"; Emit 'stop', $why; throw $why }
+            Write-Host "Updated the QEMU in $to to this package's ($(if ($new) { $new } else { 'no BUILD.txt' }))"
+        }
     }
 }
 # work\qemu, as Install-iOS26.ps1 has it (an older install's QEMU 11.1.2 in work\qemu\v11.1.2-asoft
