@@ -19,7 +19,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 if (git -C $repo status --porcelain) { throw 'commit first: the package takes the committed files' }
 
-git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos
+git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Start-visionOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos visionos
 tar -x -f "$Out\src.tar" -C $stage
 Remove-Item "$Out\src.tar"
 # ASoftware.exe, the launcher (install, start, settings), stamped with this version (its update check
@@ -34,6 +34,12 @@ $kernel = Get-ChildItem "$repo\xnu\out-*\kernel.development.sweet" | Sort-Object
 New-Item -ItemType Directory -Force "$stage\xnu\$($kernel.Directory.Name)" | Out-Null
 Copy-Item $kernel.FullName "$stage\xnu\$($kernel.Directory.Name)\"
 if (-not (Test-Path "$QemuDist\qemu-system-aarch64.exe")) { throw "no QEMU build in $QemuDist" }
+# (visionOS runs on the same QEMU: a build with usb-touchscreen's walk-hold-key and -cpu x-tlbi-filter, which
+# Install-visionOS.ps1's qemu step checks; a package without them makes a visionOS install ask for -VisionQemu)
+$ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+$probe = @(& "$QemuDist\qemu-system-aarch64.exe" -device 'usb-touchscreen,help' 2>&1 | ForEach-Object { "$_" })
+$ErrorActionPreference = 'Stop'
+if (-not ($probe | Where-Object { $_ -cmatch '\bwalk-hold-key=' })) { Write-Warning "$QemuDist's QEMU has no usb-touchscreen walk-hold-key: visionOS installs from this package need -VisionQemu" }
 robocopy $QemuDist "$stage\qemu\bin" /MIR /XD backup-* /NFL /NDL /NJH /NJS /NP | Out-Null
 $qemuBuild = if (Test-Path "$QemuDist\BUILD.txt") { (Get-Content "$QemuDist\BUILD.txt") -join '; ' } else { 'see its --version' }
 

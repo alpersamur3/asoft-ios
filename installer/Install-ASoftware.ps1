@@ -195,10 +195,10 @@ if ($free -lt $needed + 1) {
 
 Step '1/6 App files'
 if ($src.Path -ne $Dir) {
-    Show "copy ASoftware.exe, Start-iOS.cmd, Start-watchOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, installer, the helper VM and the newest kernel -> $Dir"
+    Show "copy ASoftware.exe, Start-iOS.cmd, Start-watchOS.cmd, Start-visionOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, visionos, installer, the helper VM and the newest kernel -> $Dir"
     if (-not $DryRun) {
         # ASoftware.exe: the launcher (install, start, settings), in the release package's root
-        foreach ($item in 'ASoftware.exe', 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
+        foreach ($item in 'ASoftware.exe', 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Start-visionOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {
             if (-not (Test-Path "$src\$item")) { continue }
             try { Copy-Item "$src\$item" $Dir -Force }
             catch {
@@ -207,8 +207,8 @@ if ($src.Path -ne $Dir) {
                 Write-Host "  $Dir\ASoftware.exe is in use (it runs from there): kept; close it and run this again to update it" -ForegroundColor Yellow
             }
         }
-        # ios26, watchos: iOS 26's and watchOS's installers and launchers, run from here (Setup-ASoftware.ps1)
-        foreach ($folder in 'scripts', 'tools', 'assets', 'ios26', 'watchos') {
+        # ios26, watchos, visionos: their installers and launchers, run from here (Setup-ASoftware.ps1)
+        foreach ($folder in 'scripts', 'tools', 'assets', 'ios26', 'watchos', 'visionos') {
             if (Test-Path "$src\$folder") { robocopy "$src\$folder" "$Dir\$folder" /MIR /XD __pycache__ /NFL /NDL /NJH /NJS /NP | Out-Null }
         }
         New-Item -ItemType Directory -Force "$Dir\installer\helper\out", "$Dir\xnu" | Out-Null

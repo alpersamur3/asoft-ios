@@ -985,6 +985,311 @@
         "TOP": "root.qcow2"
       },
       "note": "PC: the Linux steps run in WSL (no helper mode). The phone runs rootfs, patches, trustcache and activation in the helper VM (mk-rootw.sh takes a block device as OUT since phone-steps), decrypt, kernel and devicetree in Java (Unpack) and gpu-driver from the shared folder"
+    },
+    "visionos": {
+      "title": "visionOS 27.2 (Apple Vision Pro, N301AP, RealityDevice14,1)",
+      "build": "24N120",
+      "needs": [
+        "shared"
+      ],
+      "sources": {
+        "vision": {
+          "url": "https://updates.cdn-apple.com/2026FallFCS/47477bd7-2863-41db-97fa-7a371356228f/Apple_Vision_Pro_27.2_24N120_Restore.ipsw",
+          "members": [
+            {
+              "name": "141-17569-165.dmg.aea",
+              "role": "OS",
+              "bytes": 12348030976,
+              "method": 0,
+              "dataOffset": 222298234,
+              "headSha256": "88a9005e4b006b247622e8d70a55820bb2633183aa47b70065b29774665c148c",
+              "indexSha256": "f0e2c2d0881a69ce69a01d541c5666ec3a57b168d6d19fc8da7be5689c29b0f7",
+              "note": "never downloaded whole: its first MiB goes to Apple's key service (ipsw fw aea --key), aearemote.py indexes its 67 clusters (67 requests, 1.2 MB) and serves the plaintext over FUSE to apfs-fuse; the rootfs step reads about 10 GB of it"
+            },
+            {
+              "name": "Firmware/141-17569-165.dmg.aea.trustcache",
+              "bytes": 75577,
+              "method": 8,
+              "zipBytes": 68442
+            },
+            {
+              "name": "Firmware/all_flash/DeviceTree.n301ap.im4p",
+              "bytes": 47079
+            }
+          ]
+        },
+        "runtime": {
+          "pallas": "https://gdmf.apple.com/v2/assets",
+          "assetType": "com.apple.MobileAsset.xrOSSimulatorRuntime",
+          "assetAudience": "02d8e57e-dd1c-4090-aa50-b4ed2aef0062",
+          "requestedBuild": "24N120",
+          "relativePath": "com_apple_MobileAsset_xrOSSimulatorRuntime/C6762BE2-7EC5-4CCC-8FE7-365F076EC469.aar",
+          "bytes": 7650410496,
+          "tlsRoot": "Apple Root CA, SHA-256 b0b1730ecbc7ff4505142c49f1295e6eda6bcaed7e2c68c5be91b5a11001f024 (embedded in pallas.py)",
+          "kept": "xrOS 27.2.simruntime/Contents/Resources/RuntimeRoot/System/Library/Assets/SystemEnvironments/SyntheticEnvironments: six rooms, 56 files, 265,764,799 bytes, visionos/scripts/rooms.sha256",
+          "note": "AEA (the answer's ArchiveDecryptionKey) -> Apple Archive -> pbzx -> Apple Archive -> AssetData/Restore/141-17665-166.dmg (UDIF) -> APFS; no random access, so the .dmg (7.6 GB) is written to the work drive and deleted once the rooms are out"
+        }
+      },
+      "files": {
+        "qemu": {
+          "version": "",
+          "url": "",
+          "sha256": "",
+          "note": "our QEMU with visionOS's options (usb-touchscreen walk-hold-key, -cpu x-tlbi-filter, the visionOS GPU changes in reims-vgpu/metal2vulkan): not published yet; Install-visionOS.ps1's qemu step reads this entry, else -QemuDir <folder>"
+        },
+        "audioPlugin": {
+          "name": "VPhoneVirtIOSound.driver",
+          "url": "",
+          "files": {
+            "VPhoneVirtIOSound": "d5980d783a86822038759988dfe7bffaa341adcc8890f0c8742568b2a772c838",
+            "Info.plist": "73253dd18f4dcbde9c827f183efc90738d7fe18ea842482eb9a3f16cd3089285",
+            "_CodeSignature/CodeResources": "70262abbfd5a4f2794aa829fa7b9d3069bcb8e7d58768a1515cce4729f9c9fc5"
+          },
+          "cdhash": "82e8d87863e48771eb23355c8da72809e537f9d7",
+          "note": "vphone-cli VPhoneGuestComponents/VirtIOSound (MIT, cb23353e) + our 48 kHz speaker (d59f767), built for xrOS 26.0 on macOS CI; not published yet (Install-visionOS.ps1's $AudioPluginRelease, else -AudioPlugin <folder>); without it the install is silent only"
+        },
+        "usdCore": {
+          "pip": "usd-core==26.11",
+          "note": "PyPI, into a venv in the Linux scratch, for usdacoustic.py (the rooms without their acoustic prims, visionos/scripts/rooms-noaudio.sha256)"
+        }
+      },
+      "kernel": {
+        "from": "the iOS 26 install's cloud/kernelcache.research.vphone600.decompressed + kc-vision.py's 13 patches (iOS 27's 7, IOGPU timeouts 3, sandbox syscall filters 3); result 6f421a9a1929f2dc661919ab344fd70813dd496fadbf556cffd5ce6d49ac415d"
+      },
+      "devicetrees": {
+        "dtree-v": "dt-vision.py dtree-smp4 -> ad5a377032c7744f745c6088a4263aef8c07149a68912dd4fd768df80e0de421",
+        "dtree-v6": "dt-root26smp.py fw/dtree.orig --cpus 6, dt-vision.py -> 7d8c9e050f86a61248de74338259dafa0283ef97cbc8bdde472c5fdc9c29b3fd",
+        "dtree-v8": "dt-vision.py dtree-smp8 -> 53f45695cd063c70ece1dcdf7142e2745d4f52ffcd2444f3ff241812e931c186"
+      },
+      "steps": [
+        {
+          "id": "check",
+          "title": "The iOS 26 base it builds on, WSL and its tools, the scripts",
+          "kind": "always",
+          "linux": [
+            {
+              "name": "tools"
+            }
+          ]
+        },
+        {
+          "id": "qemu",
+          "title": "The QEMU every guest runs on, with visionOS's options (qemu\\)",
+          "kind": "once"
+        },
+        {
+          "id": "rooms",
+          "title": "The six synthetic rooms, out of Apple's visionOS Simulator Runtime",
+          "kind": "once",
+          "python": [
+            "pallas.py visionos/build/rooms/asset.json --type ... --build 24N120 --size 7650410496 --path ..."
+          ],
+          "linux": [
+            {
+              "name": "rooms",
+              "out": [
+                "visionos/rooms",
+                "visionos/rooms-noaudio"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ipsw",
+          "title": "visionOS 27.2 IPSW: trust cache, device tree, the OS image's key and index",
+          "kind": "once",
+          "python": [
+            "ipsw-get.py (the two members)",
+            "aeahead.py IPSW 141-17569-165.dmg.aea visionos/ipsw/os.aea.head"
+          ],
+          "linux": [
+            {
+              "name": "ipsw",
+              "out": [
+                "visionos/ipsw/os.key",
+                "visionos/ipsw/os.idx"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "firmware",
+          "title": "The visionOS kernel and device trees (4, 6 and 8 vCPUs)",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "kernel"
+            },
+            {
+              "name": "devicetree"
+            }
+          ],
+          "python": [
+            "kc-vision.py visionos/bootkc-v cloud/kernelcache.research.vphone600.decompressed fw/bootkc (the first that is the stock kernel)",
+            "dt-root26smp.py fw/dtree.orig visionos/build/dtree-smp6 --cpus 6",
+            "dt-vision.py dtree-smp4|visionos/build/dtree-smp6|dtree-smp8 visionos/ipsw/DeviceTree.n301ap.raw visionos/dtree-v|dtree-v6|dtree-v8"
+          ]
+        },
+        {
+          "id": "gpu",
+          "title": "The guest GPU driver for visionOS",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "gpu-driver"
+            },
+            {
+              "name": "gpu"
+            }
+          ]
+        },
+        {
+          "id": "rootfs",
+          "title": "The root disk, read out of Apple's OS image (visionos\\rootv.qcow2)",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "rootfs",
+              "disks": [
+                {
+                  "new": "visionos/rootv.qcow2",
+                  "size": "28 GiB + 2 MiB"
+                }
+              ],
+              "in": [
+                "downloads/ios_sysroot.tar.gz",
+                "visionos/ipsw/os.idx"
+              ],
+              "out": [
+                "visionos/rootv.qcow2.hashes"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "audio",
+          "title": "The virtio-snd audio plug-in (VPhoneVirtIOSound), when there is one",
+          "kind": "chain"
+        },
+        {
+          "id": "patches",
+          "title": "Patches, prefs, apps, rooms, keyboard camera and GPU driver on it",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "patches",
+              "disks": [
+                {
+                  "rw": "visionos/rootv-p.qcow2",
+                  "overlay": "visionos/rootv.qcow2"
+                }
+              ],
+              "in": [
+                "visionos/gpu",
+                "visionos/rooms",
+                "visionos/rooms-noaudio",
+                "visionos/audio"
+              ],
+              "out": [
+                "visionos/rootv-p.hashes"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "trustcache",
+          "title": "Its trust cache (visionos\\rootv.tc)",
+          "kind": "chain",
+          "python": [
+            "mktc.py -2 visionos/rootv.tc visionos/ipsw/141-17569-165.dmg.aea.trustcache visionos/rootv.qcow2.hashes visionos/rootv-p.hashes visionos/gpu/hashes.txt [visionos/audio/hash.txt]"
+          ]
+        },
+        {
+          "id": "firstboot",
+          "title": "First boot (visionos\\rootv-b.qcow2)",
+          "kind": "chain",
+          "boot": "overlay visionos/rootv-b.qcow2 on rootv-p.qcow2; 4 vCPUs, silent; until /private/var/keybags/persona.kb and usersession.kb, then 30 s and a sync"
+        },
+        {
+          "id": "persona",
+          "title": "Persona, MobileGestalt, activation and visionOS's prefs",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "persona",
+              "disks": [
+                {
+                  "rw": "visionos/rootv-b.qcow2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "homeboot",
+          "title": "Second boot, to Home",
+          "kind": "chain",
+          "boot": "rootv-b.qcow2 again; until a QMP screendump over 60,000 bytes twice 20 s apart, then 2 min and a sync"
+        },
+        {
+          "id": "disks",
+          "title": "The silent and sound disks",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "disks",
+              "disks": [
+                {
+                  "rw": "visionos/rootv-b.qcow2"
+                },
+                {
+                  "new": "visionos/rootv-s.qcow2",
+                  "overlay": "visionos/rootv-b.qcow2"
+                },
+                {
+                  "new": "visionos/rootv-a.qcow2",
+                  "overlay": "visionos/rootv-b.qcow2"
+                },
+                {
+                  "new": "visionos/vision-silent.qcow2",
+                  "overlay": "visionos/rootv-s.qcow2"
+                },
+                {
+                  "new": "visionos/vision.qcow2",
+                  "overlay": "visionos/rootv-a.qcow2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cleanup",
+          "title": "Remove what only the build needs",
+          "kind": "always",
+          "linux": [
+            {
+              "name": "cleanup"
+            }
+          ]
+        },
+        {
+          "id": "shortcut",
+          "title": "Start-visionOS.cmd and the Start menu shortcut",
+          "kind": "always"
+        }
+      ],
+      "vars": {
+        "BUNDLE": "AppleParavirtGPUMetalIOGPUFamily.bundle",
+        "PACKED": "cloudos/kernelcache.research.vphone600",
+        "TOP": "root.qcow2",
+        "MEMBER": "141-17569-165.dmg.aea",
+        "OFF": "222298234",
+        "CACHE_MB": "512",
+        "AUDIO": "the WSL path of visionos/audio/VPhoneVirtIOSound.driver, or empty",
+        "EDGE": "-CdnEdge, or empty",
+        "KEEP": "1 with -KeepBuildFiles, else empty"
+      },
+      "note": "PC only, WSL only. Ports 4481-4483. Start: visionos/Start-visionOS.ps1 -Cpus 4|6|8 (dtree-v/-v6/-v8), -Sound (vision.qcow2 + virtio-sound-pci on dsound), else vision-silent.qcow2"
     }
   }
 }
