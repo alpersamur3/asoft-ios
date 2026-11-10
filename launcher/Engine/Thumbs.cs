@@ -101,16 +101,18 @@ namespace ASoftware.Engine
             GuestRun run;
             lock (Machines.Runs) Machines.Runs.TryGetValue(os, out run);
             if (run == null || run.QemuPid == 0 || run.Busy != "" || !Native.Alive(run.QemuPid)) return;
-            string png = null;
+            string dump = null;
             try
             {
                 Directory.CreateDirectory(Dir);
-                png = Path.Combine(QemuDir(os), os + ".screen.png");
-                try { File.Delete(png); } catch { }
-                var err = Screendump(Guests.QmpPort(os), png);
+                // PPM, QEMU's own format: it writes the frame as it is, in about 20 ms; a PNG kept its main loop (the guest's
+                // devices and display) for 0.7 s at iOS 26's size
+                dump = Path.Combine(QemuDir(os), os + ".screen.ppm");
+                try { File.Delete(dump); } catch { }
+                var err = Screendump(Guests.QmpPort(os), dump);
                 if (err == "") return;                      // QMP was taken or not there yet: the next round
                 if (err != null) { Once(os, err); return; }
-                var frame = Decode(png);
+                var frame = Decode(dump);
                 // the display sleeps (a black frame): the picture from before stays
                 if (NearlyBlack(frame)) return;
                 BitmapSource small = frame;
@@ -131,7 +133,7 @@ namespace ASoftware.Engine
                 Changed?.Invoke(os);
             }
             catch (Exception e) { Once(os, e.Message); }
-            finally { if (png != null) try { File.Delete(png); } catch { } }
+            finally { if (dump != null) try { File.Delete(dump); } catch { } }
         }
 
         /// <summary>A failure goes to the log once, not every round, until a capture works again.</summary>
@@ -163,7 +165,7 @@ namespace ASoftware.Engine
                     w.WriteLine("{\"execute\":\"qmp_capabilities\"}");
                     if (Reply(r) == null) return "";
                     s.ReadTimeout = Left();
-                    w.WriteLine("{\"execute\":\"screendump\",\"arguments\":{\"filename\":" + Qmp.Quote(file.Replace('\\', '/')) + ",\"format\":\"png\"}}");
+                    w.WriteLine("{\"execute\":\"screendump\",\"arguments\":{\"filename\":" + Qmp.Quote(file.Replace('\\', '/')) + "}}");
                     var rep = Reply(r);
                     if (rep == null) return "";
                     if (rep.Contains("\"error\"")) return "screendump: " + rep;
@@ -184,10 +186,29 @@ namespace ASoftware.Engine
             }
         }
 
+        /// <summary>QEMU's screendump: a binary PPM (P6, 8 bits a channel). Its rows can be longer than the header's width
+        /// says (iOS 26's 1179 pixels come as 3540 bytes, padded to four), so the row length is taken from the file's size.</summary>
         static BitmapSource Decode(string file)
         {
-            var d = BitmapDecoder.Create(new MemoryStream(File.ReadAllBytes(file)), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-            return d.Frames[0];
+            var b = File.ReadAllBytes(file);
+            int at = 0;
+            string Word()
+            {
+                while (at < b.Length && b[at] <= ' ') at++;
+                int from = at;
+                while (at < b.Length && b[at] > ' ') at++;
+                return Encoding.ASCII.GetString(b, from, at - from);
+            }
+            if (Word() != "P6") throw new InvalidDataException("the screen dump is no PPM");
+            int w = int.Parse(Word()), h = int.Parse(Word()), max = int.Parse(Word());
+            at++;                                       // the one white space after the header
+            if (w <= 0 || h <= 0 || max != 255 || b.Length - at < (long)w * 3 * h) throw new InvalidDataException("the screen dump is cut short");
+            int stride = (b.Length - at) / h;
+            var px = new byte[stride * h];
+            Buffer.BlockCopy(b, at, px, 0, px.Length);
+            var frame = BitmapSource.Create(w, h, 96, 96, PixelFormats.Rgb24, null, px, stride);
+            frame.Freeze();
+            return frame;
         }
 
         /// <summary>Whether almost nothing on the frame is lit (one sample in 8 x 8 pixels).</summary>
