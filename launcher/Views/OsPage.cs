@@ -17,6 +17,8 @@ namespace ASoftware.Views
     public class OsPage : UserControl, IRetext
     {
         readonly string os;
+        /// <summary>The system this page shows.</summary>
+        public string Os => os;
         readonly MainWindow main;
         string tab;
         // (new at each Build: an element has one parent, and the old layout keeps these as its children)

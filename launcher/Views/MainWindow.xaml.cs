@@ -80,6 +80,9 @@ namespace ASoftware.Views
                         var os = c.Os;
                         var disk = Guests.SaveDisk(os);
                         c.Quick = disk == "" ? null : (await Task.Run(() => Guests.Snapshots(os, disk))).FirstOrDefault(s => s.Quick);
+                        // the system's page draws its Go back from this lookup too: a guest that ended while its page was
+                        // open (Save and close, Turn off) left there the way back from before, or none
+                        if (Page.Content is OsPage page && page.Os == os) page.Refresh();
                     }
                     c.Refresh();
                 }
