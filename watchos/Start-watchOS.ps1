@@ -26,6 +26,8 @@ param(
     [string]$Tc = 'watchos\rootw.tc',
     [string]$Exe = '',
     [ValidateSet(4, 8)][int]$Smp = 4,
+    # QEMU's x-tlbi-filter off (it is on when the QEMU has it: see the probe below $machine)
+    [switch]$NoTlbiFilter,
     [switch]$Snapshot,
     [switch]$NoNet,
     [switch]$Keep,
@@ -173,6 +175,17 @@ function Qemu-Probe([string]$path, [string[]]$argv, [int]$ms = 20000) {
 }
 $probeExe = Join-Path (Split-Path $Exe) 'qemu-system-aarch64.exe'
 if ((Test-Path $probeExe) -and ((Qemu-Probe $probeExe @('-M', 'vresearch,help')) -cmatch '\bloadvm-date=')) { $machine += ',loadvm-date=on' }
+# x-tlbi-filter, as Start-iOS26.ps1's (qemu-sptm 4993dd8): a broadcast TLB flush in one address space stops only the
+# vCPUs in it. On by default since 2026-11-10 and not measured on watchOS: experimental, 8 vCPUs may now be faster than
+# 4, or still slower. A QEMU without it starts without it.
+$watchCpu = 'max,pauth-impdef=on'
+if (-not $NoTlbiFilter -and (Test-Path $probeExe)) {
+    $tlbiOut = Qemu-Probe $probeExe @('-M', 'none', '-cpu', 'max,x-tlbi-filter=on,x-asoft-probe=on', '-display', 'none', '-S', '-nodefaults')
+    if ($tlbiOut -cmatch 'x-asoft-probe' -and $tlbiOut -cnotmatch "x-tlbi-filter' not found") {
+        $watchCpu += ',x-tlbi-filter=on'
+        Write-Host 'TLBI filter on (x-tlbi-filter, experimental; -NoTlbiFilter turns it off)'
+    } else { Write-Host 'TLBI filter: this QEMU has no x-tlbi-filter' }
+}
 $qargs = @(
     '-name', (Q 'ASoftware watchOS 27.2'),
     '-M', $machine,
@@ -185,7 +198,7 @@ $qargs = @(
     '-parallel', 'none',
     '-chardev', (Q "socket,id=con,host=127.0.0.1,port=4471,server=on,wait=off,logfile=$O\serial.log"),
     '-serial', 'chardev:con', '-d', 'guest_errors,unimp', '-D', (Q "$O\qemu.log"),
-    '-cpu', 'max,pauth-impdef=on', '-smp', "$Smp", '-accel', 'tcg,thread=multi,tb-size=2048',
+    '-cpu', $watchCpu, '-smp', "$Smp", '-accel', 'tcg,thread=multi,tb-size=2048',
     '-drive', (Q ("file=" + (In-Work $Disk) + ",if=none,id=root,cache=writeback,discard=unmap")), '-device', 'virtio-blk-pci,drive=root',
     '-qmp', 'tcp:127.0.0.1:4473,server=on,wait=off',
     '-device', 'qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2',
