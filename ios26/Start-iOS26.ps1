@@ -55,6 +55,8 @@ param(
     [string]$Cpu = 'max,pauth-impdef=on',
     # vCPUs: 4 or 8 (dtree-smpN from dt-root26smp.py --cpus N)
     [ValidateSet(4, 8)][int]$Smp = 4,
+    # QEMU's x-tlbi-filter off (it is on when the QEMU has it: see the probe below $machine)
+    [switch]$NoTlbiFilter,
     # .ipa installs: the side bar's "Install .ipa..." copies files into $IpaDir (default <Work>\ipa);
     # each .ipa there is installed by direct placement on the next start (the disk can't be written
     # while iOS runs). -NoIpa turns it off.
@@ -403,6 +405,19 @@ function Qemu-Probe([string]$path, [string[]]$argv, [int]$ms = 20000) {
 }
 $probeExe = Join-Path (Split-Path $exe) 'qemu-system-aarch64.exe'
 if ((Test-Path $probeExe) -and ((Qemu-Probe $probeExe @('-M', 'vresearch,help')) -cmatch '\bloadvm-date=')) { $machine += ',loadvm-date=on' }
+# x-tlbi-filter (qemu-sptm 4993dd8, visionOS's): iOS's broadcast TLB flush of a page or a range in one address space
+# (ASID) reaches only the vCPUs in that ASID instead of stopping every vCPU. Those stops grow with the vCPU count (iOS 16
+# at 8 vCPUs, 2026-10-21: 53 s of a 60 s profile). vresearch keeps the kernel's TLB entries (x-keep-kernel-tlb), where
+# the filter stays off unless asked for. On by default since 2026-11-10 and not measured on iOS 26: experimental, 8 vCPUs
+# may now be faster than 4, or still slower. A QEMU without it names it in the probe's error instead of the unknown
+# x-asoft-probe (Setup-ASoftware.ps1's probe) and then starts without it.
+if (-not $NoTlbiFilter -and $Cpu -cnotmatch 'x-tlbi-filter' -and (Test-Path $probeExe)) {
+    $tlbiOut = Qemu-Probe $probeExe @('-M', 'none', '-cpu', 'max,x-tlbi-filter=on,x-asoft-probe=on', '-display', 'none', '-S', '-nodefaults')
+    if ($tlbiOut -cmatch 'x-asoft-probe' -and $tlbiOut -cnotmatch "x-tlbi-filter' not found") {
+        $Cpu += ',x-tlbi-filter=on'
+        Write-Host 'TLBI filter on (x-tlbi-filter, experimental; -NoTlbiFilter turns it off)'
+    } else { Write-Host 'TLBI filter: this QEMU has no x-tlbi-filter' }
+}
 $qargs = @(
     '-name', '"ASoftware iOS 26"',
     '-M', $machine,

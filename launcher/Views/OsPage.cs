@@ -237,9 +237,15 @@ namespace ASoftware.Views
 
             // the guest
             var cpus = Ui.Seg(Guests.CpuChoices(os).Select(n => (n, n.ToString())), c.Smp, v => { c.Smp = v; Changed(); });
-            var cpuDesc = os == "ios16" ? L.T("4 boots faster: every broadcast TLB flush stops all vCPUs.", "4 daha hızlı açılır: her TLB temizliği tüm vCPU'ları durdurur.")
+            // iOS 16, iOS 26, watchOS: 8 vCPUs untested with the TLBI filter (iOS 16's since 2026-11-04, -M virt; iOS 26's
+            // and watchOS's x-tlbi-filter since 2026-11-10 in their start scripts). The old numbers: iOS 16 at 8 vCPUs spent
+            // 53 s of a 60 s profile in those stops (2026-10-21), iOS 26 at 8 dragged the notification panel at 1-6 fps
+            // (notes/WIN-LAUNCHER.md)
+            var cpuDesc = os == "ios16" ? L.T("Experimental: 4 booted faster in an older measurement, when every broadcast TLB flush stopped all vCPUs. A TLB filter has cut those stops since and 8 has not been measured again: it may be slower or faster.",
+                                              "Deneysel: eski bir ölçümde 4 daha hızlı açılıyordu; o zaman her TLB temizliği tüm vCPU'ları durduruyordu. Sonradan gelen TLB süzgeci bu durdurmaları azalttı ve 8 yeniden ölçülmedi: daha yavaş da olabilir, daha hızlı da.")
                         : os == "vision" ? L.T("8 is the start script's default; the boot times on this page are for 8. A save goes on only with the vCPUs it was made with.", "Başlatma betiğinin varsayılanı 8; bu sayfadaki açılış süreleri 8 içindir. Bir kayıt yalnız alındığı vCPU sayısıyla sürer.")
-                        : L.T("8 gives apps more room; the boot is not faster.", "8 uygulamalara daha çok yer açar; açılış hızlanmaz.");
+                        : L.T("Experimental: 8 may be slower than 4, or faster. Every broadcast TLB flush used to stop all vCPUs; the TLB filter that cuts this is new and not measured yet.",
+                              "Deneysel: 8, 4'ten daha yavaş da olabilir daha hızlı da. Eskiden her TLB temizliği tüm vCPU'ları durduruyordu; bunu azaltan TLB süzgeci yeni ve henüz ölçülmedi.");
             UIElement ram;
             string ramDesc;
             if (Guests.HasRamSetting(os))
