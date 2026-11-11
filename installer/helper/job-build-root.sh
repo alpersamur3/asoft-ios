@@ -41,8 +41,26 @@ image() {    # image ROLE: unpack it to /mnt/scratch/ROLE.dmg
         python3 ipsw-members.py "$ipsw" "$1" "/mnt/scratch/$1.dmg"
     fi
 }
-progress 2 "unpacking the iOS images ($(( (size[OS] + size[SystemOS] + size[AppOS]) >> 20 )) MB)"
-image OS & image SystemOS & image AppOS & wait
+total=$(( size[OS] + size[SystemOS] + size[AppOS] ))
+progress 2 "unpacking the iOS images ($(( total >> 20 )) MB)"
+# The unpack is minutes of no output (7 GB, longer under TCG): say how far it is every 20 s, 2 to 9 %,
+# from what the three files hold so far
+(
+    while sleep 20; do
+        got=$(du -sk --apparent-size /mnt/scratch 2>/dev/null | cut -f1)
+        [ -n "$got" ] || continue
+        pct=$((2 + got * 1024 * 7 / total))
+        progress $((pct > 9 ? 9 : pct)) "unpacking the iOS images ($((got >> 10)) of $((total >> 20)) MB)"
+    done
+) &
+unpacker=$!
+pids=()
+image OS & pids+=($!)
+image SystemOS & pids+=($!)
+image AppOS & pids+=($!)
+# each one's own status (a bare wait is 0 whatever they did): set -e stops on a failed unpack
+for p in "${pids[@]}"; do wait "$p"; done
+kill $unpacker 2>/dev/null || true
 for role in OS SystemOS AppOS; do
     [ "$(stat -c %s "/mnt/scratch/$role.dmg")" = "${size[$role]}" ] || { echo "ASOFT: $role image short" >&2; exit 1; }
 done
