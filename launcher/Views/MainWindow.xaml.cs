@@ -28,7 +28,7 @@ namespace ASoftware.Views
         {
             InitializeComponent();
             // the line-up's order: the newest iPhone first
-            foreach (var os in new[] { "ios26", "ios16", "watch", "vision" }) cards.Add(new OsCardVm(os, this));
+            foreach (var os in new[] { "ios26", "ios16", "watch", "vision", "tv" }) cards.Add(new OsCardVm(os, this));
             TestRuns();
             Cards.ItemsSource = cards;
             foreach (var c in cards) c.Refresh();
@@ -313,8 +313,10 @@ namespace ASoftware.Views
                     if (Dialog.Show(this, L.T("Memory is short", "Bellek az"), w.Message, L.T("Start anyway", "Yine de başlat"), L.K("Cancel")) != 0) return;
                     run = await Machines.Start(os, loadState, true);
                 }
-                // (visionOS from cold: minutes of a dark window, said so that nobody takes it for a hang)
-                Snack(os == "vision" && !run.Resumed
+                // (visionOS from cold: minutes of a dark window, said so that nobody takes it for a hang; tvOS: about a minute)
+                Snack(os == "tv" && !run.Resumed
+                    ? L.T("tvOS is starting in its own window: Home comes after about a minute.", "tvOS kendi penceresinde açılıyor: Home yaklaşık bir dakikada gelir.")
+                    : os == "vision" && !run.Resumed
                     ? L.T("visionOS is starting in its own window: Home comes after about 5 to 7 minutes (the window stays dark for about 4.5).", "visionOS kendi penceresinde açılıyor: Home yaklaşık 5–7 dakikada gelir (pencere yaklaşık 4,5 dakika karanlık kalır).")
                     : L.T($"{Guests.Name(os)} is starting in its own window.", $"{Guests.Name(os)} kendi penceresinde açılıyor."), "good");
             }
@@ -450,7 +452,7 @@ namespace ASoftware.Views
                 case "settings": ShowPage(new SettingsPage(this)); break;
                 case "phone": OpenPhone(); break;
                 case "report": OpenReport(); break;
-                case "ios16": case "ios26": case "watch": case "vision": OpenOs(page, tab); break;
+                case "ios16": case "ios26": case "watch": case "vision": case "tv": OpenOs(page, tab); break;
                 case "devices": ShowPage(TestDevices()); break;
                 default: GoHome(); break;     // (dialog: the home page under it)
             }
@@ -475,11 +477,11 @@ namespace ASoftware.Views
                     var cell = new StackPanel { Width = 190 };
                     var d = new DeviceArt
                     {
-                        Os = os, Height = os == "watch" ? 136 : os == "vision" ? 89 : 160, Present = s.present, Awake = s.awake, Progress = s.progress,
+                        Os = os, Height = os == "watch" ? 136 : os == "vision" ? 89 : os == "tv" ? 84 : 160, Present = s.present, Awake = s.awake, Progress = s.progress,
                         Shot = s.shot ? pic : null, HorizontalAlignment = HorizontalAlignment.Center
                     };
                     d.VerticalAlignment = VerticalAlignment.Bottom;
-                    cell.Children.Add(new Border { Height = os == "vision" ? 100 : 168, Child = d });
+                    cell.Children.Add(new Border { Height = os == "vision" || os == "tv" ? 100 : 168, Child = d });
                     var caption = Ui.Text(Guests.Name(os) + " · " + s.name, "Faint", 6);
                     caption.TextAlignment = TextAlignment.Center;
                     cell.Children.Add(caption);

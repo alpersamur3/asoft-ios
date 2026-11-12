@@ -53,13 +53,15 @@ namespace ASoftware.Engine
         public static string Args(InstallChoice c, string mode)
         {
             var a = new List<string>();
-            // watchOS or visionOS without iOS 26: Setup makes only the base they share
-            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : c.Watch ? (c.Ios16 ? "ios16-watchos" : "watchos") : c.Vision ? (c.Ios16 ? "ios16-visionos" : "visionos") : "ios16";
+            // watchOS, visionOS or tvOS without iOS 26: Setup makes only the base they share
+            string ver = c.Ios16 && c.Ios26 ? "both" : c.Ios26 ? "ios26" : c.Watch ? (c.Ios16 ? "ios16-watchos" : "watchos") : c.Vision ? (c.Ios16 ? "ios16-visionos" : "visionos")
+                       : c.Tv ? (c.Ios16 ? "ios16-tvos" : "tvos") : "ios16";
             a.Add("-Version"); a.Add(ver);
-            if (c.Ios26 || c.Watch || c.Vision)
+            if (c.Ios26 || c.Watch || c.Vision || c.Tv)
             {
                 a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no");
                 a.Add("-Vision"); a.Add(c.Vision ? "yes" : "no");
+                a.Add("-Tv"); a.Add(c.Tv ? "yes" : "no");
                 a.Add("-Linux"); a.Add(c.Linux);
             }
             a.Add("-Dir"); a.Add(Runner.Q(c.Dir));
@@ -80,8 +82,36 @@ namespace ASoftware.Engine
                 var vq = Environment.GetEnvironmentVariable("ASOFT_VISION_QEMU");
                 if (!string.IsNullOrEmpty(vq) && File.Exists(Path.Combine(vq, "qemu-system-aarch64.exe"))) { a.Add("-VisionQemu"); a.Add(Runner.Q(vq)); }
             }
+            // tvOS runs on the same build (Setup's -TvQemu: else it takes work\qemu, visionOS's, or the package's)
+            if (c.Tv)
+            {
+                var tq = Environment.GetEnvironmentVariable("ASOFT_TV_QEMU");
+                if (!string.IsNullOrEmpty(tq) && File.Exists(Path.Combine(tq, "qemu-system-aarch64.exe"))) { a.Add("-TvQemu"); a.Add(Runner.Q(tq)); }
+            }
             return string.Join(" ", a);
         }
+
+        // Install-tvOS.ps1's steps in Turkish (as visionOS's)
+        static readonly Dictionary<string, string> TvTr = new Dictionary<string, string>
+        {
+            ["check"] = "Üzerine kurulduğu iOS 26 tabanı, WSL ve araçları, betikler",
+            ["qemu"] = "Tüm konukların çalıştığı QEMU, tvOS'un ölçüldüğü derleme (qemu\\)",
+            ["lzraven"] = "liblzraven (sabitlenmiş sürüm) ve pbzm_dec, WSL'de derlenir",
+            ["download"] = "AppleTV14,1 için tvOS 27.2 tam OTA (Apple, 4,97 GB, SHA-256 denetimli)",
+            ["decrypt"] = "OTA'nın şifresini çöz, dizinini çıkar, açılış dosyalarını al",
+            ["unpack"] = "Kökü (LZRAVEN) bir ext4 kalıbına aç ve imzaları denetle",
+            ["firmware"] = "tvOS çekirdeği ve aygıt ağaçları (4, 6 ve 8 vCPU; 4K ve 1080p)",
+            ["gpu"] = "tvOS için konuk GPU sürücüsü",
+            ["rootfs"] = "Kök disk, açılmış kökten (tvos\\roott.qcow2)",
+            ["patches"] = "Üstüne ayarlar, paylaşılan önbellek yamaları, tercihler ve GPU sürücüsü",
+            ["trustcache"] = "Trust cache'i (tvos\\roott.tc)",
+            ["firstboot"] = "İlk açılış (tvos\\roott-b.qcow2)",
+            ["persona"] = "Persona, MobileGestalt, etkinleştirme ve tvOS tercihleri",
+            ["homeboot"] = "İkinci açılış, Home'a kadar",
+            ["disks"] = "Kullandığınız disk (tvos\\tv.qcow2)",
+            ["cleanup"] = "Yalnız kurulumun gerektirdiklerini sil",
+            ["shortcut"] = "Start-tvOS.cmd ve Başlat menüsü kısayolu",
+        };
 
         // Install-visionOS.ps1's steps in Turkish (the installer writes its titles in English)
         static readonly Dictionary<string, string> VisionTr = new Dictionary<string, string>
@@ -113,10 +143,11 @@ namespace ASoftware.Engine
 
         /// <summary>A step's title in the launcher's language: the installer's own, or for visionOS's steps in Turkish ours.</summary>
         static string Title(string os, string id, string given) =>
-            os == "vision" && L.Tr && VisionTr.TryGetValue(id, out var tr) ? tr : given;
+            os == "vision" && L.Tr && VisionTr.TryGetValue(id, out var tr) ? tr
+            : os == "tv" && L.Tr && TvTr.TryGetValue(id, out var tt) ? tt : given;
 
         static string StepText(string os, string given) =>
-            os == "vision" && L.Tr && VisionTextTr.TryGetValue(given ?? "", out var tr) ? tr : given;
+            (os == "vision" || os == "tv") && L.Tr && VisionTextTr.TryGetValue(given ?? "", out var tr) ? tr : given;
 
         /// <summary>A QEMU with the watch's devices this PC has: the install's own (work\qemu-watch) or a known one.</summary>
         public static string WatchQemu(InstallChoice c)
@@ -182,9 +213,10 @@ namespace ASoftware.Engine
             if (c.Ios26 && !Guests.Installed("ios26")) Thumbs.Drop("ios26");
             if (c.Watch && !Guests.Installed("watch")) Thumbs.Drop("watch");
             if (c.Vision && !Guests.Installed("vision")) Thumbs.Drop("vision");
+            if (c.Tv && !Guests.Installed("tv")) Thumbs.Drop("tv");
             // iOS 26's setup asks where its GPU driver comes from: the wizard's answer, in its config
             var conf = LauncherConfig.Current;
-            if (c.Ios26 || c.Watch || c.Vision)
+            if (c.Ios26 || c.Watch || c.Vision || c.Tv)
             {
                 conf.Ios26.GpuMode = c.GpuMode;
                 conf.Ios26.GpuDriver = c.GpuMode == "gpu" ? c.GpuDriver : "";
@@ -195,6 +227,7 @@ namespace ASoftware.Engine
             if (c.Ios26 && (conf.Ios26.App == "" || !Guests.Installed("ios26"))) conf.Ios26.App = c.Dir;
             if (c.Watch && (conf.Watch.Work == "" || !Guests.Installed("watch"))) { conf.Watch.Work = j.Ios26Work; conf.Watch.App = c.Dir; }
             if (c.Vision && (conf.Vision.Work == "" || !Guests.Installed("vision"))) { conf.Vision.Work = j.Ios26Work; conf.Vision.App = c.Dir; }
+            if (c.Tv && (conf.Tv.Work == "" || !Guests.Installed("tv"))) { conf.Tv.Work = j.Ios26Work; conf.Tv.App = c.Dir; }
             c.Started = DateTime.Now.ToString("s");
             c.Stage = "running";
             conf.Install = c;
@@ -342,6 +375,8 @@ namespace ASoftware.Engine
                 : p.Os == "watch" && p.Id == "download" ? Path.Combine(w, "watchos", "ipsw")
                 // (the runtime's .dmg as it streams in: steps\rooms.sh writes it there, then deletes it)
                 : p.Os == "vision" && p.Id == "rooms" ? Path.Combine(w, "visionos", "build", "rooms")
+                // (the OTA and its .part while it streams in)
+                : p.Os == "tv" && p.Id == "download" ? Path.Combine(w, "tvos", "ota")
                 : null;
             if (dir == null || !Directory.Exists(dir)) return lastBytes = -1;
             long sum = 0;

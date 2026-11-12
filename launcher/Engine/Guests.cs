@@ -12,34 +12,35 @@ namespace ASoftware.Engine
     /// <summary>What the launcher knows of each OS: its scripts, folders, ports and disks, as the scripts lay them out.</summary>
     public static class Guests
     {
-        public static readonly string[] Ids = { "ios16", "ios26", "watch", "vision" };
-        /// <summary>The systems the phone app runs (visionOS is PC only).</summary>
+        public static readonly string[] Ids = { "ios16", "ios26", "watch", "vision", "tv" };
+        /// <summary>The systems the phone app runs (visionOS and tvOS are PC only).</summary>
         public static readonly string[] PhoneIds = { "ios16", "ios26", "watch" };
 
-        public static string Name(string os) => os == "ios16" ? "iOS 16" : os == "ios26" ? "iOS 26" : os == "watch" ? "watchOS" : "visionOS";
-        public static string Detail(string os) => os == "ios16" ? "16.7.16 · iPhone X" : os == "ios26" ? "26.6.2 · iPhone 16" : os == "watch" ? "27.2 · Apple Watch Series 9" : "27.2 · Apple Vision Pro";
+        public static string Name(string os) => os == "ios16" ? "iOS 16" : os == "ios26" ? "iOS 26" : os == "watch" ? "watchOS" : os == "tv" ? "tvOS" : "visionOS";
+        public static string Detail(string os) => os == "ios16" ? "16.7.16 · iPhone X" : os == "ios26" ? "26.6.2 · iPhone 16" : os == "watch" ? "27.2 · Apple Watch Series 9" : os == "tv" ? "27.2 · Apple TV 4K" : "27.2 · Apple Vision Pro";
 
         /// <summary>The ports a running guest holds; a start refuses when another process has one.</summary>
-        public static int[] Ports(string os) => os == "ios16" ? new[] { 4445 } : os == "ios26" ? new[] { 4451, 4452, 4453 } : os == "vision" ? new[] { 4481, 4482, 4483 } : new[] { 4471, 4472, 4473 };
-        public static int QmpPort(string os) => os == "ios16" ? 4445 : os == "ios26" ? 4453 : os == "vision" ? 4483 : 4473;
-        public static int SerialPort(string os) => os == "ios26" ? 4451 : os == "watch" ? 4471 : os == "vision" ? 4481 : 0;
-        /// <summary>iOS 16's RAM is fixed by its device tree, visionOS's too (4 GiB, the dtree-v trees').</summary>
-        public static bool HasRamSetting(string os) => os != "ios16" && os != "vision";
+        public static int[] Ports(string os) => os == "ios16" ? new[] { 4445 } : os == "ios26" ? new[] { 4451, 4452, 4453 } : os == "vision" ? new[] { 4481, 4482, 4483 } : os == "tv" ? new[] { 4501, 4502, 4503 } : new[] { 4471, 4472, 4473 };
+        public static int QmpPort(string os) => os == "ios16" ? 4445 : os == "ios26" ? 4453 : os == "vision" ? 4483 : os == "tv" ? 4503 : 4473;
+        public static int SerialPort(string os) => os == "ios26" ? 4451 : os == "watch" ? 4471 : os == "vision" ? 4481 : os == "tv" ? 4501 : 0;
+        /// <summary>iOS 16's RAM is fixed by its device tree, visionOS's and tvOS's too (4 GiB, the dtree-v and dtree-t trees';
+        /// Start-tvOS.ps1's -RamMiB is not measured on tvOS, so the launcher gives none).</summary>
+        public static bool HasRamSetting(string os) => os != "ios16" && os != "vision" && os != "tv";
         // iOS 26's 6 and 8 GB need qemu-sptm f76157c or later (the boot framebuffer above RAM): an older QEMU puts it
         // inside RAM from 5 GB, and reims-vgpu then refuses the split RAM map (rvg_device_create fails, QEMU ends at once)
         public static int[] RamChoices(string os) => os == "watch" ? new[] { 2048, 3072, 4096 } : new[] { 3072, 4096, 6144, 8192 };
-        /// <summary>The vCPU counts a start takes: visionOS has a device tree for 4, 6 and 8 (Start-visionOS.ps1 -Cpus).</summary>
-        public static int[] CpuChoices(string os) => os == "vision" ? new[] { 4, 6, 8 } : new[] { 4, 8 };
-        public static string[] Windows(string os) => os == "ios16" ? new[] { "ASoftware iOS" } : os == "ios26" ? new[] { "ASoftware iOS 26" } : os == "vision" ? new[] { "ASoftware visionOS 27.2" } : new[] { "ASoftware watchOS" };
+        /// <summary>The vCPU counts a start takes: visionOS has a device tree for 4, 6 and 8 (Start-visionOS.ps1 -Cpus), tvOS for 4, 6 and 8 too (Start-tvOS.ps1 -Cpus, 4 measured).</summary>
+        public static int[] CpuChoices(string os) => os == "vision" || os == "tv" ? new[] { 4, 6, 8 } : new[] { 4, 8 };
+        public static string[] Windows(string os) => os == "ios16" ? new[] { "ASoftware iOS" } : os == "ios26" ? new[] { "ASoftware iOS 26" } : os == "vision" ? new[] { "ASoftware visionOS 27.2" } : os == "tv" ? new[] { "ASoftware tvOS 27.2" } : new[] { "ASoftware watchOS" };
 
         /// <summary>Saves of the whole machine: the quick save closing the window makes, the way back, the Saves tab and a
         /// start that resumes one. Every control of that kind asks this, so a system without them is one place to say.
-        /// All four have them: visionOS since Start-visionOS.ps1's quick boot (-NoQuickBoot, -LoadState, &lt;disk&gt;.quick-used
+        /// All five have them: visionOS since Start-visionOS.ps1's quick boot (-NoQuickBoot, -LoadState, &lt;disk&gt;.quick-used
         /// as watchOS's; each of its two disks, sound and silent, has its own saves; Vision-AutoSave.ps1 after a cold boot, as the watch's).</summary>
         public static bool HasQuickSave(string os) => true;
 
-        /// <summary>The PC's GPU a guest drawn by reims-vgpu runs on: iOS 26's setting, which visionOS shares.</summary>
-        public static string HostGpu(string os) => (os == "vision" ? LauncherConfig.Current.Ios26 : Cfg(os)).HostGpu;
+        /// <summary>The PC's GPU a guest drawn by reims-vgpu runs on: iOS 26's setting, which visionOS and tvOS share.</summary>
+        public static string HostGpu(string os) => (os == "vision" || os == "tv" ? LauncherConfig.Current.Ios26 : Cfg(os)).HostGpu;
 
         public static OsConfig Cfg(string os) => LauncherConfig.Current.For(os);
 
@@ -59,6 +60,7 @@ namespace ASoftware.Engine
             os == "ios16" ? Path.Combine(App(os), "scripts", "run-windows.ps1")
             : os == "ios26" ? Path.Combine(App(os), "ios26", "Start-iOS26.ps1")
             : os == "vision" ? Path.Combine(App(os), "visionos", "Start-visionOS.ps1")
+            : os == "tv" ? Path.Combine(App(os), "tvos", "Start-tvOS.ps1")
             : Path.Combine(App(os), "watchos", "Start-watchOS.ps1");
 
         // --- installed? ------------------------------------------------------------------------
@@ -88,6 +90,9 @@ namespace ASoftware.Engine
                 case "vision":
                     // the silent disk is always made (Install-visionOS.ps1's disks step); the sound disk only with the plug-in
                     return Has(os, @"visionos\vision-silent.qcow2.ready") && Has(os, @"visionos\vision-silent.qcow2");
+                case "tv":
+                    // Install-tvOS.ps1's disks step makes tv.qcow2 and its .ready
+                    return Has(os, @"tvos\tv.qcow2.ready") && Has(os, @"tvos\tv.qcow2");
                 default:
                     return Has(os, @"watchos\watch.qcow2.ready") && Has(os, @"watchos\watch.qcow2");
             }
@@ -120,27 +125,28 @@ namespace ASoftware.Engine
                 var asked = LauncherConfig.Current.Install;
                 int watch = marks.Count(f => f.StartsWith("watch-", StringComparison.Ordinal));
                 int vision = marks.Count(f => f.StartsWith("vision-", StringComparison.Ordinal));
+                int tv = marks.Count(f => f.StartsWith("tv-", StringComparison.Ordinal));
                 // Install-iOS26.ps1: 26 steps, of which setup, prereq, cleanup and shortcut run every time and leave none
                 if (os == "ios26")
                 {
-                    var own = marks.Where(f => !f.StartsWith("watch-", StringComparison.Ordinal) && !f.StartsWith("vision-", StringComparison.Ordinal)).ToList();
+                    var own = marks.Where(f => !f.StartsWith("watch-", StringComparison.Ordinal) && !f.StartsWith("vision-", StringComparison.Ordinal) && !f.StartsWith("tv-", StringComparison.Ordinal)).ToList();
                     // a watch-only or visionOS-only install leaves the base's markers here and nothing else of iOS 26: that
                     // is no iOS 26 install that stopped, unless iOS 26 was asked for too
                     bool onlyBase = own.All(f => BaseOnce.Contains(Path.GetFileNameWithoutExtension(f)));
-                    bool forOther = watch > 0 || vision > 0 || asked != null && (asked.Watch || asked.Vision);
+                    bool forOther = watch > 0 || vision > 0 || tv > 0 || asked != null && (asked.Watch || asked.Vision || asked.Tv);
                     if (onlyBase && forOther && !(asked != null && asked.Ios26)) return (0, 0);
                     return (own.Count, 26 - 4);
                 }
-                // Install-watchOS.ps1: 13 steps, Install-visionOS.ps1: 16; in both check, cleanup and shortcut run every time
+                // Install-watchOS.ps1: 13 steps, Install-visionOS.ps1: 16, Install-tvOS.ps1: 17; in all check, cleanup and shortcut run every time
                 // and leave none. One without iOS 26 makes the base first, in this folder and before any of its own markers
                 // (its check step runs Install-iOS26.ps1 -Base): the base's steps are this install's too, unless a finished
                 // iOS 26 or the other one of the two here made them, or nothing says this one was ever asked for (then they
                 // are an iOS 26 install's that stopped)
-                bool isWatch = os == "watch";
-                int mine = isWatch ? watch : vision, total = isWatch ? 13 - 3 : 16 - 3;
-                bool wanted = asked != null && (isWatch ? asked.Watch : asked.Vision);
-                string other = isWatch ? "vision" : "watch";
-                bool baseBefore = Installed("ios26") && SameFolder(Work("ios26"), w) || Installed(other) && SameFolder(Work(other), w);
+                bool isWatch = os == "watch", isTv = os == "tv";
+                int mine = isWatch ? watch : isTv ? tv : vision, total = (isWatch ? 13 : isTv ? 17 : 16) - 3;
+                bool wanted = asked != null && (isWatch ? asked.Watch : isTv ? asked.Tv : asked.Vision);
+                bool baseBefore = Installed("ios26") && SameFolder(Work("ios26"), w)
+                    || new[] { "watch", "vision", "tv" }.Any(other => other != os && Installed(other) && SameFolder(Work(other), w));
                 if (baseBefore || mine == 0 && !wanted) return (mine, total);
                 return (mine + marks.Count(f => BaseOnce.Contains(Path.GetFileNameWithoutExtension(f))), total + BaseOnce.Length);
             }
@@ -154,7 +160,7 @@ namespace ASoftware.Engine
         static bool SameFolder(string a, string b) =>
             string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
 
-        /// <summary>A watchOS or visionOS install has its base already: iOS 26 is installed (the wizard puts them in its
+        /// <summary>A watchOS, visionOS or tvOS install has its base already: iOS 26 is installed (the wizard puts them in its
         /// folder), or the system's work folder has every marker of the base's steps.</summary>
         public static bool HasBase(string os)
         {
@@ -177,6 +183,7 @@ namespace ASoftware.Engine
                 case "ios26": return W(os, c.Wallpaper == "collections" ? "root-collections-user.qcow2" : "root26-user.qcow2");
                 // (two disks of their own, as Start-visionOS.ps1 picks them: what one keeps is not on the other)
                 case "vision": return W(os, Sound(os) ? @"visionos\vision.qcow2" : @"visionos\vision-silent.qcow2");
+                case "tv": return W(os, @"tvos\tv.qcow2");
                 default: return W(os, @"watchos\watch.qcow2");
             }
         }
@@ -200,6 +207,8 @@ namespace ASoftware.Engine
             }
             if (os == "watch") return W(os, smp == 8 ? @"watchos\dtree-w8" : @"watchos\dtree-w");
             if (os == "vision") return W(os, smp == 8 ? @"visionos\dtree-v8" : smp == 6 ? @"visionos\dtree-v6" : @"visionos\dtree-v");
+            // (Start-tvOS.ps1's $Modes: a tree per vCPU count and mode; 4K's carry no suffix)
+            if (os == "tv") return W(os, (smp == 8 ? @"tvos\dtree-t8" : smp == 6 ? @"tvos\dtree-t6" : @"tvos\dtree-t") + (Cfg(os).Resolution == "2160" ? "" : "-1080"));
             return "";
         }
 
@@ -214,12 +223,18 @@ namespace ASoftware.Engine
 
         public static int Ram(string os) => Cfg(os).RamMiB > 0 && HasRamSetting(os) ? Cfg(os).RamMiB : DefaultRam(os);
 
-        /// <summary>The vCPUs a start takes: the setting, one of the counts there is a device tree for (visionOS: 8 else).</summary>
+        /// <summary>The vCPUs a start takes: the setting, one of the counts there is a device tree for (visionOS: 8 else,
+        /// tvOS: 4 else).</summary>
         public static int Smp(string os)
         {
             int n = Cfg(os).Smp;
-            return os == "vision" && Array.IndexOf(CpuChoices(os), n) < 0 ? 8 : n;
+            return (os == "vision" || os == "tv") && Array.IndexOf(CpuChoices(os), n) < 0 ? (os == "tv" ? 4 : 8) : n;
         }
+
+        /// <summary>tvOS's picture size, "1080" or "2160" (Start-tvOS.ps1 -Resolution): the setting, 1080 else.</summary>
+        public static string Resolution() => Cfg("tv").Resolution == "2160" ? "2160" : "1080";
+
+        public static string ResolutionLabel(string res) => res == "2160" ? "4K" : res == "1080" ? "1080p" : res;
 
         /// <summary>The commit charge a guest's QEMU takes beyond its RAM, bytes: the code buffer (tb-size 2 GB on the research
         /// VM), GTK, and the GPU library. Measured: a 6 GB iOS 26 guest about 9.3 GB in all. When commit runs short Windows
@@ -227,14 +242,16 @@ namespace ASoftware.Engine
         public static double QemuOverhead(string os) => os == "ios16" ? 1.0e9 : 3.5e9;
 
         /// <summary>The settings a save depends on besides its disk (QEMU loads a state only into the machine it was made on):
-        /// vCPUs, RAM, the network card, and for iOS 26 and visionOS the PC's GPU. Its own RAM and vCPUs when given.
+        /// vCPUs, RAM, the network card, for iOS 26, visionOS and tvOS the PC's GPU, and for tvOS its resolution
+        /// (a state loads only into the frame buffer and device tree it was saved with). Its own RAM and vCPUs when given.
         /// (visionOS's sound is not in it: sound and silent are two disks, each with its own saves.)</summary>
         public static string Shape(string os, int ram = 0, int smp = 0)
         {
             var c = Cfg(os);
             var s = $"smp={(smp > 0 ? smp : Smp(os))};ram={(os == "ios16" ? 0 : ram > 0 ? ram : Ram(os))};net={(c.Net ? 1 : 0)}";
             var g = HostGpu(os);
-            if (os == "ios26" || os == "vision") s += ";gpu=" + (g == "integrated" || g == "discrete" ? g : "auto");
+            if (os == "ios26" || os == "vision" || os == "tv") s += ";gpu=" + (g == "integrated" || g == "discrete" ? g : "auto");
+            if (os == "tv") s += ";res=" + Resolution();
             return s;
         }
 
@@ -273,6 +290,7 @@ namespace ASoftware.Engine
             if (ram > 0) parts.Add($"{ram / 1024.0:0.#} GB RAM");
             if (p.TryGetValue("smp", out var s)) parts.Add(s + " vCPU");
             if (p.TryGetValue("net", out var net)) parts.Add(net == "1" ? L.T("network on", "ağ açık") : L.T("network off", "ağ kapalı"));
+            if (p.TryGetValue("res", out var res)) parts.Add(ResolutionLabel(res));
             if (p.TryGetValue("gpu", out var g) && g != "auto") parts.Add(g == "integrated" ? L.T("integrated GPU", "tümleşik GPU") : L.T("graphics card", "ekran kartı"));
             return string.Join(" · ", parts);
         }
@@ -375,6 +393,9 @@ namespace ASoftware.Engine
                 if (os == "watch" && vres && c.Contains("fb=352x430")) return p;
                 // (on one of its two user disks: Install-visionOS.ps1's boots run Start-visionOS.ps1 on its build disks)
                 if (os == "vision" && vres && c.Contains("fb=1920x1080") && VisionDisk(c) != "") return p;
+                // (tvOS: its 1080p mode shares visionOS's frame buffer size, so its own disk tells them apart; Install-tvOS.ps1's
+                // boots run Start-tvOS.ps1 on its build disks)
+                if (os == "tv" && vres && (c.Contains("fb=1920x1080") || c.Contains("fb=3840x2160")) && TvDisk(c) != "") return p;
             }
             return null;
         }
@@ -384,12 +405,16 @@ namespace ASoftware.Engine
             cmd.IndexOf("vision-silent.qcow2", StringComparison.OrdinalIgnoreCase) >= 0 ? W("vision", @"visionos\vision-silent.qcow2")
             : Regex.IsMatch(cmd, @"[\\/]vision\.qcow2", RegexOptions.IgnoreCase) ? W("vision", @"visionos\vision.qcow2") : "";
 
+        /// <summary>The tvOS user disk a QEMU command line runs, or "" for another disk.</summary>
+        public static string TvDisk(string cmd) =>
+            Regex.IsMatch(cmd, @"[\\/]tvos[\\/]tv\.qcow2", RegexOptions.IgnoreCase) ? W("tv", @"tvos\tv.qcow2") : "";
+
         /// <summary>The newest run folder of an OS (where its serial and QEMU logs are).</summary>
         public static string LastRunFolder(string os)
         {
             var w = Work(os);
             if (w == "") return "";
-            var runs = os == "watch" ? Path.Combine(w, "watchos", "runs") : os == "vision" ? Path.Combine(w, "visionos", "runs") : Path.Combine(w, "runs");
+            var runs = os == "watch" ? Path.Combine(w, "watchos", "runs") : os == "vision" ? Path.Combine(w, "visionos", "runs") : os == "tv" ? Path.Combine(w, "tvos", "runs") : Path.Combine(w, "runs");
             if (!Directory.Exists(runs)) return "";
             var d = new DirectoryInfo(runs).GetDirectories().OrderByDescending(x => x.LastWriteTimeUtc).FirstOrDefault();
             return d?.FullName ?? "";
