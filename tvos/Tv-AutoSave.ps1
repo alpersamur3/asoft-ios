@@ -1,10 +1,11 @@
 # ASoftware tvOS: the automatic quick save, as visionOS's (visionos\Vision-AutoSave.ps1) and watchOS's.
 # Start-tvOS.ps1 starts it, hidden, after a cold start with quick boot on, on a disk with no save yet (a save
 # already there is the way back, and only closing the window replaces it). After a start tvOS works through its
-# own start-up (Home after about 1.5 minutes on 4 vCPUs on the hand-built disk, then its services' first work). A
-# save made in that time carries the work into every resume, so this one waits it out: once Home is on the screen
-# (a QMP screendump bigger than -HomeBytes: the boot screen, the Apple logo on black, is small, Home with its rows
-# of artwork far bigger at 3840x2160) for -HomeSeconds, at least -MinSeconds after the start, QEMU's CPU use is
+# own start-up (Home after about a minute at 1080p, 1.5 at 4K, on 4 vCPUs on the hand-built disk, then its services'
+# first work). A save made in that time carries the work into every resume, so this one waits it out: once Home is
+# on the screen (a QMP screendump bigger than -HomeBytes, which Start-tvOS.ps1 gives for its mode: the boot screens,
+# black and the Apple logo, dump small, Home with its rows of artwork far bigger; the default is 4K's, where they
+# measured 24-49 KB and 288-299 KB) for -HomeSeconds, at least -MinSeconds after the start, QEMU's CPU use is
 # under -CalmCores (or -PatienceSeconds more have passed), and nobody is using tvOS (its window not in front, or no
 # mouse or keyboard input on this PC for -IdleSeconds), it saves the machine as the quick boot state, asoft-quick,
 # as closing the window does. A start after a crash, a forced stop or a power cut then goes on from a settled Home
@@ -17,7 +18,7 @@ param(
     [int]$QmpPort = 4503,
     [int]$MinSeconds = 300,
     [int]$HomeSeconds = 180,
-    [int]$HomeBytes = 300000,
+    [int]$HomeBytes = 150000,
     # QEMU's CPU use (cores) under which tvOS counts as settled, and how long past the other waits a guest that
     # stays above it is waited for before it is saved anyway
     [double]$CalmCores = 2.5,

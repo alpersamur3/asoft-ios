@@ -388,7 +388,7 @@ $RefT = [ordered]@{
     firmware   = @{ S = 10; Thr = 1; Add = 0.05; Keep = 0.05 }
     gpu        = @{ S = 15; Thr = 1; Add = 0.01; Keep = 0.01; Linux = $true }
     rootfs     = @{ S = 1200; Thr = 2; Add = 10.3; Keep = -2.7; Linux = $true }
-    patches    = @{ S = 60; Thr = 2; Add = 0.5; Keep = 0.5; Linux = $true }
+    patches    = @{ S = 60; Thr = 2; Add = 0.65; Keep = 0.65; Linux = $true }
     trustcache = @{ S = 2; Thr = 1; Add = 0; Keep = 0 }
     firstboot  = @{ S = 300; Thr = 4; Add = 1.3; Keep = 1.3 }
     persona    = @{ S = 30; Thr = 1; Add = 0.05; Keep = 0.05; Linux = $true }

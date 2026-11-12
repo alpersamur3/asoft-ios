@@ -11,7 +11,10 @@
 # tvx.py unpacks the payload into an ext4 image on the work drive, whose code signatures vsig.py checks.
 # It needs our QEMU with visionOS's options in <work>\qemu (the build tvOS was measured on), the one QEMU every guest
 # runs on: the qemu step puts it there when the install's is older.
-# Everything goes into <Work>\tvos (about 12.5 GB when done; the build peaks near 23 GB, when the root disk is
+# One disk runs at 4K (3840x2160) and at 1080p: its QuartzCore takes a display mode's scale as a real Apple TV does
+# (dsc-qcscale.py, the patches step), and each mode has its own device trees (dtree-t*, dtree-t*-1080), which
+# Start-tvOS.ps1 -Resolution picks.
+# Everything goes into <Work>\tvos (about 12.7 GB when done; the build peaks near 23 GB, when the root disk is
 # built from the unpacked root), and leaves a marker per step in <Work>\install\tv-*.done, so running it again goes
 # on where it stopped.
 #
@@ -73,10 +76,14 @@ $GpuBundle = 'AppleParavirtGPUMetalIOGPUFamily.bundle'
 $KernelIn = @('visionos\bootkc-v', 'cloud\kernelcache.research.vphone600.decompressed', 'fw\bootkc')
 $KernelPacked = 'cloudos\kernelcache.research.vphone600'
 # the device trees dt-tv.py makes from the base's (iOS 26 0.3.0's dtree-smp4/8, fw\dtree.orig; the same properties
-# as the hand-built dtree-t, in a fixed order): another base gives other bytes, which is said, not refused
-$TreeSha = @{ 'dtree-t'  = 'ba5e4bfe54bbe080bf2c58c4a606b23968dce311f0e151dd3453b28a95c58f1d'
-              'dtree-t6' = '04e6b2ef6c1843e391eb51f368265ab28e486bc086a75e89fa014b48b7c6fee5'
-              'dtree-t8' = 'f47825e781d6add815275a3f8220ec03a2585429709f52b1c7e3c530207d7cd5' }
+# as the hand-built dtree-t, in a fixed order), and their 1080p siblings dt-res.py makes (the same properties as the
+# hand-built dtree-t-1080): another base gives other bytes, which is said, not refused
+$TreeSha = @{ 'dtree-t'       = 'ba5e4bfe54bbe080bf2c58c4a606b23968dce311f0e151dd3453b28a95c58f1d'
+              'dtree-t6'      = '04e6b2ef6c1843e391eb51f368265ab28e486bc086a75e89fa014b48b7c6fee5'
+              'dtree-t8'      = 'f47825e781d6add815275a3f8220ec03a2585429709f52b1c7e3c530207d7cd5'
+              'dtree-t-1080'  = '932ec7ea624720139dfafda9286d5aa9316105a8c3cf0dcc865f2bf1a4d0333b'
+              'dtree-t6-1080' = '971ce5ded69fee5a139d066a283d0e2944a6bfa5c8117bbc62428614aac4c522'
+              'dtree-t8-1080' = '9ed63b5684f703166b8556b1026c36ee0089ef141fd79d04efafdc4ba3efd44e' }
 # the unpacked root's ext4 image: sparse, this big at most (about 13 GB of it is used)
 $RootImageGiB = 20
 # tvOS's ports (serial console, HMP, QMP): iOS 26 4451-4453, iOS 27 4461-4463, watchOS 4471-4473, visionOS 4481-4483
@@ -264,15 +271,16 @@ function Send-Qmp([string]$command, [hashtable]$arguments = $null, [switch]$Quie
         } finally { $client.Close() }
     } catch { if (-not $Quiet) { Say "QMP: $($_.Exception.Message)" Yellow } }
 }
-# The size of the guest's screen dumped by QMP as a PNG: at 3840x2160 the boot screen (the Apple logo on black) is
-# small, Home with its rows of app artwork well over 300 KB (a threshold set for 4K, not measured on a dump)
+# The size of the guest's screen dumped by QMP as a PNG. At 3840x2160 (the install's boots) the boot screens (black,
+# then the Apple logo) dump to 24-49 KB, Home with its rows of app artwork to 288-299 KB (measured on two boots of
+# the hand-built disk, 2026-11-12): Home is a dump over 150 KB
 function Screen-Bytes($g, [string]$shot) {
     $png = Join-Path $g.Dir "$shot.png"
     Remove-Item $png -ErrorAction SilentlyContinue
     Send-Qmp 'screendump' @{ filename = ($png -replace '\\', '/'); format = 'png' } -Quiet
     if (Test-Path $png) { (Get-Item $png).Length } else { 0 }
 }
-$HomeBytes = 300000
+$HomeBytes = 150000
 # A tvOS guest running (its fixed ports listening) holds the files a disk or QEMU step replaces
 function Need-NoTv {
     if ($DryRun) { return }
@@ -282,7 +290,8 @@ function Need-NoTv {
 function Guest([int]$wait, [string[]]$cmds, [switch]$NoFail) {
     Py 'guest-shell.py' (@("$($TvPorts[0])", "$wait") + $cmds) -NoFail:$NoFail
 }
-# Start-tvOS.ps1 on the install's disk, 4 vCPUs, 2160p (the measured mode), its own window
+# Start-tvOS.ps1 on the install's disk, 4 vCPUs, its own window, at 2160p: the mode the hand-built disk's first boots
+# ran in (its 1080p starts were on such a disk) and $HomeBytes is measured for
 function Start-Tv([string]$runName) {
     $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $here 'Start-tvOS.ps1'), '-Work', $Work,
            '-Name', $runName, '-Disk', 'tvos\roott-b.qcow2', '-Cpus', '4', '-Resolution', '2160')
@@ -633,11 +642,16 @@ function Do-Firmware {
         $smp8 = In-Tv 'build\dtree-smp8'
         $null = Py 'dt-root26smp.py' @((In-Work 'fw\dtree.orig'), $smp8, '--cpus', '8')
     }
+    # each with its 1080p sibling (<tree>-1080: display scale 1, artwork 1080 @1x), which Start-tvOS.ps1
+    # -Resolution 1080 boots with fb=1920x1080 on the same disk
     foreach ($t in @(@('dtree-t', (In-Work 'dtree-smp4')), @('dtree-t6', $smp6), @('dtree-t8', $smp8))) {
         $outTree = In-Tv $t[0]
         $null = Py 'dt-tv.py' @($t[1], $raw, $outTree)
-        if (-not $DryRun -and (Sha256 $outTree) -cne $TreeSha[$t[0]]) {
-            Say "tvos\$($t[0]) differs from the one made on our PC (another iOS 26 base's tree?): used as it is" Yellow
+        $null = Py 'dt-res.py' @($outTree, '1', "$outTree-1080")
+        foreach ($n in $t[0], "$($t[0])-1080") {
+            if (-not $DryRun -and (Sha256 (In-Tv $n)) -cne $TreeSha[$n]) {
+                Say "tvos\$n differs from the one made on our PC (another iOS 26 base's tree?): used as it is" Yellow
+            }
         }
     }
 }
@@ -709,8 +723,9 @@ function Do-Patches {
     $null = Run-Wsl 'patches' (Step-Body 'patches')
 }
 function Do-TrustCache {
-    # Apple's, the signed sysroot (rootfs), the patched subcaches (patches) and the GPU driver (gpu): each list from
-    # the step that makes it (the hand-built roott.tc: 1738 entries)
+    # Apple's, the signed sysroot (rootfs), the patched subcaches (patches: IOMobileFramebuffer's, libxpc's and
+    # QuartzCore's, whose CDHashes dsc-patch.py computes) and the GPU driver (gpu): each list from the step that makes
+    # it (the hand-built roott.tc: 1738 entries, 1739 with QuartzCore's in roott4.tc)
     $in = [ordered]@{ "ota\$OsTrustCache" = 'decrypt'; 'roott.qcow2.hashes' = 'rootfs'; 'roott-p.hashes' = 'patches'; 'gpu\hashes.txt' = 'gpu' }
     foreach ($f in $in.Keys) { Need-Input $f $in[$f] }
     $null = Py 'mktc.py' (@('-2', (In-Tv 'roott.tc')) + @($in.Keys | ForEach-Object { In-Tv $_ }))
@@ -847,10 +862,10 @@ $Steps = @(
     @{ Id = 'download';   Kind = 'once';   Min = 12; GB = 4.97;  Add = 4.97; Keep = 4.97; Title = 'tvOS 27.2 full OTA for AppleTV14,1 (Apple, 4.97 GB, SHA-256 checked)' }
     @{ Id = 'decrypt';    Kind = 'once';   Min = 6;  GB = 0;     Add = 5.0;  Keep = 0.03; Title = 'Decrypt the OTA, index it, take out its boot files' }
     @{ Id = 'unpack';     Kind = 'once';   Min = 40; GB = 0;     Add = 13.0; Keep = 8.0;  Title = 'Unpack the root (LZRAVEN) into an ext4 image and check its signatures' }
-    @{ Id = 'firmware';   Kind = 'once';   Min = 1;  GB = 0;     Add = 0.05; Keep = 0.05; Title = 'The tvOS kernel and device trees (4, 6 and 8 vCPUs)' }
+    @{ Id = 'firmware';   Kind = 'once';   Min = 1;  GB = 0;     Add = 0.05; Keep = 0.05; Title = 'The tvOS kernel and device trees (4, 6 and 8 vCPUs; 4K and 1080p)' }
     @{ Id = 'gpu';        Kind = 'once';   Min = 1;  GB = 0;     Add = 0.01; Keep = 0.01; Title = 'The guest GPU driver for tvOS' }
     @{ Id = 'rootfs';     Kind = 'chain';  Min = 20; GB = 0;     Add = 10.3; Keep = -2.7; Title = 'The root disk, from the unpacked root (tvos\roott.qcow2)' }
-    @{ Id = 'patches';    Kind = 'chain';  Min = 2;  GB = 0;     Add = 0.5;  Keep = 0.5;  Title = 'Tweaks, shared-cache patches, prefs and the GPU driver on it' }
+    @{ Id = 'patches';    Kind = 'chain';  Min = 2;  GB = 0;     Add = 0.65; Keep = 0.65; Title = 'Tweaks, shared-cache patches, prefs and the GPU driver on it' }
     @{ Id = 'trustcache'; Kind = 'chain';  Min = 1;  GB = 0;     Add = 0;    Keep = 0;    Title = 'Its trust cache (tvos\roott.tc)' }
     @{ Id = 'firstboot';  Kind = 'chain';  Min = 5;  GB = 0;     Add = 1.3;  Keep = 1.3;  Title = 'First boot (tvos\roott-b.qcow2)' }
     @{ Id = 'persona';    Kind = 'chain';  Min = 1;  GB = 0;     Add = 0.05; Keep = 0.05; Title = 'Persona, MobileGestalt, activation and tvOS''s prefs' }

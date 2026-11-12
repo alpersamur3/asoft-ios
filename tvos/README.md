@@ -1,10 +1,10 @@
 # tvOS 27.2 on ASoftware (research preview)
 
 tvOS 27.2 (24K122) as an Apple TV 4K (3rd generation, AppleTV14,1, J255) on QEMU's `-M vresearch`, drawn by your
-PC's GPU (reims-vgpu and metal2vulkan, Vulkan) into a 3840x2160 picture. It is built on the iOS 26 install of this
-PC (or only its base): its research kernel, SPTM, TXM, device trees, shell ramdisk, sysroot, GPU driver and WSL
-distro. Nothing of Apple's is in this repository: the installer downloads Apple's own OTA update for the Apple TV
-4K and builds the root disk out of it on your PC.
+PC's GPU (reims-vgpu and metal2vulkan, Vulkan) at 1080p (1920x1080) or 4K (3840x2160), one disk for both. It is
+built on the iOS 26 install of this PC (or only its base): its research kernel, SPTM, TXM, device trees, shell
+ramdisk, sysroot, GPU driver and WSL distro. Nothing of Apple's is in this repository: the installer downloads
+Apple's own OTA update for the Apple TV 4K and builds the root disk out of it on your PC.
 
 ## Install
 
@@ -24,7 +24,7 @@ It needs:
 - liblzraven, fetched from GitHub at one pinned commit and built in WSL (see Credits): OS 27's OTA payloads are
   LZRAVEN-compressed, which `ipsw` cannot decode off macOS 27
 - about 23 GB free on the install drive at the peak (the OTA, its decrypted archive and the unpacked root's image
-  meet there for a while), about 12.5 GB when it is done; the work drive must be NTFS (the unpacked root's image
+  meet there for a while), about 12.7 GB when it is done; the work drive must be NTFS (the unpacked root's image
   is a sparse file)
 - our QEMU in `work\qemu`, the one QEMU iOS 16, iOS 26, watchOS, visionOS and tvOS run on, as visionOS has it
   (usb-touchscreen's walk mode with a held key and `-cpu x-tlbi-filter`). An install whose QEMU is older gets it
@@ -46,14 +46,14 @@ root's image.
 | download | the OTA (`tvos\ota`), in 32 MiB pieces over 8 connections; a download that stopped goes on with the pieces it has; the whole file is checked by its SHA-256 |
 | decrypt | `ipsw fw aea` with the pinned key into one Apple Archive (4.99 GB, checked by size and magic), indexed (`index_outer.py`), and its boot files taken out: the OS trust cache (1,623 entries), J255's device tree, the build manifest (24K122, AppleTV14,1). The downloaded OTA is removed then |
 | unpack | the root out of the payload (`tvx.py` with `pbzm_dec`) into a sparse ext4 image (`tvos\build\root.ext4`, 20 GiB at most, 13 GB used); checked: every path of Apple's fixup manifest there, 24K122, and `vsig.py`: every code page of every Mach-O and shared-cache file against its signature, and their CDHashes against the OS trust cache (8 kexts, whose code is in the kernel cache, may be outside it). The decrypted archive is removed then |
-| firmware | the kernel: visionOS's (`kc-vision.py`, the cloudOS 26.4b research kernel with iOS 27's patches, the IOGPU timeouts and the sandbox syscall filters off; SHA-256 pinned); `dt-tv.py`: J255's identity on the 4, 6 and 8 CPU trees (`dtree-t`, `-t6`, `-t8`) |
+| firmware | the kernel: visionOS's (`kc-vision.py`, the cloudOS 26.4b research kernel with iOS 27's patches, the IOGPU timeouts and the sandbox syscall filters off; SHA-256 pinned); `dt-tv.py`: J255's identity on the 4, 6 and 8 CPU trees (`dtree-t`, `-t6`, `-t8`: 4K, display scale 2, artwork 3840 @2x), and `dt-res.py` their 1080p siblings (`dtree-t-1080`, `-t6-1080`, `-t8-1080`: display scale 1, artwork 1080 @1x) |
 | gpu | the GPU driver (`work\gpu-driver`), retargeted to tvOS, signed, into `tvos\gpu` (kept) |
 | rootfs | `mk-roott.sh`: the partitioned HFS+ root (`roott.qcow2`, root 16 GB and Data 8 GB) copied from the unpacked root; the image is removed then |
-| patches | `roott-patch.sh` on a new overlay, `roott-p.qcow2`: launchd jobs, keybag, the shared-cache patches (IOMobileFramebuffer, libxpc), the GPU driver, prefs (screen saver and idle screen off) |
-| trustcache | `roott.tc`: Apple's trust cache + the signed sysroot, the patched shared-cache files and the GPU driver |
+| patches | `roott-patch.sh` on a new overlay, `roott-p.qcow2`: launchd jobs, keybag, the shared-cache patches (IOMobileFramebuffer, libxpc, and QuartzCore's display-mode scale: `dsc-qcscale.py`, below), the GPU driver, prefs (screen saver and idle screen off) |
+| trustcache | `roott.tc`: Apple's trust cache + the signed sysroot, the patched shared-cache files (their CDHashes computed by the patches step) and the GPU driver |
 | firstboot | boots once on `roott-b.qcow2` until usermanagerd has written the persona manifest and mobileactivationd its container |
 | persona | the persona manifest, MobileGestalt, the activation record, tvOS's prefs |
-| homeboot | boots again until Home is up (about 1.5 min on our PC), then 2 min more |
+| homeboot | boots again (at 4K) until Home is up (about 1.5 min on our PC; a screen dump over 150 KB twice), then 2 min more |
 | disks | `tv.qcow2`, the disk you use, on `roott-b.qcow2` |
 | cleanup, shortcut | removes the build's leftovers; Start menu "ASoftware tvOS" |
 
@@ -65,22 +65,31 @@ stays, and the next one is `.old2`, `.old3`, ... A redo after the cleanup downlo
 
 `Start-tvOS.cmd` (or the Start menu shortcut):
 
-    Start-tvOS.cmd [-Cpus 4|6|8] [-NoNet] [-NoFrame] [-Snapshot] [-NoQuickBoot] [-NoAutoSave]
-                   [-LoadState NAME] [-MaxFps N] [-RamMiB N] [-PrintOnly]
+    Start-tvOS.cmd [-Resolution 1080|2160] [-Cpus 4|6|8] [-NoNet] [-NoFrame] [-Snapshot] [-NoQuickBoot]
+                   [-NoAutoSave] [-LoadState NAME] [-MaxFps N] [-RamMiB N] [-PrintOnly]
 
-- 4 vCPUs by default (each count has its own device tree; 6 and 8 are not measured on tvOS); 4 GiB of guest RAM
+- 1080p (`-Resolution 1080`, 1920x1080) or 4K (`-Resolution 2160`, 3840x2160), on the same disk. Without
+  `-Resolution` a start takes the mode of the save it resumes, else the one the disk was last started in, else
+  1080p. 1080p is the default because it is lighter for the same picture (tvOS lays out 1920x1080 points either
+  way, 4K draws them at 2x): measured on our PC, Home comes 59-66 s after the start (4K: 65-79 s), a slow remote
+  key shows about 1.45x sooner, and QEMU takes 1.3-1.6 GB less memory. Settings > About says
+  `1080p HD - 60Hz` or `2160p UHD - 60Hz`
+- 4 vCPUs by default (each count has its own device trees; 6 and 8 are not measured on tvOS); 4 GiB of guest RAM
   (the tree's)
-- 3840x2160 (`-Resolution 2160`, the default). `-Resolution 1080` is not wired in yet: a start in it says which
-  files it lacks and stops
 - one tvOS at a time (ports 4501-4503); iOS 26, watchOS and visionOS can run beside it
 - quick boot, as the other guests have it: closing the window saves the machine into the disk (about the
   guest's RAM, 4 GB), and the next start goes on from there in seconds instead of booting. The save is resumed
-  once and then stays as a way back (`-LoadState asoft-quick`); `-NoQuickBoot` boots every time. A save loads
-  only with the `-Cpus` and RAM it was made with. After a cold start on a disk with no save yet, tvOS is also
-  saved by itself once Home has been up a while and you are not using it (`-NoAutoSave` turns that off)
-- the window is a TV with a Siri Remote beside it, whose parts you can click, when the QEMU has the TV window
-  (usb-consumer `tv-remote`, our build from branch asoft-tv, not published yet; the start looks for it and
-  otherwise opens the plain window). F9 (or `-NoFrame`) leaves the picture alone
+  once and then stays as a way back (`-LoadState asoft-quick`) until the next save replaces it; `-NoQuickBoot`
+  boots every time. A save loads only with the settings it was made with (resolution, `-Cpus`, RAM, network,
+  `-HostGpu`): a start takes them from the save when its command line does not set them, and a start that sets
+  other values boots instead, keeping the save as the way back (a changed setting never removes a save). The
+  start notes each start's settings in `tvos\tv.qcow2.starts`, which tells what a save was made with. After a cold
+  start on a disk with no save yet, tvOS is also saved by itself once Home has been up a while and you are not
+  using it (`-NoAutoSave` turns that off)
+- the window is a TV with a Siri Remote beside it, whose parts you can click, and the side bar (Save state, Saved
+  states, screenshots), when the QEMU has the TV window (usb-consumer `tv-remote`, our build from branch asoft-tv,
+  not published yet); the start looks for it and otherwise opens GTK's plain window with its menu bar. F9 (or
+  `-NoFrame`) leaves the picture alone
 - `-PrintOnly` prints the QEMU command line the start would run, and starts nothing
 
 Controls:
@@ -99,10 +108,22 @@ Controls:
 
 A key takes 2-8 seconds (up to 19 when a row changes) to show on the screen: wait for it before the next one.
 
-Works: Home with its apps, Settings (About says 27.2, 2160p), the network. Not yet: activation (About says
-Activation: Failed), so the apps that need Apple's services (Search, Apple TV) say they are not available right
-now. It runs under TCG on your CPU: Home comes up about 1.5 minutes after the start. QEMU takes about 5 GB of
-memory at 4 GiB of guest RAM: leave about 11 GB of Windows' commit free before you start it.
+Works: Home with its apps, Settings (About says 27.2, 1080p HD or 2160p UHD), the network. Not yet: activation
+(About says Activation: Failed), so the apps that need Apple's services (Search, Apple TV) say they are not
+available right now. It runs under TCG on your CPU: Home comes up about a minute after the start at 1080p, 1.5 at
+4K. QEMU takes about 3.6-3.9 GB of memory at 1080p and 5-5.5 GB at 4K, at 4 GiB of guest RAM: leave about 11 GB of
+Windows' commit free before you start it.
+
+### 1080p and 4K on one disk
+
+A real Apple TV takes a display mode's scale from its height: 1x up to 1080 lines, 2x above. QuartzCore
+(`-[CADisplayMode preferredScale]`) gives every mode at least 2x on a device whose MobileGestalt says it is virtual,
+as this VM's does, so a 1920x1080 picture became "1920x1080 at 2x" and tvOS drew its 4K layout into it (a quarter
+of it shown). The installer's patches step changes the one branch that picks the virtual rule into a branch to the
+hardware rule (`tvos\scripts\dsc-qcscale.py`: one word in the shared cache's subcache `.03`, its page hash and
+CDHash recomputed, the CDHash in the trust cache). A 3840x2160 mode is above 1080 lines, so 4K keeps its 2x;
+1080p gets 1x. The device tree tells tvOS which output it has (display scale, artwork subtype and scale), so each
+mode has its own trees and the start picks them with the frame buffer.
 
 ## Credits
 

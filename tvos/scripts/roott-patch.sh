@@ -1,7 +1,8 @@
 # The tvOS root's changes before its first boot, sourced by Install-tvOS.ps1's patches step inside in_root
 # ($R = the root, p1, with the Data volume p2 on $R/private/var; S = the scripts; P = where the patched
 # shared-cache copies and their CDHashes go, P/hashes.txt for the trust cache; GPU = the tvOS copy of the GPU
-# driver, the gpu step's). The hand-built tvOS's cmdT1.sh with its paths made parameters (notes: TVOS.md):
+# driver, the gpu step's). The hand-built tvOS's cmdT1.sh and cmdT4.sh with their paths made parameters (notes:
+# TVOS.md):
 #  - root26-tweaks.py: com.asoft.bash on the serial console, _PanicOnCrash renamed, containers
 #  - roott-jobs.py: backboardd without _Conclave (PineBoard has none in 24K122)
 #  - the system keybag, as ios26's tweaks step makes it
@@ -9,6 +10,8 @@
 #    stops here, as it would need watchOS's patch)
 #  - IOMobileFramebuffer force-kern: dscforce.py with tvOS 24K122's own symbol list (10 trampolines)
 #  - libxpc _xpc_token_satisfies_lwcr derives matched from error_code (1 hit in subcache .01 on 24K122)
+#  - QuartzCore's display-mode scale as on a real Apple TV (dsc-qcscale.py, subcache .03): a 1920x1080 mode at 1x,
+#    a 3840x2160 one at 2x as before, so one disk runs at 1080p and at 4K (the device tree picks the mode)
 #  - the paravirtual GPU driver (iOS 26's, retargeted to tvOS and signed by the gpu step)
 #  - roott-prefs.py (setup done, screen saver and idle screen off, watchdogs off) and root26-prefs.py
 #    (DataMigration not run; activation once mobileactivationd's container exists: the persona step runs it again)
@@ -52,6 +55,14 @@ n=$(dsc_hits lwcr e8079f1a0800084a88010036)
 va=$(awk '/ va /{print $NF}' "$P/lwcr-find.txt")
 python3 -I $S/dsc-patch.py $C $va e8079f1a0800084a88010036 e0179f1a1f2003d51f2003d5 $P | tee $P/lwcr.txt
 dsc_put $P/lwcr.txt
+# (a root that has it already keeps its subcache; its CDHash goes into the trust cache all the same)
+python3 -I $S/dsc-qcscale.py $C $P | tee $P/qcscale.txt
+if [ "$(awk 'NR==1{print $4}' $P/qcscale.txt)" = already ]; then
+	awk 'NR==1{print $3}' $P/qcscale.txt >> "$P/hashes.txt"
+	echo "QuartzCore's display-mode scale patch was there already"
+else
+	dsc_put $P/qcscale.txt
+fi
 
 B=$R/System/Library/Extensions/AppleParavirtGPUMetalIOGPUFamily.bundle
 rm -rf "${B:?}"

@@ -1,23 +1,25 @@
 # ASoftware tvOS launcher: tvOS 27.2 (Apple TV 4K, 3rd generation, AppleTV14,1) on -M vresearch, from the work
 # folder Install-tvOS.ps1 built it in (the iOS 26 install's, with its tvos\ folder), on the install's one QEMU
 # (<work>\qemu, which runs iOS 16, iOS 26, watchOS and visionOS too).
-#   Start-tvOS.cmd [-Work D:\ios26] [-Cpus 4|6|8] [-Resolution 2160|1080] [-NoNet] [-NoFrame] [-Snapshot]
+#   Start-tvOS.cmd [-Work D:\ios26] [-Resolution 1080|2160] [-Cpus 4|6|8] [-NoNet] [-NoFrame] [-Snapshot]
 #                  [-Name RUN] [-NoQuickBoot] [-NoAutoSave] [-LoadState NAME] [-HostGpu auto|integrated|discrete]
 #                  [-PrintOnly]
-# The window is the TV's picture, 3840x2160 (scaled to the window; F11 full screen). On a QEMU with the TV window
-# (usb-consumer tv-remote, branch asoft-tv) it is drawn as a TV with a Siri Remote beside it, whose parts can be
-# clicked (F9 or -NoFrame: the picture alone); on an older one the window is the plain one. The keyboard is the
-# remote: the arrow keys move the focus, Return selects, Esc goes back (Menu); F1 the TV button, F2 power, F3/F4
-# volume, and with the TV window F5 Play/Pause, F6 Mute, F7 Siri. tvOS reaches Home in about 75-96 s on 4 vCPUs
-# (measured on the hand-built disk; 73 s on visionOS's QEMU package).
+# The window is the TV's picture, 1920x1080 or 3840x2160 (-Resolution; scaled to the window, F11 full screen). On a
+# QEMU with the TV window (usb-consumer tv-remote, branch asoft-tv) it is drawn as a TV with a Siri Remote beside it,
+# whose parts can be clicked, and the side bar (F9 or -NoFrame: the picture alone); on an older one it is GTK's plain
+# window with its menu bar. The keyboard is the remote: the arrow keys move the focus, Return selects, Esc goes back
+# (Menu); F1 the TV button, F2 power, F3/F4 volume, and with the TV window F5 Play/Pause, F6 Mute, F7 Siri. tvOS
+# reaches Home in about a minute on 4 vCPUs at 1080p (59-66 s), 65-96 s at 4K (measured on the hand-built disk).
 # Its own ports (serial console 4501, HMP 4502, QMP 4503): one tvOS at a time; iOS 26 (4451-4453), watchOS
 # (4471-4473) and visionOS (4481-4483) can run beside it.
+#   -Resolution      1080 (1920x1080, tvOS's 1080p mode, scale 1) or 2160 (3840x2160, 4K, scale 2): the same disk,
+#                    each with its own device trees ($Modes below). Not given: the mode of the saved state the start
+#                    resumes, else the one this disk was last started in, else 1080 ($DefaultResolution)
 #   -Cpus 4|6|8      vCPUs (default 4, the measured count), each with its own device tree (dtree-t, -t6, -t8);
 #                    6 and 8 are made like 4 but not measured on tvOS
 #   -RamMiB N        the guest's RAM (default: the tree's 4096 MiB; QEMU takes it from the device tree:
 #                    ..\ios26\scripts\dt-ram.ps1 writes <tree>-<N>m beside it). Not measured on tvOS.
-#   -Resolution      2160 (default, the measured mode) or 1080: see $Modes below (1080 is not wired in yet)
-#   -Ppi N           the machine's ppi= (a QEMU that has it); default: the mode's (none for 2160)
+#   -Ppi N           the machine's ppi= (a QEMU that has it); default: the mode's (none)
 #   -NoNet           no network
 #   -NoFrame         the TV window starts with the picture alone, without the TV and the remote (ASOFT_FRAME=0)
 #   -HostGpu         auto|integrated|discrete: the PC's GPU tvOS draws on (as Start-iOS26.ps1's)
@@ -31,9 +33,15 @@
 # machine (memory and devices, about the guest's RAM) into the disk as its snapshot asoft-quick, and the next start
 # resumes it in seconds instead of booting. A save is resumed once; then it stays as a way back (-LoadState
 # asoft-quick goes back to it) until the next save replaces it, and a start boots tvOS from its disk as it was left.
-# -LoadState NAME resumes another saved state (the side bar's Save state makes them). A state loads only with its
-# own -Cpus, RAM and resolution. After a cold start on a disk with no save yet, Tv-AutoSave.ps1 (hidden) saves the
-# same state once Home has been up a while and nobody is using tvOS (-NoAutoSave keeps only the save at closing).
+# -LoadState NAME resumes another saved state (the TV window's side bar, Save state, makes them). A state loads only
+# into the machine it was saved from: its resolution, -Cpus, RAM, network and -HostGpu (as ASoftware.exe keeps a
+# save's settings). What a start does not give on its command line it takes from the state it resumes; a start that
+# gives other values boots instead, and the quick save stays as the way back (a changed setting never removes a
+# save; -LoadState with other values stops and says which). Each start of the disk notes its settings and time in
+# <disk>.starts: a state's settings are those of the last start before it was saved (a state older than every
+# noted start was saved at 2160, the only mode then). After a cold start on a disk with no save yet, Tv-AutoSave.ps1
+# (hidden) saves the same state once Home has been up a while and nobody is using tvOS (-NoAutoSave keeps only the
+# save at closing).
 # Writes go to the disk's own layer; the layers under it stay as the install made them. Each start keeps its logs
 # in tvos\runs\<Name> (serial.log, qemu.log, stderr.log, cmdline.txt). Prints "started EXE pid N -> RUN FOLDER".
 param(
@@ -41,7 +49,8 @@ param(
     [string]$Config = (Join-Path $env:LOCALAPPDATA 'ASoftware iOS 26\ios26.config.json'),
     [string]$Name = '',
     [ValidateSet(4, 6, 8)][int]$Cpus = 4,
-    [ValidateSet('2160', '1080')][string]$Resolution = '2160',
+    # '' (not given): see -Resolution above
+    [ValidateSet('1080', '2160')][string]$Resolution = '',
     [int]$RamMiB = 0,
     [ValidateRange(0, 1000)][int]$Ppi = 0,
     [switch]$NoNet,
@@ -69,22 +78,26 @@ $ErrorActionPreference = 'Stop'
 # The one place the window is told it shows a TV: this property of the usb-consumer device (=on), with the GTK
 # display's side bar (sidebar=on, below). The window then draws the picture as a TV's screen with a Siri Remote
 # beside it, and the device gets the remote's Play/Pause, Mute and Siri buttons. Only the QEMU built from branch
-# asoft-tv has it: the start probes the QEMU for it (as for x-tlbi-filter) and gives the plain device without it.
+# asoft-tv has it: the start probes the QEMU for it (as for x-tlbi-filter) and gives the plain device and GTK's
+# plain window without it (the side bar of an older QEMU is a phone's: Home, Lock, App switcher, Install .ipa).
 $SkinProp = 'tv-remote'
 
-# --- HOOK: the output modes (-Resolution) -----------------------------------------------------------
-# Each mode's frame buffer, its device trees (one per vCPU count), the user disk, its trust cache and the machine's
-# ppi (0: none). 2160 is the mode the installer builds and tvOS was measured in (3840x2160, display-scale 2).
-# 1080 is a hook for the 1080p recipe (a tree with scale 1, dt-res.py; a disk whose QuartzCore takes the hardware
-# scale rule, and that disk's own trust cache): its files are not made by this installer yet, so a start in it
-# says what is missing and stops. Wiring it in = making these files (and the names here, if they differ).
+# --- The output modes (-Resolution) -----------------------------------------------------------------
+# Each mode's frame buffer, its device trees (one per vCPU count; Install-tvOS.ps1's firmware step makes both sets),
+# the machine's ppi (0: none) and the size of a QMP screen dump that is Home, for Tv-AutoSave.ps1 (measured on the
+# hand-built disk's boots: at 1080p the boot screens dump to 6-17 KB, Home to 115-121 KB; at 4K 24-49 KB and
+# 288-299 KB). Both run on the one disk: its QuartzCore takes a mode's scale as a real Apple TV does (1 up to 1080
+# lines, 2 above; Install-tvOS.ps1's patches step), and the tree's display scale and artwork keys say which.
+# 1080 is the default: measured on the same PC, Home comes 59-66 s after the start (4K: 65-79 s), a slow remote
+# key shows about 1.45x sooner, and QEMU takes 3.6-3.9 GB of private memory (4K: 4.9-5.5 GB); tvOS's own layout is
+# 1920x1080 points either way.
 $Modes = @{
-    '2160' = @{ Fb = '3840x2160'; Ppi = 0; Disk = 'tvos\tv.qcow2'; Tc = 'tvos\roott.tc'; Measured = $true
-                Trees = @{ 4 = 'tvos\dtree-t'; 6 = 'tvos\dtree-t6'; 8 = 'tvos\dtree-t8' } }
-    '1080' = @{ Fb = '1920x1080'; Ppi = 0; Disk = 'tvos\tv-1080.qcow2'; Tc = 'tvos\roott-1080.tc'; Measured = $false
+    '1080' = @{ Fb = '1920x1080'; Ppi = 0; HomeBytes = 60000; Label = '1080p'
                 Trees = @{ 4 = 'tvos\dtree-t-1080'; 6 = 'tvos\dtree-t6-1080'; 8 = 'tvos\dtree-t8-1080' } }
+    '2160' = @{ Fb = '3840x2160'; Ppi = 0; HomeBytes = 150000; Label = '4K'
+                Trees = @{ 4 = 'tvos\dtree-t'; 6 = 'tvos\dtree-t6'; 8 = 'tvos\dtree-t8' } }
 }
-$mode = $Modes[$Resolution]
+$DefaultResolution = '1080'
 # tvOS's ports: serial console, HMP, QMP
 $TvPorts = @(4501, 4502, 4503)
 
@@ -103,25 +116,152 @@ if (-not $Exe) {
     if (-not (Test-Path $Exe)) { $Exe = In-Work 'qemu\qemu-system-aarch64.exe' }
 }
 $userDisk = -not $Disk
-if (-not $Disk) { $Disk = $mode.Disk }
-if (-not $Tc) { $Tc = $mode.Tc }
-$tree = $mode.Trees[$Cpus]
+if (-not $Disk) { $Disk = 'tvos\tv.qcow2' }
+if (-not $Tc) { $Tc = 'tvos\roott.tc' }
+$diskPath = In-Work $Disk
 $goOn = 'run tvos\Install-tvOS.cmd (or Install-ASoftware.cmd) again: it goes on where it stopped'
-$need = @($Exe, (In-Work 'tvos\bootkc-t'), (In-Work $tree), (In-Work 'fw\sptm'), (In-Work 'fw\txm'),
-          (In-Work 'rd-shell.hfs'), (In-Work $Disk), (In-Work $Tc))
-# the install's own disk once its disks step has made it (a redo of a disk step retires it)
-if ($userDisk) { $need += (In-Work $Disk) + '.ready' }
-$missing = @($need | Where-Object { -not (Test-Path -LiteralPath $_) })
-if ($missing -and -not $mode.Measured) {
-    throw ("-Resolution $Resolution is not wired in yet: it needs files this install does not make (" +
-           (($missing | ForEach-Object { $_.Replace("$Work\", '') }) -join ', ') + '). Start without -Resolution (3840x2160)')
-}
-foreach ($n in $missing) {
-    if ($userDisk -and $n -ceq ((In-Work $Disk) + '.ready')) {
-        throw "the tvOS install is not finished ($Disk has not been through its disks step): $goOn"
+function Need-Files([string[]]$files) {
+    foreach ($n in @($files | Where-Object { -not (Test-Path -LiteralPath $_) })) {
+        if ($userDisk -and $n -ceq "$diskPath.ready") {
+            throw "the tvOS install is not finished ($Disk has not been through its disks step): $goOn"
+        }
+        throw "$n is missing: $goOn"
     }
-    throw "$n is missing: $goOn"
 }
+# what every mode needs (the device tree comes once the mode is known, below)
+Need-Files (@($Exe, (In-Work 'tvos\bootkc-t'), (In-Work 'fw\sptm'), (In-Work 'fw\txm'), (In-Work 'rd-shell.hfs'),
+              $diskPath, (In-Work $Tc)) + $(if ($userDisk) { @("$diskPath.ready") } else { @() }))
+
+# Saved states: in the disk tvOS writes (not with -Snapshot), through the QEMU package's qemu-img.
+$qemuImg = Join-Path (Split-Path $Exe) 'qemu-img.exe'
+if (-not (Test-Path $qemuImg)) { $qemuImg = '' }
+# The disk and every layer under it must open: said here, in qemu-img's words, before QEMU ends on it at once (and
+# before a saved state is blamed for that and dropped)
+if ($qemuImg) {
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    $chain = @(& $qemuImg info -U --backing-chain $diskPath 2>&1 | ForEach-Object { "$_" })
+    $chainExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($chainExit) { throw ("$diskPath cannot be opened with the layers under it: " + (($chain | Where-Object { $_ } | Select-Object -Last 2) -join ' ')) }
+}
+$quickSnapshot = 'asoft-quick'
+function Disk-States {
+    if (-not $qemuImg -or -not (Test-Path $diskPath)) { return @() }
+    # (-U: QEMU may have the disk open)
+    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
+    try { @(((& $qemuImg info --output=json -U $diskPath 2>$null) -join "`n" | ConvertFrom-Json).snapshots) | Where-Object { $_ } } catch { @() }
+}
+# The quick save is resumed by itself once. From that start on (and from any start that does not resume it) it
+# stays as the way back: <disk>.quick-used names it by its id and time (qemu-img's JSON: no time zone in them;
+# the other launchers write the same), and only -LoadState asoft-quick goes back to it. The next save (closing the
+# window) replaces it with a new time, which is resumed again.
+function Quick-Key {
+    $s = Disk-States | Where-Object { $_.name -ceq $quickSnapshot } | Select-Object -First 1
+    if ($s) { "$($s.id) $($s.'date-sec') $($s.'date-nsec')" } else { '' }
+}
+$quickUsed = "$diskPath.quick-used"
+# the quick save's key when no start resumed it yet, else ''
+function Get-QuickState {
+    $k = Quick-Key
+    $used = "$(Get-Content $quickUsed -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
+    if ($k -and $k -cne $used) { $k } else { '' }
+}
+# keeps the quick save as the way back: no start resumes it by itself any more
+function Keep-WayBack {
+    $k = Quick-Key
+    if ($k) { Set-Content -Path $quickUsed -Value $k -Encoding ASCII }
+}
+function Remove-QuickState {
+    if (Quick-Key) {
+        $ErrorActionPreference = 'Continue'
+        $null = & $qemuImg snapshot -d $quickSnapshot $diskPath 2>&1
+    }
+    Remove-Item $quickUsed -ErrorAction SilentlyContinue
+}
+
+# --- The settings a state depends on ---------------------------------------------------------------
+# A state loads only into the machine it was saved from (QEMU refuses another vCPU count or set of devices; another
+# frame buffer and device tree would leave tvOS drawing for the screen it was saved on): the mode, the vCPUs, the
+# RAM, the network card and the PC's GPU, written as ASoftware.exe writes a save's settings (Guests.Shape, with
+# res=). <disk>.starts has one line per start of the install's disk, "<unix time> <settings>", the time taken just
+# before QEMU starts: a state saved in a run (closing the window, Tv-AutoSave.ps1, the side bar) is newer than its
+# start's line and older than the next one's.
+$startsFile = "$diskPath.starts"
+function Settings-Text([string]$res, [int]$smp, [int]$ram, [bool]$net, [string]$gpu) {
+    "res=$res;smp=$smp;ram=$ram;net=$(if ($net) { 1 } else { 0 });gpu=$gpu"
+}
+function Settings-Parts([string]$text) {
+    $h = @{}
+    foreach ($p in ($text -split ';')) { $kv = $p -split '=', 2; if ($kv.Count -eq 2 -and $kv[1]) { $h[$kv[0]] = $kv[1] } }
+    $h
+}
+# the noted starts, oldest first
+function Read-Starts {
+    if (-not $userDisk -or -not (Test-Path -LiteralPath $startsFile)) { return @() }
+    @(Get-Content -LiteralPath $startsFile | ForEach-Object {
+        if ("$_" -cmatch '^(\d+) (\S+)$') { [pscustomobject]@{ T = [long]$Matches[1]; Settings = $Matches[2] } }
+    } | Sort-Object T)
+}
+# a state's settings: the last start noted at or before its time; older than every noted start: 2160, the only mode
+# before the starts were noted (its other settings unknown, so not compared)
+function State-Settings($state) {
+    $t = [long]$state.'date-sec'
+    $s = @(Read-Starts | Where-Object { $_.T -le $t }) | Select-Object -Last 1
+    if ($s) { $s.Settings } else { 'res=2160' }
+}
+# Notes this start; keeps the lines a state on the disk was saved under, and the newest
+function Note-Start([string]$settings) {
+    $all = @(Read-Starts) + @([pscustomobject]@{ T = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); Settings = $settings })
+    $times = @(Disk-States | ForEach-Object { [long]$_.'date-sec' })
+    $kept = for ($i = 0; $i -lt $all.Count; $i++) {
+        $next = if ($i + 1 -lt $all.Count) { $all[$i + 1].T } else { [long]::MaxValue }
+        if ($i -eq $all.Count - 1 -or @($times | Where-Object { $_ -ge $all[$i].T -and $_ -lt $next }).Count) { "$($all[$i].T) $($all[$i].Settings)" }
+    }
+    Set-Content -LiteralPath $startsFile -Value $kept -Encoding ASCII
+}
+# for people: "1080p, 4 vCPUs, 4096 MiB RAM, network on, GPU auto" (the parts known)
+function Settings-Say([string]$text) {
+    $p = Settings-Parts $text
+    @($(if ($p.res) { $Modes[$p.res].Label }), $(if ($p.smp) { "$($p.smp) vCPUs" }), $(if ($p.ram) { "$($p.ram) MiB RAM" }),
+      $(if ($p.net) { "network $(if ($p.net -ceq '1') { 'on' } else { 'off' })" }), $(if ($p.gpu) { "GPU $($p.gpu)" }) |
+      Where-Object { $_ }) -join ', '
+}
+
+if ($LoadState -and $Snapshot) { throw '-LoadState resumes a state of the disk tvOS writes: not with -Snapshot' }
+$loading = if ($LoadState) { Disk-States | Where-Object { $_.name -ceq $LoadState } | Select-Object -First 1 }
+if ($LoadState -and -not $loading) { throw "no saved state $LoadState on $diskPath" }
+# (the install's own disks only: a disk named with -Disk is one of Install-tvOS.ps1's boots, which must boot)
+$quickBoot = $userDisk -and -not $Snapshot -and -not $NoQuickBoot -and [bool]$qemuImg
+$savedState = if ($userDisk -and -not $Snapshot) { Get-QuickState }
+# The state this start would resume: -LoadState's, else the quick save no start has resumed yet. What the command
+# line does not set comes from it, so it opens as it was saved; what the command line sets must match it.
+$resumeState = if ($loading) { $loading } elseif ($savedState -and $quickBoot) { Disk-States | Where-Object { $_.name -ceq $quickSnapshot } | Select-Object -First 1 }
+$stateSettings = if ($resumeState) { State-Settings $resumeState } else { '' }
+if ($resumeState) {
+    $sp = Settings-Parts $stateSettings
+    $given = $PSBoundParameters
+    if (-not $given.ContainsKey('Resolution') -and $Modes.ContainsKey("$($sp.res)")) { $Resolution = $sp.res }
+    if (-not $given.ContainsKey('Cpus') -and @('4', '6', '8') -ccontains $sp.smp) { $Cpus = [int]$sp.smp }
+    if (-not $given.ContainsKey('RamMiB') -and $sp.ram -cmatch '^\d+$') { $RamMiB = if ([int]$sp.ram -eq 4096) { 0 } else { [int]$sp.ram } }
+    if (-not $given.ContainsKey('NoNet') -and @('0', '1') -ccontains $sp.net) { $NoNet = [switch]($sp.net -ceq '0') }
+    if (-not $given.ContainsKey('HostGpu') -and @('auto', 'integrated', 'discrete') -ccontains $sp.gpu) { $HostGpu = $sp.gpu }
+}
+# else the mode this disk was last started in, else the default
+if (-not $Resolution) {
+    $last = @(Read-Starts) | Select-Object -Last 1
+    $lastRes = if ($last) { (Settings-Parts $last.Settings).res }
+    $Resolution = if ($Modes.ContainsKey("$lastRes")) { $lastRes } else { $DefaultResolution }
+}
+$mode = $Modes[$Resolution]
+$tree = $mode.Trees[$Cpus]
+# (an install made before 1080p was wired in has neither the 1080p trees nor QuartzCore's patch on its disk)
+if ($Resolution -ceq '1080' -and -not (Test-Path -LiteralPath (In-Work $Modes['1080'].Trees[4]))) {
+    throw ('this tvOS install has no 1080p device trees, and its disk not the QuartzCore patch 1080p needs (it was ' +
+           'built before 1080p was wired in): start with -Resolution 2160, or run tvos\Install-tvOS.cmd -Only firmware, ' +
+           'then tvos\Install-tvOS.cmd -From patches (your disk is kept as tvos\tv.qcow2.old)')
+}
+Need-Files @((In-Work $tree))
+
 # another RAM size: the tree with it, made once next to the tree (again when the tree is newer)
 $ramGiB = 4.0
 if ($RamMiB) {
@@ -138,6 +278,22 @@ if ($RamMiB) {
     }
     $ramGiB = $RamMiB / 1024
 }
+$startSettings = Settings-Text $Resolution $Cpus ([int]($ramGiB * 1024)) (-not $NoNet) $HostGpu
+# the state and this start: every part the state's settings name must be the same
+$differs = @()
+if ($resumeState) {
+    $now = Settings-Parts $startSettings
+    $sp = Settings-Parts $stateSettings
+    $differs = @($sp.Keys | Where-Object { $sp[$_] -cne $now[$_] } | Sort-Object)
+}
+if ($differs) {
+    $said = "the saved state $($resumeState.name) opens with $(Settings-Say $stateSettings); this start has $(Settings-Say $startSettings)"
+    if ($LoadState) { throw "$said`: start without the options that differ (they are taken from the state), or with its own. It is kept." }
+    Write-Host "Quick boot: $said, so tvOS boots, and the save stays as a way back (-LoadState asoft-quick opens it with its own settings)" -ForegroundColor Yellow
+    $savedState = ''
+}
+Write-Host ("tvOS at {0} ({1}), {2} vCPUs{3}" -f $mode.Label, $mode.Fb, $Cpus,
+            $(if ($resumeState -and -not $differs) { ", as $($resumeState.name) was saved" } elseif (-not $PSBoundParameters.ContainsKey('Resolution')) { " (-Resolution 1080|2160 chooses)" }))
 
 # What tvOS needs of the QEMU: the build the installer's qemu step put in <work>\qemu. The probes have a time limit,
 # as Install-tvOS.ps1's: a console exe that hangs (a missing-DLL dialog, an antivirus hold) must not hold the start
@@ -174,10 +330,13 @@ if (-not $NoTlbiFilter) {
         Write-Host 'TLBI filter on (x-tlbi-filter, experimental; -NoTlbiFilter turns it off)'
     } else { Write-Host 'TLBI filter: this QEMU has no x-tlbi-filter' }
 }
-# The TV window (above): the usb-consumer's property list, which names $SkinProp in a QEMU that has it
+# The TV window (above): the usb-consumer's property list names $SkinProp ("  tv-remote=<bool> ...") in a QEMU that
+# has it; then the device gets it and the GTK window its side bar, which draws the TV and the remote
 $consumer = 'usb-consumer,bus=xhci.0,port=3,id=ucons'
+$display = 'gtk,show-cursor=on,zoom-to-fit=on,gl=on'
 if ((Qemu-Probe $probeExe @('-device', 'usb-consumer,help')) -cmatch "(?m)^\s*$([regex]::Escape($SkinProp))=") {
     $consumer += ",$SkinProp=on"
+    $display += ',sidebar=on,show-menubar=off'
     Write-Host "TV window: the picture as a TV with a Siri Remote (F9$(if ($NoFrame) { ', or -NoFrame as now' }): the picture alone)"
 } else { Write-Host "TV window: this QEMU has no usb-consumer $SkinProp (the asoft-tv build has it): the plain window" }
 # one tvOS at a time: the ports are fixed
@@ -187,60 +346,8 @@ if ($busy) {
     if ($PrintOnly) { Write-Host $said -ForegroundColor Yellow } else { throw $said }
 }
 
-# Saved states: in the disk tvOS writes (not with -Snapshot), through the QEMU package's qemu-img.
-$diskPath = In-Work $Disk
-$qemuImg = Join-Path (Split-Path $Exe) 'qemu-img.exe'
-if (-not (Test-Path $qemuImg)) { $qemuImg = '' }
-# The disk and every layer under it must open: said here, in qemu-img's words, before QEMU ends on it at once (and
-# before a saved state is blamed for that and dropped)
-if ($qemuImg) {
-    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-    $chain = @(& $qemuImg info -U --backing-chain $diskPath 2>&1 | ForEach-Object { "$_" })
-    $chainExit = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    if ($chainExit) { throw ("$diskPath cannot be opened with the layers under it: " + (($chain | Where-Object { $_ } | Select-Object -Last 2) -join ' ')) }
-}
-$quickSnapshot = 'asoft-quick'
 # GB a saved state takes on the disk's drive: about the guest's RAM (not measured on tvOS), the first save needs it free
 $stateGB = $ramGiB + 0.5
-function Disk-States {
-    if (-not $qemuImg -or -not (Test-Path $diskPath)) { return @() }
-    # (-U: QEMU may have the disk open)
-    $ErrorActionPreference = 'Continue'     # (Windows PowerShell 5.1 turns a native tool's stderr into errors)
-    try { @(((& $qemuImg info --output=json -U $diskPath 2>$null) -join "`n" | ConvertFrom-Json).snapshots) | Where-Object { $_ } } catch { @() }
-}
-# The quick save is resumed by itself once. From that start on (and from any start that does not resume it) it
-# stays as the way back: <disk>.quick-used names it by its id and time (qemu-img's JSON: no time zone in them;
-# the other launchers write the same), and only -LoadState asoft-quick goes back to it. The next save (closing the
-# window) replaces it with a new time, which is resumed again.
-function Quick-Key {
-    $s = Disk-States | Where-Object { $_.name -ceq $quickSnapshot } | Select-Object -First 1
-    if ($s) { "$($s.id) $($s.'date-sec') $($s.'date-nsec')" } else { '' }
-}
-$quickUsed = "$diskPath.quick-used"
-# the quick save's key when no start resumed it yet, else ''
-function Get-QuickState {
-    $k = Quick-Key
-    $used = "$(Get-Content $quickUsed -TotalCount 1 -ErrorAction SilentlyContinue)".Trim()
-    if ($k -and $k -cne $used) { $k } else { '' }
-}
-# keeps the quick save as the way back: no start resumes it by itself any more
-function Keep-WayBack {
-    $k = Quick-Key
-    if ($k) { Set-Content -Path $quickUsed -Value $k -Encoding ASCII }
-}
-function Remove-QuickState {
-    if (Quick-Key) {
-        $ErrorActionPreference = 'Continue'
-        $null = & $qemuImg snapshot -d $quickSnapshot $diskPath 2>&1
-    }
-    Remove-Item $quickUsed -ErrorAction SilentlyContinue
-}
-if ($LoadState -and $Snapshot) { throw '-LoadState resumes a state of the disk tvOS writes: not with -Snapshot' }
-if ($LoadState -and -not (Disk-States | Where-Object { $_.name -ceq $LoadState })) { throw "no saved state $LoadState on $diskPath" }
-# (the install's own disks only: a disk named with -Disk is one of Install-tvOS.ps1's boots, which must boot)
-$quickBoot = $userDisk -and -not $Snapshot -and -not $NoQuickBoot -and [bool]$qemuImg
-$savedState = if ($userDisk -and -not $Snapshot) { Get-QuickState }
 # (a new save of the same name takes the old one's room: only the first needs it free)
 if ($quickBoot -and -not (Quick-Key)) {
     $free = ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($diskPath))).AvailableFreeSpace / 1e9
@@ -263,7 +370,7 @@ $qemuEnv = [ordered]@{
     REIMS_VGPU_LOG = $GpuLog
     # (a surface the GPU library cannot make is skipped, not the guest's process stopped)
     REIMS_VGPU_REFUSALS = 'skip'
-    ASOFT_SUBTITLE = "tvOS 27.2 $([char]0x00B7) Apple TV 4K"
+    ASOFT_SUBTITLE = "tvOS 27.2 $([char]0x00B7) Apple TV 4K $([char]0x00B7) $($mode.Label)"
 }
 # the TV window draws the TV and the remote around the picture; -NoFrame starts with the picture alone (F9 switches)
 $qemuEnv['ASOFT_FRAME'] = if ($NoFrame) { '0' } else { $null }
@@ -299,7 +406,7 @@ $qargs = @(
     '-bootkc', (Q (In-Work 'tvos\bootkc-t')), '-sptm', (Q (In-Work 'fw\sptm')), '-txm', (Q (In-Work 'fw\txm')),
     '-dtree', (Q (In-Work $tree)), '-tc', (Q (In-Work $Tc)), '-ramdisk', (Q (In-Work 'rd-shell.hfs')),
     '-args', (Q $boot),
-    '-display', ('gtk,show-cursor=on,zoom-to-fit=on,gl=on,sidebar=on,show-menubar=off' + $(if ($quickBoot) { ',quick-boot=on' } else { '' })),
+    '-display', ($display + $(if ($quickBoot) { ',quick-boot=on' } else { '' })),
     '-monitor', "tcp:127.0.0.1:$($TvPorts[1]),server=on,wait=off",
     '-parallel', 'none',
     '-chardev', (Q "socket,id=con,host=127.0.0.1,port=$($TvPorts[0]),server=on,wait=off,logfile=$O\serial.log"),
@@ -319,12 +426,13 @@ if ($Snapshot) { $qargs += '-snapshot' }
 $qargs += $Extra
 
 if ($PrintOnly) {
-    # what a start would run: nothing is started or written (no run folder, no .quick-used)
+    # what a start would run: nothing is started or written (no run folder, no .quick-used, no .starts line)
     Write-Host "mode $Resolution ($($mode.Fb)), $Cpus vCPUs, tree $tree, disk $Disk, trust cache $Tc" -ForegroundColor DarkGray
+    if ($userDisk -and -not $Snapshot) { Write-Host "settings $startSettings (noted in $startsFile at a start)" -ForegroundColor DarkGray }
     foreach ($k in $qemuEnv.Keys) { if ($null -ne $qemuEnv[$k]) { "set $k=$($qemuEnv[$k])" } }
     "$(Q $Exe) $($qargs -join ' ')"
-    if ($resume) { "  (then -loadvm ${resume}: $(if ($LoadState) { 'the state named with -LoadState' } else { 'the quick save, resumed once' }))" }
-    elseif ($quickBoot -and -not $NoAutoSave -and -not (Quick-Key)) { '  (and Tv-AutoSave.ps1, hidden: the first quick save once Home has been up a while)' }
+    if ($resume) { "  (then -loadvm ${resume}: $(if ($LoadState) { 'the state named with -LoadState' } else { 'the quick save, resumed once' }), saved with $stateSettings)" }
+    elseif ($quickBoot -and -not $NoAutoSave -and -not (Quick-Key)) { "  (and Tv-AutoSave.ps1 -HomeBytes $($mode.HomeBytes), hidden: the first quick save once Home has been up a while)" }
     "(print only: QEMU not started; its run folder would be $O)"
     return
 }
@@ -365,8 +473,9 @@ function Qemu-Why([string]$log) {
       Where-Object { $_ -match 'qemu-system-aarch64w?\.exe: ' -and $_ -notmatch '\.exe: info: ' } |
       ForEach-Object { $_ -replace '^.*?qemu-system-aarch64w?\.exe: ', '' }) | Select-Object -First 2
 }
-# From here on the disk goes on from this start: a quick save, resumed now or not, is the way back
-if ($userDisk -and -not $Snapshot) { Keep-WayBack }
+# From here on the disk goes on from this start: a quick save, resumed now or not, is the way back; the states this
+# run saves are saved with this start's settings
+if ($userDisk -and -not $Snapshot) { Keep-WayBack; Note-Start $startSettings }
 $resumed = $false
 if ($resume) {
     Write-Host $(if ($LoadState) { "Resuming the saved state $LoadState" } else { 'Resuming the state saved when the window was closed' })
@@ -380,7 +489,7 @@ if ($resume) {
         Move-Item "$O\stderr.log" "$O\stderr-resume.log" -Force -ErrorAction SilentlyContinue
         $why = Qemu-Why "$O\stderr-resume.log"
         $said = "The saved state $resume could not be resumed (exit $($q.ExitCode)" + $(if ($why) { ': ' + ($why -join '; ') } else { '' }) + "; $O\stderr-resume.log)"
-        # a state named with -LoadState is kept; the quick boot's goes, and tvOS boots
+        # a state named with -LoadState is kept; the quick boot's (its settings were this start's) goes, and tvOS boots
         if ($LoadState) { throw "$said; it is kept" }
         Write-Host "$said; booting tvOS" -ForegroundColor Yellow
         Remove-QuickState
@@ -399,12 +508,13 @@ if ($q.WaitForExit(3000)) {
 if ($resumed) {
     Write-Host 'tvOS goes on where it was saved; closing the window saves it again.'
 } else {
-    Write-Host "tvOS boots to Home in about 1.5 minutes on 4 vCPUs (the arrow keys, Return and Esc are the remote)."
+    Write-Host "tvOS boots to Home in about $(if ($Resolution -ceq '1080') { 'a minute' } else { '1.5 minutes' }) on 4 vCPUs (the arrow keys, Return and Esc are the remote)."
     # The automatic save is for a disk with no save yet. A save already there stays as the way back, and only
     # closing the window replaces it. (A save that failed to load above is gone by now: that start gets one.)
     if ($quickBoot -and -not $NoAutoSave -and -not (Quick-Key)) {
         $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', (Q (Join-Path $PSScriptRoot 'Tv-AutoSave.ps1')),
-               '-QemuPid', "$($q.Id)", '-Disk', (Q $diskPath), '-Log', (Q "$O\autosave.log"), '-QmpPort', "$($TvPorts[2])", '-StateGB', "$stateGB")
+               '-QemuPid', "$($q.Id)", '-Disk', (Q $diskPath), '-Log', (Q "$O\autosave.log"), '-QmpPort', "$($TvPorts[2])", '-StateGB', "$stateGB",
+               '-HomeBytes', "$($mode.HomeBytes)")
         $null = Start-Process powershell.exe -ArgumentList $a -WindowStyle Hidden
         Write-Host ('Quick boot: tvOS is saved once Home has been up a while and you are not using it, and ' +
                     "again when you close the window; the next start goes on from there in seconds ($O\autosave.log).")
