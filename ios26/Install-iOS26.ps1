@@ -684,21 +684,30 @@ function Find-NotOwned {
 
 # --- WSL ---------------------------------------------------------------------------------------
 function Get-Wsl {
-    # distro name -> WSL version, from wsl -l -v; Ok is false without WSL
+    # distro name -> WSL version, from wsl -l -v; Ok is false without WSL. WSL with no distro yet is Ok:
+    # there wsl -l -v fails ("no installed distributions") and wsl --status does not. Said keeps what
+    # wsl printed, for the message of a step that stops on it.
     $env:WSL_UTF8 = '1'
     $d = @{}
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return @{ Ok = $false; Distros = $d } }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return @{ Ok = $false; Distros = $d; Said = 'no wsl.exe on the PATH' } }
     $ErrorActionPreference = 'Continue'
-    $out = & wsl.exe -l -v 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() }
-    $ok = ($LASTEXITCODE -eq 0)
+    $out = @(& wsl.exe -l -v 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() } | Where-Object { $_ })
+    $listed = ($LASTEXITCODE -eq 0)
+    $said = "wsl -l -v ($LASTEXITCODE): " + (@($out | Select-Object -First 3) -join ' / ')
+    $ok = $listed
+    if (-not $listed) {
+        $st = @(& wsl.exe --status 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() } | Where-Object { $_ })
+        $ok = ($LASTEXITCODE -eq 0)
+        $said += "; wsl --status ($LASTEXITCODE): " + (@($st | Select-Object -First 3) -join ' / ')
+    }
     $ErrorActionPreference = 'Stop'
-    if ($ok) {
+    if ($listed) {
         foreach ($l in @($out | Select-Object -Skip 1)) {
             $f = @(($l -replace '^\*\s*', '') -split '\s+' | Where-Object { $_ })
             if ($f.Count -ge 3) { $d[$f[0]] = $f[-1] }
         }
     }
-    @{ Ok = $ok; Distros = $d }
+    @{ Ok = $ok; Distros = $d; Said = $said }
 }
 
 # --- Booting iOS for a step (the launcher, as the menu runs it) ----------------------------------
@@ -1050,13 +1059,15 @@ function Do-Wsl {
     } else {
         $w = Get-Wsl
         if (-not $w.Ok) {
-            Fail 'WSL is not installed: in an administrator PowerShell run "wsl --install --no-distribution", restart Windows, then run this again'
+            Fail ('WSL is not installed: in an administrator PowerShell run "wsl --install --no-distribution", restart Windows, ' +
+                  "then run this again; or run this with -Linux helper, which needs no WSL. What wsl said: $($w.Said)")
         }
         if (-not $w.Distros.ContainsKey($Distro)) {
             $null = Run 'wsl.exe' @('--install', 'Ubuntu-24.04', '--name', $Distro, '--no-launch')
             $w = Get-Wsl
             if (-not $w.Distros.ContainsKey($Distro)) {
-                Fail "WSL did not make the distro $Distro`: run 'wsl --update', or make an Ubuntu 24.04 distro yourself and pass -Distro NAME"
+                Fail ("WSL did not make the distro $Distro`: run 'wsl --update', or make an Ubuntu 24.04 distro yourself and pass -Distro NAME, " +
+                      "or run this with -Linux helper, which needs no WSL. What wsl said: $($w.Said)")
             }
         }
         if ("$($w.Distros[$Distro])" -cne '2') { Fail "$Distro is a WSL $($w.Distros[$Distro]) distro; the build needs WSL 2: wsl --set-version $Distro 2" }
