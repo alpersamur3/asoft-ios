@@ -403,8 +403,8 @@ function Do-Check {
 
 # The QEMU every guest of this install runs on, <work>\qemu, is the build tvOS was measured on: visionOS's (walk
 # mode with the held key, the TLBI filter; its reims/metal2vulkan draw tvOS's glass, which the older watch build
-# refused). The probes only read (a dry run makes them too), as Install-visionOS.ps1's. The TV window (its skin) is
-# the QEMU's next change: once a build has it, this probe is where it is asked for.
+# refused). The probes only read (a dry run makes them too), as Install-visionOS.ps1's. The TV window (usb-consumer
+# tv-remote, branch asoft-tv) is asked for by Qemu-HasRemote below, never required.
 function Qemu-Probe([string]$exe, [string[]]$argv) {
     $psi = New-Object Diagnostics.ProcessStartInfo $exe
     $psi.Arguments = ($argv | ForEach-Object { Q $_ }) -join ' '
@@ -422,6 +422,13 @@ function Qemu-HasTv([string]$dir) {
     if ($walk -cnotmatch '\bwalk-hold-key=') { return $false }
     $cpu = Qemu-Probe $exe @('-M', 'none', '-cpu', 'max,x-tlbi-filter=on,x-asoft-probe=on', '-display', 'none', '-S', '-nodefaults')
     ($cpu -cmatch 'x-asoft-probe') -and ($cpu -cnotmatch "x-tlbi-filter' not found")
+}
+# The TV window (usb-consumer tv-remote, the asoft-tv build): not needed (Start-tvOS.ps1 falls back to the plain
+# window), but a -QemuDir that has it replaces a <work>\qemu that does not
+function Qemu-HasRemote([string]$dir) {
+    $exe = [IO.Path]::Combine($dir, 'qemu-system-aarch64.exe')
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $false }
+    (Qemu-Probe $exe @('-device', 'usb-consumer,help')) -cmatch '(?m)^\s*tv-remote='
 }
 # QEMUs started from <work>\qemu (any guest of this install): its files cannot be replaced under them
 function Need-NoQemuFrom([string]$dir) {
@@ -444,8 +451,13 @@ function Qemu-Release {
 }
 function Do-Qemu {
     $dst = In-Work 'qemu'
-    if (Qemu-HasTv $dst) { Say "have $dst (visionOS's build: walk-hold-key, x-tlbi-filter)$(if ($QemuDir) { ': -QemuDir is not needed' })"; return }
-    Say "$dst is older than the build tvOS was measured on (visionOS's: usb-touchscreen walk-hold-key, -cpu x-tlbi-filter): it is replaced by one that has them, which runs iOS 16, iOS 26, watchOS and visionOS too" Yellow
+    $newRemote = $QemuDir -and (Qemu-HasRemote ([IO.Path]::GetFullPath($QemuDir).TrimEnd('\'))) -and -not (Qemu-HasRemote $dst)
+    if ((Qemu-HasTv $dst) -and -not $newRemote) {
+        Say "have $dst (visionOS's build: walk-hold-key, x-tlbi-filter$(if (Qemu-HasRemote $dst) { '; the TV window' }))$(if ($QemuDir) { ': -QemuDir is not needed' })"
+        return
+    }
+    if ($newRemote -and (Qemu-HasTv $dst)) { Say "-QemuDir has the TV window (usb-consumer tv-remote), $dst does not: it is replaced, for every guest" Yellow }
+    else { Say "$dst is older than the build tvOS was measured on (visionOS's: usb-touchscreen walk-hold-key, -cpu x-tlbi-filter): it is replaced by one that has them, which runs iOS 16, iOS 26, watchOS and visionOS too" Yellow }
     if ($QemuDir) {
         $src = [IO.Path]::GetFullPath($QemuDir).TrimEnd('\')
         # looked at before anything is copied

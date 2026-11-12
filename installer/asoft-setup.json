@@ -1316,7 +1316,7 @@
           "version": "",
           "url": "",
           "sha256": "",
-          "note": "the same build as visionOS's (usb-touchscreen walk-hold-key, -cpu x-tlbi-filter): empty here, so Install-tvOS.ps1's qemu step takes visionOS's entry, else -QemuDir <folder>; a build with the TV window (ASOFT_SKIN=tv) would go here"
+          "note": "the same build as visionOS's (usb-touchscreen walk-hold-key, -cpu x-tlbi-filter): empty here, so Install-tvOS.ps1's qemu step takes visionOS's entry, else -QemuDir <folder>; the build with the TV window (usb-consumer tv-remote=on, branch asoft-tv, not built yet) goes here once published; Start-tvOS.ps1 probes for tv-remote and starts the plain window without it"
         },
         "liblzraven": {
           "repo": "https://github.com/anat0m1a/liblzraven",

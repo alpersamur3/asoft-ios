@@ -78,6 +78,9 @@ stays, and the next one is `.old2`, `.old3`, ... A redo after the cleanup downlo
   once and then stays as a way back (`-LoadState asoft-quick`); `-NoQuickBoot` boots every time. A save loads
   only with the `-Cpus` and RAM it was made with. After a cold start on a disk with no save yet, tvOS is also
   saved by itself once Home has been up a while and you are not using it (`-NoAutoSave` turns that off)
+- the window is a TV with a Siri Remote beside it, whose parts you can click, when the QEMU has the TV window
+  (usb-consumer `tv-remote`, our build from branch asoft-tv, not published yet; the start looks for it and
+  otherwise opens the plain window). F9 (or `-NoFrame`) leaves the picture alone
 - `-PrintOnly` prints the QEMU command line the start would run, and starts nothing
 
 Controls:
@@ -87,7 +90,11 @@ Controls:
 | arrow keys | move the focus (on a new screen the first one only puts the focus on the first item) |
 | Return | select |
 | Esc | back (Menu) |
-| F1 | the TV button |
+| F1 | the TV button (held: Control Center) |
+| F2 | power |
+| F3 / F4 | volume down / up |
+| F5 / F6 / F7 | Play/Pause, Mute, Siri (the TV window's remote only) |
+| F9 | the drawn TV and remote on and off (the TV window only) |
 | F11 | full screen |
 
 A key takes 2-8 seconds (up to 19 when a row changes) to show on the screen: wait for it before the next one.

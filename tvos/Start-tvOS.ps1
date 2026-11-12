@@ -4,9 +4,12 @@
 #   Start-tvOS.cmd [-Work D:\ios26] [-Cpus 4|6|8] [-Resolution 2160|1080] [-NoNet] [-NoFrame] [-Snapshot]
 #                  [-Name RUN] [-NoQuickBoot] [-NoAutoSave] [-LoadState NAME] [-HostGpu auto|integrated|discrete]
 #                  [-PrintOnly]
-# The window is the TV's picture, 3840x2160 (scaled to the window; F11 full screen). The keyboard is the remote:
-# the arrow keys move the focus, Return selects, Esc goes back (Menu); F1 in the window is the TV button. tvOS
-# reaches Home in about 75-96 s on 4 vCPUs (measured on the hand-built disk; 73 s on visionOS's QEMU package).
+# The window is the TV's picture, 3840x2160 (scaled to the window; F11 full screen). On a QEMU with the TV window
+# (usb-consumer tv-remote, branch asoft-tv) it is drawn as a TV with a Siri Remote beside it, whose parts can be
+# clicked (F9 or -NoFrame: the picture alone); on an older one the window is the plain one. The keyboard is the
+# remote: the arrow keys move the focus, Return selects, Esc goes back (Menu); F1 the TV button, F2 power, F3/F4
+# volume, and with the TV window F5 Play/Pause, F6 Mute, F7 Siri. tvOS reaches Home in about 75-96 s on 4 vCPUs
+# (measured on the hand-built disk; 73 s on visionOS's QEMU package).
 # Its own ports (serial console 4501, HMP 4502, QMP 4503): one tvOS at a time; iOS 26 (4451-4453), watchOS
 # (4471-4473) and visionOS (4481-4483) can run beside it.
 #   -Cpus 4|6|8      vCPUs (default 4, the measured count), each with its own device tree (dtree-t, -t6, -t8);
@@ -16,7 +19,7 @@
 #   -Resolution      2160 (default, the measured mode) or 1080: see $Modes below (1080 is not wired in yet)
 #   -Ppi N           the machine's ppi= (a QEMU that has it); default: the mode's (none for 2160)
 #   -NoNet           no network
-#   -NoFrame         the window starts with the picture alone (ASOFT_FRAME=0)
+#   -NoFrame         the TV window starts with the picture alone, without the TV and the remote (ASOFT_FRAME=0)
 #   -HostGpu         auto|integrated|discrete: the PC's GPU tvOS draws on (as Start-iOS26.ps1's)
 #   -NoTlbiFilter    QEMU's x-tlbi-filter off (it is on when the QEMU has it, as iOS 26's and watchOS's starts)
 #   -Snapshot        writes go to a temporary file, the disk stays as it was
@@ -63,10 +66,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # --- The TV window's skin ---------------------------------------------------------------------------
-# The one place the window is told it shows a TV: the QEMU's GTK window draws a TV around the picture once it reads
-# this variable (no QEMU build reads it yet: until then the window is the plain one, and the variable does nothing).
-$SkinEnv = 'ASOFT_SKIN'
-$SkinValue = 'tv'
+# The one place the window is told it shows a TV: this property of the usb-consumer device (=on), with the GTK
+# display's side bar (sidebar=on, below). The window then draws the picture as a TV's screen with a Siri Remote
+# beside it, and the device gets the remote's Play/Pause, Mute and Siri buttons. Only the QEMU built from branch
+# asoft-tv has it: the start probes the QEMU for it (as for x-tlbi-filter) and gives the plain device without it.
+$SkinProp = 'tv-remote'
 
 # --- HOOK: the output modes (-Resolution) -----------------------------------------------------------
 # Each mode's frame buffer, its device trees (one per vCPU count), the user disk, its trust cache and the machine's
@@ -170,6 +174,12 @@ if (-not $NoTlbiFilter) {
         Write-Host 'TLBI filter on (x-tlbi-filter, experimental; -NoTlbiFilter turns it off)'
     } else { Write-Host 'TLBI filter: this QEMU has no x-tlbi-filter' }
 }
+# The TV window (above): the usb-consumer's property list, which names $SkinProp in a QEMU that has it
+$consumer = 'usb-consumer,bus=xhci.0,port=3,id=ucons'
+if ((Qemu-Probe $probeExe @('-device', 'usb-consumer,help')) -cmatch "(?m)^\s*$([regex]::Escape($SkinProp))=") {
+    $consumer += ",$SkinProp=on"
+    Write-Host "TV window: the picture as a TV with a Siri Remote (F9$(if ($NoFrame) { ', or -NoFrame as now' }): the picture alone)"
+} else { Write-Host "TV window: this QEMU has no usb-consumer $SkinProp (the asoft-tv build has it): the plain window" }
 # one tvOS at a time: the ports are fixed
 $busy = @(Get-NetTCPConnection -State Listen -LocalPort $TvPorts -ErrorAction SilentlyContinue)
 if ($busy) {
@@ -255,8 +265,7 @@ $qemuEnv = [ordered]@{
     REIMS_VGPU_REFUSALS = 'skip'
     ASOFT_SUBTITLE = "tvOS 27.2 $([char]0x00B7) Apple TV 4K"
 }
-$qemuEnv[$SkinEnv] = $SkinValue
-# the window draws the TV around the picture (once a QEMU does); -NoFrame starts with the picture alone
+# the TV window draws the TV and the remote around the picture; -NoFrame starts with the picture alone (F9 switches)
 $qemuEnv['ASOFT_FRAME'] = if ($NoFrame) { '0' } else { $null }
 # The PC's GPU (Start-iOS26.ps1's rule: the library takes a discrete one first; -HostGpu, or auto on a PC whose GPUs
 # are all AMD, two or more, limits it to a kind with REIMS_VGPU_DEVICE; set by hand in the environment, it stays)
@@ -299,10 +308,11 @@ $qargs = @(
     '-drive', (Q ("file=$diskPath,if=none,id=root,cache=writeback,discard=unmap")), '-device', 'virtio-blk-pci,drive=root',
     '-qmp', "tcp:127.0.0.1:$($TvPorts[2]),server=on,wait=off",
     '-device', 'qemu-xhci,id=xhci,conditional-intr-mapping=on,nonremovable=2',
-    # the remote: arrows, Return and Esc on the keyboard; the consumer device is the TV button (F1 in the window)
+    # the remote: arrows, Return and Esc on the keyboard; the consumer device's buttons are F1-F4 (TV, power,
+    # volume) and, as a TV remote's ($SkinProp=on), F5-F7 (Play/Pause, Mute, Siri)
     '-device', 'usb-kbd,bus=xhci.0,port=1,id=ukbd,idle-reports=off',
     '-device', 'usb-touchscreen,bus=xhci.0,port=2,id=utouch',
-    '-device', 'usb-consumer,bus=xhci.0,port=3,id=ucons'
+    '-device', $consumer
 )
 if (-not $NoNet) { $qargs += @('-nic', 'user,model=virtio-net-pci') }
 if ($Snapshot) { $qargs += '-snapshot' }
