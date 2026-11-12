@@ -1290,6 +1290,277 @@
         "KEEP": "1 with -KeepBuildFiles, else empty"
       },
       "note": "PC only, WSL only. Ports 4481-4483. Start: visionos/Start-visionOS.ps1 -Cpus 4|6|8 (dtree-v/-v6/-v8), -Sound (vision.qcow2 + virtio-sound-pci on dsound), else vision-silent.qcow2"
+    },
+    "tvos": {
+      "title": "tvOS 27.2 (Apple TV 4K 3rd generation, J255AP, AppleTV14,1)",
+      "build": "24K122",
+      "needs": [
+        "shared"
+      ],
+      "sources": {
+        "ota": {
+          "url": "https://updates.cdn-apple.com/2026FallFCS/372ccebe-e288-46c1-b427-e36c5103d7f9/com_apple_MobileAsset_SoftwareUpdate/ec0f05584a1d84bb0275ce419a24ee68c55f5c3d39b40239e6c24ec882a8caaf.aea",
+          "name": "AppleTV14,1_27.2_24K122_full-OTA.aea",
+          "bytes": 4966055936,
+          "sha256": "b436615ce265a597cdaf2d78ff9b09acb54dced24b9e13bb14fb304845f85c9c",
+          "sha1": "508d959312952fdedee078f77b6cd1e2a6873787",
+          "aeaKey": "gUokX0RHox/zA24cgD4XNGmQuBZ92IRwnuROdnmk91c=",
+          "decryptedBytes": 4986563871,
+          "osTrustCache": "AssetData/boot/Firmware/141-10510-176.dmg.trustcache (1623 entries)",
+          "deviceTree": "AssetData/boot/Firmware/all_flash/DeviceTree.j255ap.im4p (unwrapped 170380 bytes, SHA-256 34c1283d1d7ba9e1e00c998282edc39588b9a630089e90b6a01b19a2037432d2)",
+          "note": "Apple publishes no tvOS IPSW for the Apple TV 4K: the full OTA from Pallas (release audience; the asset set lists it until 2027-02-06), its AEA key the one Pallas gives. Downloaded whole (pdl.py, 32 MiB pieces, resumable, SHA-256 checked) unless -OtaFile names a copy; removed after the decrypt step"
+        }
+      },
+      "files": {
+        "qemu": {
+          "version": "",
+          "url": "",
+          "sha256": "",
+          "note": "the same build as visionOS's (usb-touchscreen walk-hold-key, -cpu x-tlbi-filter): empty here, so Install-tvOS.ps1's qemu step takes visionOS's entry, else -QemuDir <folder>; a build with the TV window (ASOFT_SKIN=tv) would go here"
+        },
+        "liblzraven": {
+          "repo": "https://github.com/anat0m1a/liblzraven",
+          "commit": "700b88c4b2e1b1d96e499d172dfa0b8e5d9134ab",
+          "license": "0BSD",
+          "note": "a clean-room LZRAVEN decoder (OS 27's pbzm payloads; ipsw cannot decode them off macOS 27): fetched by its commit, the checkout checked, built and its tests run in WSL's Linux scratch, pbzm_dec (tvos/scripts/pbzm_dec.c) linked against it; not shipped"
+        }
+      },
+      "kernel": {
+        "from": "visionOS's: visionos/bootkc-v when visionOS is installed, else kc-vision.py on the iOS 26 install's cloud/kernelcache.research.vphone600.decompressed (or fw/bootkc); result 6f421a9a1929f2dc661919ab344fd70813dd496fadbf556cffd5ce6d49ac415d (= the hand-built bootkc-ty)"
+      },
+      "devicetrees": {
+        "dtree-t": "dt-tv.py dtree-smp4 -> ba5e4bfe54bbe080bf2c58c4a606b23968dce311f0e151dd3453b28a95c58f1d",
+        "dtree-t6": "dt-root26smp.py fw/dtree.orig --cpus 6, dt-tv.py -> 04e6b2ef6c1843e391eb51f368265ab28e486bc086a75e89fa014b48b7c6fee5",
+        "dtree-t8": "dt-tv.py dtree-smp8 -> f47825e781d6add815275a3f8220ec03a2585429709f52b1c7e3c530207d7cd5"
+      },
+      "steps": [
+        {
+          "id": "check",
+          "title": "The iOS 26 base it builds on, WSL and its tools, the scripts",
+          "kind": "always",
+          "linux": [
+            {
+              "name": "tools"
+            }
+          ]
+        },
+        {
+          "id": "qemu",
+          "title": "The QEMU every guest runs on, the build tvOS was measured on (qemu\\)",
+          "kind": "once"
+        },
+        {
+          "id": "lzraven",
+          "title": "liblzraven (pinned commit) and pbzm_dec, built in WSL",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "lzraven"
+            }
+          ]
+        },
+        {
+          "id": "download",
+          "title": "tvOS 27.2 full OTA for AppleTV14,1 (Apple, 4.97 GB, SHA-256 checked)",
+          "kind": "once",
+          "python": [
+            "pdl.py URL tvos/ota/AppleTV14,1_27.2_24K122_full-OTA.aea 4966055936 SHA256 [EDGE] 8"
+          ]
+        },
+        {
+          "id": "decrypt",
+          "title": "Decrypt the OTA, index it, take out its boot files",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "decrypt",
+              "out": [
+                "tvos/build/dec/ota.aa",
+                "tvos/build/outer.json",
+                "tvos/ota/141-10510-176.dmg.trustcache",
+                "tvos/ota/DeviceTree.j255ap.im4p",
+                "tvos/ota/BuildManifest.plist"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unpack",
+          "title": "Unpack the root (LZRAVEN) into an ext4 image and check its signatures",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "unpack",
+              "in": [
+                "tvos/build/root.ext4 (made sparse by the installer, 20 GiB)"
+              ],
+              "out": [
+                "tvos/build/root.ext4.ok",
+                "tvos/build/root-meta/report.json",
+                "tvos/build/root-meta/vsig.json"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "firmware",
+          "title": "The tvOS kernel and device trees (4, 6 and 8 vCPUs)",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "kernel"
+            }
+          ],
+          "python": [
+            "kc-vision.py tvos/bootkc-t visionos/bootkc-v cloud/kernelcache.research.vphone600.decompressed fw/bootkc",
+            "dtraw.py tvos/ota/DeviceTree.j255ap.im4p tvos/ota/DeviceTree.j255ap.raw",
+            "dt-root26smp.py fw/dtree.orig tvos/build/dtree-smp6 --cpus 6",
+            "dt-tv.py dtree-smp4|tvos/build/dtree-smp6|dtree-smp8 tvos/ota/DeviceTree.j255ap.raw tvos/dtree-t|dtree-t6|dtree-t8"
+          ]
+        },
+        {
+          "id": "gpu",
+          "title": "The guest GPU driver for tvOS",
+          "kind": "once",
+          "linux": [
+            {
+              "name": "gpu-driver"
+            },
+            {
+              "name": "gpu"
+            }
+          ]
+        },
+        {
+          "id": "rootfs",
+          "title": "The root disk, from the unpacked root (tvos\\roott.qcow2)",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "rootfs",
+              "disks": [
+                {
+                  "new": "tvos/roott.qcow2",
+                  "size": "p1 16 GiB root + p2 8 GiB Data"
+                }
+              ],
+              "in": [
+                "downloads/ios_sysroot.tar.gz",
+                "tvos/build/root.ext4"
+              ],
+              "out": [
+                "tvos/roott.qcow2.hashes"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "patches",
+          "title": "Tweaks, shared-cache patches, prefs and the GPU driver on it",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "patches",
+              "disks": [
+                {
+                  "rw": "tvos/roott-p.qcow2",
+                  "overlay": "tvos/roott.qcow2"
+                }
+              ],
+              "in": [
+                "tvos/gpu"
+              ],
+              "out": [
+                "tvos/roott-p.hashes"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "trustcache",
+          "title": "Its trust cache (tvos\\roott.tc)",
+          "kind": "chain",
+          "python": [
+            "mktc.py -2 tvos/roott.tc tvos/ota/141-10510-176.dmg.trustcache tvos/roott.qcow2.hashes tvos/roott-p.hashes tvos/gpu/hashes.txt"
+          ]
+        },
+        {
+          "id": "firstboot",
+          "title": "First boot (tvos\\roott-b.qcow2)",
+          "kind": "chain",
+          "boot": "overlay tvos/roott-b.qcow2 on roott-p.qcow2; 4 vCPUs, 2160p; until persona.kb, usersession.kb and mobileactivationd's data_ark.plist, then 30 s and a sync"
+        },
+        {
+          "id": "persona",
+          "title": "Persona, MobileGestalt, activation and tvOS's prefs",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "persona",
+              "disks": [
+                {
+                  "rw": "tvos/roott-b.qcow2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "homeboot",
+          "title": "Second boot, to Home",
+          "kind": "chain",
+          "boot": "roott-b.qcow2 again; until a QMP screendump over 300,000 bytes twice 20 s apart, then 2 min and a sync"
+        },
+        {
+          "id": "disks",
+          "title": "The disk you use (tvos\\tv.qcow2)",
+          "kind": "chain",
+          "linux": [
+            {
+              "name": "disks",
+              "disks": [
+                {
+                  "rw": "tvos/roott-b.qcow2"
+                },
+                {
+                  "new": "tvos/tv.qcow2",
+                  "overlay": "tvos/roott-b.qcow2"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "cleanup",
+          "title": "Remove what only the build needs",
+          "kind": "always",
+          "linux": [
+            {
+              "name": "cleanup"
+            }
+          ]
+        },
+        {
+          "id": "shortcut",
+          "title": "Start-tvOS.cmd and the Start menu shortcut",
+          "kind": "always"
+        }
+      ],
+      "vars": {
+        "COMMIT": "liblzraven's pinned commit",
+        "REPO": "https://github.com/anat0m1a/liblzraven",
+        "KEY": "the OTA's AEA key",
+        "AEA": "the WSL path of the OTA (tvos/ota/..., or -OtaFile's)",
+        "DECSIZE": "4986563871",
+        "PATTERN": "the boot files' ipsw ota extract pattern",
+        "TC": "141-10510-176.dmg.trustcache",
+        "TCENTRIES": "1623",
+        "NOTINTC": "8",
+        "BUNDLE": "AppleParavirtGPUMetalIOGPUFamily.bundle",
+        "PACKED": "cloudos/kernelcache.research.vphone600",
+        "TOP": "root.qcow2"
+      },
+      "note": "PC only, WSL only, NTFS work drive (the unpacked root's sparse image). Ports 4501-4503. Start: tvos/Start-tvOS.ps1 -Cpus 4|6|8 (dtree-t/-t6/-t8), -Resolution 2160 (1080: a hook, not wired in yet), tv.qcow2"
     }
   }
 }

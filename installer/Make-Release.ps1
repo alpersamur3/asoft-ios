@@ -53,7 +53,7 @@ if (git -C $repo status --porcelain) { throw 'commit first: the package takes th
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tar)) { throw "no $tar (Windows 10 1803 or later has it)" }
 
-git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Start-visionOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos visionos
+git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Start-visionOS.cmd Start-tvOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos visionos tvos
 if ($LASTEXITCODE) { throw "git archive failed ($LASTEXITCODE)" }
 & $tar -x -f "$Out\src.tar" -C $stage
 if ($LASTEXITCODE) { throw "tar could not unpack the repository's files into $stage ($LASTEXITCODE)" }
