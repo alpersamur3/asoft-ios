@@ -20,7 +20,8 @@ def slices(buf):
                 cpu, sub, off, size, _ = struct.unpack_from('>iiIII', buf, 8 + 20 * i)
             else:
                 cpu, sub, off, size, _, _ = struct.unpack_from('>iiQQII', buf, 8 + 32 * i)
-            yield buf[off:off + size]
+            if struct.unpack_from('<I', buf, off)[0] == 0xfeedfacf:		# not a 32-bit (armv7) slice
+                yield buf[off:off + size]
     elif struct.unpack_from('<I', buf)[0] == 0xfeedfacf:
         yield buf
 

@@ -465,7 +465,9 @@ app from an `.ipa` does run on iOS 26 another way: place its `.app` into `/Appli
 Mach-O's CDHash in the trust cache and rebuild LaunchServices, exactly as the system apps are
 installed (step 5.3 / `apply-apps.sh`). `Install-Ipa.ps1` does that offline, in WSL or, on a PC set up
 without WSL, in the helper VM (about a minute). Tested with a small Hello app: it appears on the home
-screen and opens. The live `asoftinstalld` path is waiting on an APFS Data volume.
+screen and opens. An `.ipa` signed with a development profile (get-task-allow, which AMFI refuses while
+Developer Mode is off) is handled on the way: `scripts/noget.py` switches the entitlement off in every
+Mach-O of the app before the CDHashes are taken. The live `asoftinstalld` path is waiting on an APFS Data volume.
 
 ### Without WSL (the helper VM)
 
