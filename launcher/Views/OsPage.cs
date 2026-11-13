@@ -235,10 +235,15 @@ namespace ASoftware.Views
                 p.Children.Add(Ui.Note("Info", L.T("A research preview on an emulated CPU, so it is slow. A start from cold takes about 5 to 7 minutes to Home on 8 vCPUs, and its window stays dark for about 4.5 of them: it has not hung. A start after the window was closed goes on from there in about 15 seconds.",
                                                    "Öykünülen bir işlemcide çalışan bir araştırma önizlemesi, bu yüzden yavaş. Soğuk açılış 8 vCPU ile Home'a yaklaşık 5–7 dakika sürer ve pencere bunun yaklaşık 4,5 dakikasında karanlık kalır: donmuş değildir. Pencere kapatıldıktan sonraki açılış yaklaşık 15 saniyede kaldığı yerden sürer.")));
 
-            // tvOS is quick: said so, with what the picture size costs (Start-tvOS.ps1's measurements)
+            // tvOS: a research preview, with what does not work said first, then the speed (Start-tvOS.ps1's measurements;
+            // TVOS.md: Activation failed, Search and Apple TV unavailable, 3-19 s from a key to the picture, saves never tried)
             if (os == "tv")
-                p.Children.Add(Ui.Note("Info", L.T("A research preview on an emulated CPU. A start from cold reaches Home in about a minute at 1080p (about 65 to 95 seconds at 4K); one after the window was closed goes on from there in seconds. The keyboard is the remote.",
-                                                   "Öykünülen bir işlemcide çalışan bir araştırma önizlemesi. Soğuk açılış 1080p'de yaklaşık bir dakikada Home'a varır (4K'da yaklaşık 65–95 saniye); pencere kapatıldıktan sonraki açılış saniyeler içinde kaldığı yerden sürer. Klavye kumandadır.")));
+            {
+                p.Children.Add(Ui.Note("Warn", L.T("A research preview, not a usable Apple TV. It reaches Home and Settings. What does not work: About shows Activation failed; Search and the Apple TV app say they are not available; a key can take 3 to 20 seconds to show on screen; saves (Save and close, Go back) have not been tested.",
+                                                   "Bir araştırma önizlemesi, kullanılabilir bir Apple TV değil. Home ve Ayarlar'a varır. Çalışmayanlar: Hakkında'da Activation failed yazar; Search ve Apple TV uygulaması kullanılamıyor der; bir tuşun ekrana yansıması 3–20 saniye sürebilir; kayıtlar (Kaydet ve kapat, Geri dön) sınanmadı.")));
+                p.Children.Add(Ui.Note("Info", L.T("On an emulated CPU a start from cold reaches Home in about a minute at 1080p (about 65 to 95 seconds at 4K). The keyboard is the remote.",
+                                                   "Öykünülen bir işlemcide soğuk açılış 1080p'de yaklaşık bir dakikada Home'a varır (4K'da yaklaşık 65–95 saniye). Klavye kumandadır.")));
+            }
 
             // the guest
             var cpus = Ui.Seg(Guests.CpuChoices(os).Select(n => (n, n.ToString())), c.Smp, v => { c.Smp = v; Changed(); });

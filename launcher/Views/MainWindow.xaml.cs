@@ -96,13 +96,14 @@ namespace ASoftware.Views
             finally { polling = false; }
         }
 
-        // --- the shelf's columns: four in a row, else two rows of two (never three and one) --------------------
+        // --- the shelf's columns: all five in a row, else three over two (a lone card on a row of its own looks lost),
+        // else two by two with one under them, else one ------------------------------------------------------
         const double Column = 270;
-        int columns = 4;
+        int columns = 5;
         void Shelf_SizeChanged(object sender, SizeChangedEventArgs e)
         {
             double room = Shelf.ActualWidth - Shelf.Padding.Left - Shelf.Padding.Right - 2;
-            columns = room >= 4 * Column + 4 ? 4 : room >= 2 * Column + 4 ? 2 : 1;
+            columns = room >= 5 * Column + 4 ? 5 : room >= 3 * Column + 4 ? 3 : room >= 2 * Column + 4 ? 2 : 1;
             // (a little over the columns: layout rounding at 125 % must not push the last one to a new row)
             if (Cards.Width != columns * Column + 4) Cards.Width = columns * Column + 4;
             if (e.HeightChanged) FitSoon();

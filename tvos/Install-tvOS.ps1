@@ -937,6 +937,15 @@ if ($List -or $Estimate) {
 
 # --- Run -----------------------------------------------------------------------------------------
 Write-Host "ASoftware tvOS installer$(if ($DryRun) { ' (dry run: nothing is run)' })" -ForegroundColor Cyan
+# said on the first screen and again at the end: what tvOS here is (TVOS.md, measured 2026-11-12)
+function Preview-Notice {
+    Write-Host '  tvOS is a RESEARCH PREVIEW, not a usable Apple TV. It reaches Home and Settings. What does not work:' -ForegroundColor Yellow
+    Write-Host '    - Settings > General > About shows Activation: Failed'
+    Write-Host '    - Search and the Apple TV app say they are not available'
+    Write-Host '    - a key can take 3 to 20 seconds to show on screen'
+    Write-Host '    - saves (quick save, Go back) have not been tested'
+}
+Preview-Notice
 Write-Host "  Work $Work (WSL: $(To-Wsl $Work)), WSL distro $Distro, Linux scratch $LinuxDir"
 $fromIdx = if ($From) { [array]::IndexOf($ids, $From) } else { -1 }
 $chainRedone = $false
@@ -994,4 +1003,7 @@ Emit 'end', 'tv', 0
 Write-Host ''
 if ($DryRun) { Write-Host 'Dry run: nothing was run.' -ForegroundColor Cyan }
 elseif ($Only) { Write-Host "Done: $Only." -ForegroundColor Cyan }
-else { Write-Host 'Done. Start tvOS with Start-tvOS.cmd or the Start menu shortcut.' -ForegroundColor Cyan }
+else {
+    Write-Host 'Done. Start tvOS with Start-tvOS.cmd or the Start menu shortcut.' -ForegroundColor Cyan
+    Preview-Notice
+}

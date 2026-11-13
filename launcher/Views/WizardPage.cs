@@ -260,8 +260,8 @@ namespace ASoftware.Views
                     if (v && Guests.Installed("ios26")) FromIos26Install();
                 });
             // (Setup-ASoftware.ps1's own figures: its tvOS question with a base, its menu's entry without; Apple's OTA is 4.97 GB)
-            ct = OsChoice("tv", choice.Tv, L.T("Apple TV 4K on a drawn TV with its Siri Remote: Home, Settings and the apps, drawn by your PC's GPU at 1080p or 4K; the keyboard is the remote. A research preview on an emulated CPU. Needs only the base it shares with iOS 26.",
-                                               "Çizilmiş bir TV'de Siri Remote'lu Apple TV 4K: Home, Ayarlar ve uygulamalar PC'nizin GPU'suyla 1080p ya da 4K çizilir; klavye kumandadır. Öykünülen bir işlemcide araştırma önizlemesi. iOS 26'nın yalnız ortak tabanını ister."),
+            ct = OsChoice("tv", choice.Tv, L.T("Apple TV 4K on a drawn TV with its Siri Remote: Home and Settings, drawn by your PC's GPU at 1080p or 4K; the keyboard is the remote. A research preview, not a usable Apple TV: About shows Activation failed, Search and the Apple TV app say they are not available, keys answer slowly, and saves are untested. Needs only the base it shares with iOS 26.",
+                                               "Çizilmiş bir TV'de Siri Remote'lu Apple TV 4K: Home ve Ayarlar PC'nizin GPU'suyla 1080p ya da 4K çizilir; klavye kumandadır. Araştırma önizlemesi, kullanılabilir bir Apple TV değil: Hakkında'da Activation failed yazar, Search ve Apple TV uygulaması kullanılamıyor der, tuşlar geç yanıt verir, kayıtlar sınanmadı. iOS 26'nın yalnız ortak tabanını ister."),
                 Guests.HasBase("tv") ? L.T("about 1.5 h · 5 GB download · WSL", "yaklaşık 1,5 sa · 5 GB indirme · WSL")
                                      : L.T("about 1.5 h · 6 GB download · WSL", "yaklaşık 1,5 sa · 6 GB indirme · WSL"), v =>
                 {

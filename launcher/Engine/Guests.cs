@@ -17,7 +17,7 @@ namespace ASoftware.Engine
         public static readonly string[] PhoneIds = { "ios16", "ios26", "watch" };
 
         public static string Name(string os) => os == "ios16" ? "iOS 16" : os == "ios26" ? "iOS 26" : os == "watch" ? "watchOS" : os == "tv" ? "tvOS" : "visionOS";
-        public static string Detail(string os) => os == "ios16" ? "16.7.16 · iPhone X" : os == "ios26" ? "26.6.2 · iPhone 16" : os == "watch" ? "27.2 · Apple Watch Series 9" : os == "tv" ? "27.2 · Apple TV 4K" : "27.2 · Apple Vision Pro";
+        public static string Detail(string os) => os == "ios16" ? "16.7.16 · iPhone X" : os == "ios26" ? "26.6.2 · iPhone 16" : os == "watch" ? "27.2 · Apple Watch Series 9" : os == "tv" ? "27.2 · Apple TV 4K · " + L.T("research preview", "araştırma önizlemesi") : "27.2 · Apple Vision Pro";
 
         /// <summary>The ports a running guest holds; a start refuses when another process has one.</summary>
         public static int[] Ports(string os) => os == "ios16" ? new[] { 4445 } : os == "ios26" ? new[] { 4451, 4452, 4453 } : os == "vision" ? new[] { 4481, 4482, 4483 } : os == "tv" ? new[] { 4501, 4502, 4503 } : new[] { 4471, 4472, 4473 };

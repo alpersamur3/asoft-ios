@@ -721,7 +721,7 @@ if (-not $Version) {
         @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false),
         @((L 'watchOS 27.2 only (Apple Watch Series 9)' 'Yalnız watchOS 27.2 (Apple Watch Series 9)'), (L 'iOS 26 is not needed, only the base it shares; WSL' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL'), (-not $TW)),
         @((L 'visionOS 27.2 only (Apple Vision Pro)' 'Yalnız visionOS 27.2 (Apple Vision Pro)'), (L 'iOS 26 is not needed, only the base it shares; WSL; about 2 hours and 19 GB from Apple' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 2 saat ve Apple''dan 19 GB'), (-not $TVis)),
-        @((L 'tvOS 27.2 only (Apple TV 4K)' 'Yalnız tvOS 27.2 (Apple TV 4K)'), (L 'iOS 26 is not needed, only the base it shares; WSL; about 1.5 hours and 6 GB from Apple' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 1,5 saat ve Apple''dan 6 GB'), (-not $TT))) 0
+        @((L 'tvOS 27.2 only (Apple TV 4K): research preview' 'Yalnız tvOS 27.2 (Apple TV 4K): araştırma önizlemesi'), (L 'Home and Settings only: Activation failed, Search and the Apple TV app unavailable, slow keys, saves untested. iOS 26 is not needed, only the base it shares; WSL; about 1.5 hours and 6 GB from Apple' 'Yalnız Home ve Ayarlar: Activation failed, Search ve Apple TV uygulaması kullanılamıyor, tuşlar yavaş, kayıtlar sınanmadı. iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 1,5 saat ve Apple''dan 6 GB'), (-not $TT))) 0
     $Version = @('ios16', 'ios26', 'both', 'watchos', 'visionos', 'tvos')[$i]
 }
 $Want16 = $Version -ceq 'ios16' -or $Version -ceq 'both' -or $Version -ceq 'ios16-watchos' -or $Version -ceq 'ios16-visionos' -or $Version -ceq 'ios16-tvos'
@@ -803,9 +803,9 @@ if ($Want26 -and $TT) {
     $tq = Tv-Qemu ([IO.Path]::Combine([IO.Path]::GetFullPath($(if ($Dir) { $Dir } else { Default-Dir })).TrimEnd('\'), 'work'))
     if ($WantVision -and $tq.Why -and -not $vq.Why) { $tq.Why = '' }
     if (-not $Tv) {
-        $i = Ask (L 'tvOS 27.2 too (Apple TV 4K), built on what iOS 26 installs?' 'tvOS 27.2 de kurulsun mu (Apple TV 4K), iOS 26''nın kurduklarının üstüne?') @(
+        $i = Ask (L 'tvOS 27.2 too (Apple TV 4K, research preview), built on what iOS 26 installs?' 'tvOS 27.2 de kurulsun mu (Apple TV 4K, araştırma önizlemesi), iOS 26''nın kurduklarının üstüne?') @(
             @((L 'No' 'Hayır'), '', $false),
-            @((L 'Yes' 'Evet'), $(if ($tq.Why) { $tq.Why } else { L "about $(Fmt-Size $TT.OtaSize) more download, 13 GB more disk (23 GB at the peak) and about 1.5 hours more; WSL; its own launcher, Start-tvOS.cmd" "yaklaşık $(Fmt-Size $TT.OtaSize) daha indirme, 13 GB daha disk (en çok 23 GB) ve yaklaşık 1,5 saat daha; WSL; kendi başlatıcısı, Start-tvOS.cmd" }), [bool]$tq.Why)) 0
+            @((L 'Yes' 'Evet'), $(if ($tq.Why) { $tq.Why } else { L "it reaches Home and Settings only (Activation failed, Search and the Apple TV app unavailable, slow keys, saves untested); about $(Fmt-Size $TT.OtaSize) more download, 13 GB more disk (23 GB at the peak) and about 1.5 hours more; WSL; its own launcher, Start-tvOS.cmd" "yalnız Home ve Ayarlar'a varır (Activation failed, Search ve Apple TV uygulaması kullanılamıyor, tuşlar yavaş, kayıtlar sınanmadı); yaklaşık $(Fmt-Size $TT.OtaSize) daha indirme, 13 GB daha disk (en çok 23 GB) ve yaklaşık 1,5 saat daha; WSL; kendi başlatıcısı, Start-tvOS.cmd" }), [bool]$tq.Why)) 0
         $Tv = @('no', 'yes')[$i]
     }
     if ($Tv -eq 'yes' -and $tq.Why) { Fail ((L 'tvOS cannot be installed here: ' 'tvOS burada kurulamaz: ') + $tq.Why + (L ' (or -Tv no)' ' (ya da -Tv no)')) 2 }
@@ -1377,7 +1377,10 @@ if ($Want16) { $lines += '  iOS 16: ' + (Join-Path $Dir 'Start-iOS.cmd') + $(if 
 if ($Want26 -and -not $BaseOnly) { $lines += '  iOS 26: ' + (Join-Path $Dir 'ios26\Start-iOS26.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware iOS 26"' 'Başlat menüsü "ASoftware iOS 26"') + ')' }) + '; ' + (L 'logs' 'loglar') + ': ' + (Join-Path $Work 'install\logs') }
 if ($WantWatch) { $lines += '  watchOS: ' + (Join-Path $Dir 'Start-watchOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware watchOS"' 'Başlat menüsü "ASoftware watchOS"') + ')' }) }
 if ($WantVision) { $lines += '  visionOS: ' + (Join-Path $Dir 'Start-visionOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware visionOS"' 'Başlat menüsü "ASoftware visionOS"') + ')' }) }
-if ($WantTv) { $lines += '  tvOS: ' + (Join-Path $Dir 'Start-tvOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware tvOS"' 'Başlat menüsü "ASoftware tvOS"') + ')' }) }
+if ($WantTv) {
+    $lines += '  tvOS: ' + (Join-Path $Dir 'Start-tvOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware tvOS"' 'Başlat menüsü "ASoftware tvOS"') + ')' })
+    $lines += '    ' + (L 'tvOS is a research preview: Home and Settings only. About shows Activation: Failed, Search and the Apple TV app say they are not available, keys answer slowly, saves are untested.' 'tvOS bir araştırma önizlemesi: yalnız Home ve Ayarlar. Hakkında Activation: Failed yazar, Search ve Apple TV uygulaması kullanılamıyor der, tuşlar yavaş yanıt verir, kayıtlar sınanmadı.')
+}
 Write-Host ''
 foreach ($l in $lines) { Write-Host $l }
 try { Set-Content (Join-Path $Dir 'install-summary.txt') $lines -Encoding UTF8 } catch { }
