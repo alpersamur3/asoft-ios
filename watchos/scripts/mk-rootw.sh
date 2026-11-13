@@ -14,6 +14,7 @@ set -euo pipefail
 OS=${OS:?decrypted OS image}
 OUT=${OUT:?the qcow2 to make}
 S=${S:?the scripts folder}
+. "$S/hfs-settle.sh"
 RSIZE=${RSIZE:-16G} DSIZE=${DSIZE:-8G}
 NBD=${NBD:-/dev/nbd14}
 SYSROOT=${SYSROOT:-${L:?}/sysroot}
@@ -24,7 +25,7 @@ if [ -b "$OUT" ]; then
 else
 	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
 	[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
-	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+	nbd_wait_free $NBD 30 || { echo "$NBD is in use"; exit 1; }
 fi
 
 work=/tmp/mkrootw
@@ -35,7 +36,7 @@ cleanup() {
 		mountpoint -q "$m" && { umount "$m" 2> /dev/null || fusermount -u "$m" 2> /dev/null || true; }
 	done
 	for l in $L1 $L2; do losetup -d $l 2> /dev/null || true; done
-	[ "$NBD" = "$OUT" ] || qemu-nbd -d $NBD > /dev/null 2>&1 || true
+	[ "$NBD" = "$OUT" ] || nbd_detach $NBD
 }
 trap cleanup EXIT
 
@@ -107,7 +108,6 @@ du -sh $work/data
 df -h $R | tail -1
 sync
 umount $work/data $R
-fsck.hfsplus -f -y $L1 | grep -v 'Illegal name' | tail -2 || true
-fsck.hfsplus -f -n $L1 | tail -1
-fsck.hfsplus -f -n $L2 | tail -1
+hfs_settle $L1 || { echo "$L1: the root volume would not settle; $OUT is not usable"; exit 1; }
+hfs_settle $L2 || { echo "$L2: the Data volume would not settle; $OUT is not usable"; exit 1; }
 echo "$(date +%T) done: $OUT"

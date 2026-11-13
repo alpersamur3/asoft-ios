@@ -28,7 +28,8 @@ SYSOS=${SYSOS:-$A/os/094-95368-092.dmg}
 APPOS=${APPOS:-$A/iphone/094-96441-094.dmg}
 OUT=${OUT:-$A/root26.qcow2}
 SIZE=${SIZE:-32G}
-NBD=${NBD:-/dev/nbd12}
+. "$S/hfs-settle.sh"
+NBD=${NBD:-$(nbd_first_free)}
 SYSROOT=$L/sysroot
 EXCLUDE=${EXCLUDE:-/private/var/staged_system_apps /System/Library/LinguisticData /System/Library/PreinstalledAssetsV2 /System/Library/NanoTimeKit /usr/standalone}
 
@@ -37,7 +38,7 @@ if [ -b "$OUT" ]; then
 else
 	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
 	[[ ! -e $OUT ]] || { echo "refusing to overwrite $OUT"; exit 1; }
-	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+	nbd_wait_free $NBD 30 || { echo "$NBD is in use"; exit 1; }
 fi
 
 work=/tmp/mkroot26		# mount points only
@@ -47,7 +48,7 @@ cleanup() {
 	for m in "${mounts[@]}"; do
 		mountpoint -q "$m" && { umount "$m" 2> /dev/null || fusermount -u "$m" 2> /dev/null || true; }
 	done
-	[ "$NBD" = "$OUT" ] || qemu-nbd -d $NBD > /dev/null 2>&1 || true
+	[ "$NBD" = "$OUT" ] || nbd_detach $NBD
 }
 trap cleanup EXIT
 
@@ -158,6 +159,5 @@ echo "signed $(wc -l < "$OUT.hashes") sysroot binaries"
 df -h $R | tail -1
 sync
 umount $R
-fsck.hfsplus -f -y $NBD | grep -v 'Illegal name' || true
-fsck.hfsplus -f -n $NBD | tail -3
+hfs_settle $NBD || { echo "$NBD: the volume would not settle; $OUT is not usable"; exit 1; }
 echo "$(date +%T) done: $OUT"

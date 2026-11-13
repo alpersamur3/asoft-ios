@@ -64,7 +64,8 @@ $scriptsDir = if (Test-Path (Join-Path $here 'scripts\cdhash.py')) { Join-Path $
 $cdhashPy = Join-Path $scriptsDir 'cdhash.py'
 $mktcPy = Join-Path $scriptsDir 'mktc.py'
 $doSh = Join-Path $scriptsDir 'root26-do.sh'
-foreach ($t in @($cdhashPy, $mktcPy, $doSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
+$settleSh = Join-Path $scriptsDir 'hfs-settle.sh'
+foreach ($t in @($cdhashPy, $mktcPy, $doSh, $settleSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
 $qemuImg = @("$here\qemu\qemu-img.exe", "$Work\qemu\qemu-img.exe", 'C:\Program Files\qemu\qemu-img.exe') |
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $qemuImg) { Fail 'no qemu-img.exe (looked next to the launcher and in Program Files)' }
@@ -130,6 +131,7 @@ function Run-HelperJob([string]$jobDir, [string]$appTar, [string]$disk) {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     New-Item -ItemType Directory -Force "$jobDir\.job" | Out-Null
     Copy-Item $doSh "$jobDir\root26-do.sh"
+    Copy-Item $settleSh "$jobDir\hfs-settle.sh"	# root26-do.sh sources it
     [IO.File]::WriteAllText("$jobDir\run.sh", "set -eu`nbash root26-do.sh /work/disk 'bash /work/place.sh'`n", $utf8)
     [IO.File]::WriteAllText("$jobDir\.job\run", "run.sh`n", $utf8)
     [IO.File]::WriteAllText("$jobDir\.job\disks", "d0 disk`nd1 app.tar`n", $utf8)

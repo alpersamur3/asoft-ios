@@ -16,9 +16,9 @@ ls $R/System/Library/Caches/com.apple.dyld | head -3
 ls -la $R/System/Cryptexes/ $R/private/preboot/Cryptexes/
 python3 -I '"$S"'/root26-tweaks.py $R
 df -h $R | tail -1'
-NBD=${NBD:-/dev/nbd12}
+. "$S/hfs-settle.sh"
+NBD=${NBD:-$(nbd_first_free)}
 # (a block device, in the installer's helper VM: as it is)
 [ -b $DISK ] && NBD=$DISK || { qemu-nbd -f qcow2 -c $NBD $DISK; sleep 1; }
-fsck.hfsplus -f -y $NBD | grep -v "Illegal name" | tail -4 || true
-fsck.hfsplus -f -n $NBD | tail -2 || true
-[ $NBD = $DISK ] || qemu-nbd -d $NBD > /dev/null
+hfs_settle $NBD || true
+[ $NBD = $DISK ] || nbd_detach $NBD
