@@ -40,6 +40,9 @@
 #                    not the release's download
 #     -BakeMinutes N how long the wallpaper boot leaves iOS running once it is up (6)
 #     -KeepBuildFiles  keep the decrypted images and the intermediate disk (about 32 GB)
+#     -KeepSystemAppMigrator  leave iOS's SystemAppMigrator plugin in the disk (and copy the staged
+#                    system apps): DataMigration then runs it, ~33 min of waiting, as before (also
+#                    ASOFT_KEEP_SYSTEMAPPMIGRATOR=1); for comparing times
 # Folders, saved in the menu's config (%LOCALAPPDATA%\ASoftware iOS 26\ios26.config.json):
 #   -Work (ASOFT26)      Apple's files, the disks and the runs; a drive-letter path without
 #                        spaces. Default: the config's, else <fixed drive with most room>:\ios26.
@@ -68,6 +71,7 @@ param(
     [ValidateRange(1, 120)][int]$BakeMinutes = 6,
     [switch]$Base,
     [switch]$KeepBuildFiles,
+    [switch]$KeepSystemAppMigrator,
     [switch]$NoShortcut,
     [ValidateSet('', 'auto', 'wsl', 'helper')][string]$Linux = ''
 )
@@ -1420,6 +1424,8 @@ function Do-Activation {
     $null = Run-Linux 'activation-put' $body -In @('install/work/mobileactivationd')
 }
 
+function Keep-SystemAppMigrator { $KeepSystemAppMigrator -or $env:ASOFT_KEEP_SYSTEMAPPMIGRATOR -ceq '1' }
+
 function Do-Apps {
     # 5.3.1-5.3.5 and 5.4: the staged system apps, PosterBoard's purgeable-file patch and the side
     # button's (.42), UIKitCore's touch edge patch (.03) and libMobileGestalt's Always On Display
@@ -1427,6 +1433,8 @@ function Do-Apps {
     Need-OsImage
     Need-Space $Space.apps
     $body = Step-Body 'apps-get'
+    # (read by apply-staged.sh and root26-staged.py)
+    if (Keep-SystemAppMigrator) { $body = "export ASOFT_KEEP_SYSTEMAPPMIGRATOR=1`n" + $body }
     $dsc = ($DscFiles | ForEach-Object { '$C/' + $_ }) -join ' '
     # (apply-staged.sh and apply-apps.sh read the staged apps off the OS image)
     $osDisk = @{ ro = "os/$OsImage" }
@@ -1768,7 +1776,8 @@ function Step-Sig([string]$id) {
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
         # aod: the apps step with Always On Display and Auto-Lock Never (an install before it redoes
         # apps and the layers on it)
-        'apps' { return 'aod lock-longpress' }
+        # (no-sam: SystemAppMigrator out of the disk; an install from before redoes apps)
+        'apps' { if (Keep-SystemAppMigrator) { return 'aod lock-longpress' } else { return 'aod lock-longpress no-sam' } }
         # the other -Linux has its own tools
         'linux' { return $LinuxMode }
     }
