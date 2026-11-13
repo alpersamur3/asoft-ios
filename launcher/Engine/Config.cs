@@ -96,6 +96,8 @@ namespace ASoftware.Engine
         public bool CheckUpdates { get; set; } = true;
         public string SkippedVersion { get; set; } = "";
         public string LastUpdateCheck { get; set; } = "";
+        /// <summary>When SkippedVersion was dismissed: a critical release comes back after a day.</summary>
+        public string SkippedAt { get; set; } = "";
         public OsConfig Ios16 { get; set; } = new OsConfig { Smp = 4 };
         public OsConfig Ios26 { get; set; } = new OsConfig { Smp = 4, GpuMode = "" };
         public OsConfig Watch { get; set; } = new OsConfig { Smp = 4 };

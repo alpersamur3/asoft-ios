@@ -517,21 +517,39 @@ namespace ASoftware.Views
                 Banner("Warn", L.T("An install is not finished", "Bitmemiş bir kurulum var"),
                     L.T($"It stopped in {u.Dir}; it goes on where it stopped.", $"{u.Dir} içinde durdu; kaldığı yerden devam eder."),
                     L.K("Resume"), ResumeInstall, () => { LauncherConfig.Current.Install.Stage = "dismissed"; LauncherConfig.Current.Save(); RefreshBanners(); });
-            if (update != null)
-                Banner("Accent", L.K("UpdateAvailable") + ": " + (string.IsNullOrEmpty(update.Name) ? update.Tag : update.Name),
-                    Updates.DevBuild ? L.T("This is a development build.", "Bu bir geliştirme derlemesi.") : L.T("You have ", "Sizdeki: ") + Updates.AppVersion,
-                    L.K("ReleasePage"), () => Open(update.Url), () => { LauncherConfig.Current.SkippedVersion = update.Tag; LauncherConfig.Current.Save(); update = null; RefreshBanners(); });
+            if (UpdateToShow() is Updates.Release rel)
+            {
+                // the dot says how much it matters: blue, amber, red; a critical one also gets a red outline and title
+                var tone = rel.Level == Updates.Critical ? "Bad" : rel.Level == Updates.Important ? "Warn" : "Accent";
+                var have = Updates.DevBuild ? L.T("This is a development build.", "Bu bir geliştirme derlemesi.") : L.T("You have ", "Sizdeki: ") + Updates.AppVersion;
+                Banner(tone, L.K("UpdateAvailable") + ": " + (string.IsNullOrEmpty(rel.Name) ? rel.Tag : rel.Name),
+                    string.IsNullOrEmpty(rel.Text) ? have : rel.Text + "\n" + have,
+                    L.K("ReleasePage"), () => Open(rel.Url), () => { var c = LauncherConfig.Current; c.SkippedVersion = rel.Tag; c.SkippedAt = DateTime.Now.ToString("s"); c.Save(); RefreshBanners(); },
+                    rel.Level == Updates.Critical);
+            }
+        }
+
+        /// <summary>The release the banner announces, or null: a dismissed one stays away, except a critical one that comes back after a day.</summary>
+        Updates.Release UpdateToShow()
+        {
+            var conf = LauncherConfig.Current;
+            if (update == null || !conf.CheckUpdates) return null;
+            if (update.Tag != conf.SkippedVersion) return update;
+            if (update.Level < Updates.Critical) return null;
+            DateTime at;
+            // a clock set back counts as time gone by
+            return !DateTime.TryParse(conf.SkippedAt, out at) || DateTime.Now - at >= TimeSpan.FromHours(24) || DateTime.Now < at ? update : null;
         }
 
         /// <summary>A banner: a hairline surface with a tone dot, its text, a capsule for its action and a link to dismiss it.</summary>
-        void Banner(string tone, string title, string text, string action, Action act, Action dismiss)
+        void Banner(string tone, string title, string text, string action, Action act, Action dismiss, bool firm = false)
         {
             var b = new Border
             {
                 CornerRadius = new CornerRadius(16), Padding = new Thickness(18, 12, 14, 12), Margin = new Thickness(0, 0, 0, 10), BorderThickness = new Thickness(1)
             };
             b.SetResourceReference(Border.BackgroundProperty, "Surface");
-            b.SetResourceReference(Border.BorderBrushProperty, "Line");
+            b.SetResourceReference(Border.BorderBrushProperty, firm ? tone : "Line");
             var g = new Grid();
             g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -541,7 +559,9 @@ namespace ASoftware.Views
             dot.Margin = new Thickness(0, 7, 14, 0);
             g.Children.Add(dot);
             var t = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            t.Children.Add(new TextBlock { Text = title, Style = (Style)FindResource("H3"), TextWrapping = TextWrapping.Wrap });
+            var head = new TextBlock { Text = title, Style = (Style)FindResource("H3"), TextWrapping = TextWrapping.Wrap };
+            if (firm) head.SetResourceReference(TextBlock.ForegroundProperty, tone);
+            t.Children.Add(head);
             if (!string.IsNullOrEmpty(text)) t.Children.Add(new TextBlock { Text = text, Style = (Style)FindResource("Sub"), Margin = new Thickness(0, 2, 0, 0) });
             Grid.SetColumn(t, 1);
             g.Children.Add(t);
@@ -561,8 +581,13 @@ namespace ASoftware.Views
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(what) { UseShellExecute = true }); } catch (Exception e) { Log.Write("open " + what + ": " + e.Message); }
         }
 
+        // at the start, then every 6 hours while the launcher stays open (it lives in the tray)
+        static readonly TimeSpan UpdateEvery = TimeSpan.FromHours(6);
+        readonly System.Windows.Threading.DispatcherTimer updateTimer = new System.Windows.Threading.DispatcherTimer { Interval = UpdateEvery };
+
         async Task CheckUpdate()
         {
+            if (!updateTimer.IsEnabled) { updateTimer.Tick += async (s, e) => await CheckUpdate(); updateTimer.Start(); }
             var conf = LauncherConfig.Current;
             if (!conf.CheckUpdates) return;
             try
@@ -570,10 +595,14 @@ namespace ASoftware.Views
                 var r = await Updates.Latest();
                 conf.LastUpdateCheck = DateTime.Now.ToString("s");
                 conf.Save();
-                Log.Write($"update check: latest {r?.Tag}, this {Updates.AppVersion}");
-                if (r != null && Updates.Newer(r.Tag) && r.Tag != conf.SkippedVersion) { update = r; RefreshBanners(); if (!IsVisible) TrayTip(L.K("UpdateAvailable"), r.Tag); }
+                Log.Write(r == null ? $"update check: nothing newer than {Updates.AppVersion}"
+                    : $"update check: {r.Tag} (level {r.Level}{(r.Text != null ? ", with a text" : "")}), this {Updates.AppVersion}");
+                var was = update?.Tag;
+                update = r;
+                RefreshBanners();
+                if (r != null && r.Tag != was && UpdateToShow() != null && !IsVisible) TrayTip(L.K("UpdateAvailable"), r.Tag);
             }
-            catch (Exception ex) { Log.Write("update check: " + ex.Message); }
+            catch (Exception ex) { Log.Write("update check failed: " + ex.Message); }
         }
 
         // --- a note at the bottom -------------------------------------------------------------------

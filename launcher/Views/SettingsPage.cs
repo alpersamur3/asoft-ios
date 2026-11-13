@@ -32,7 +32,7 @@ namespace ASoftware.Views
             p.Children.Add(Ui.Group(L.T("Behaviour", "Davranış"),
                 Ui.Row(L.K("CloseToTray"), L.T("While a guest the launcher started or an install runs, closing the window keeps it in the notification area.", "Başlatıcının açtığı bir konuk ya da kurulum çalışırken pencereyi kapatmak onu bildirim alanında tutar."),
                     Ui.Switch(c.CloseToTray, v => { c.CloseToTray = v; c.Save(); })),
-                Ui.Row(L.K("CheckUpdates"), L.T("At each start: the newest release of alpersamur3/asoft-ios (read only; nothing is downloaded).", "Her açılışta: alpersamur3/asoft-ios'un en yeni sürümü (yalnız okunur; hiçbir şey indirilmez)."),
+                Ui.Row(L.K("CheckUpdates"), L.T("At each start and every 6 hours: the newest release of alpersamur3/asoft-ios (read only; nothing is downloaded).", "Her açılışta ve 6 saatte bir: alpersamur3/asoft-ios'un en yeni sürümü (yalnız okunur; hiçbir şey indirilmez)."),
                     Ui.Switch(c.CheckUpdates, v => { c.CheckUpdates = v; c.Save(); }))));
 
             var about = new StackPanel();
