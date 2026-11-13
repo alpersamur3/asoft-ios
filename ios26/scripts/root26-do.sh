@@ -10,13 +10,15 @@
 # env: NBD (default /dev/nbd12)
 set -eu
 IMG=$1
-NBD=${NBD:-/dev/nbd12}
+S=$(cd "$(dirname "$0")" && pwd)
+. "$S/hfs-settle.sh"
+NBD=${NBD:-$(nbd_first_free)}
 R=/tmp/r26		# mount point only
 if [ -b "$IMG" ]; then
 	NBD=$IMG
 else
 	case $NBD in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
-	[[ ! -s /sys/block/${NBD#/dev/}/pid ]] || { echo "$NBD is in use"; exit 1; }
+	nbd_wait_free $NBD 30 || { echo "$NBD is in use"; exit 1; }
 	modprobe nbd max_part=0 2> /dev/null || true
 fi
 grep -q hfsplus /proc/filesystems || modprobe hfsplus 2>/dev/null || insmod "${HFSPLUS_KO:?WSL has no hfsplus module: build it and set HFSPLUS_KO}"
@@ -26,7 +28,7 @@ cleanup() {
 	mountpoint -q $R/private/var && umount $R/private/var
 	mountpoint -q $R && umount $R
 	for l in $LOOPS; do losetup -d $l; done
-	[ "$NBD" = "$IMG" ] || qemu-nbd -d $NBD > /dev/null
+	[ "$NBD" = "$IMG" ] || nbd_detach $NBD
 }
 trap cleanup EXIT
 sleep 1
@@ -40,13 +42,13 @@ part() {
 }
 DEV=$(part 1)
 [ $DEV = $NBD ] || LOOPS=$DEV
-fsck.hfsplus -f -y $DEV | tail -2 || true
+hfs_settle $DEV || echo "$DEV: not settled before the mount (mounting it anyway)"
 mkdir -p $R
 mount -t hfsplus -o force $DEV $R
 if [ $DEV != $NBD ]; then
 	DATA=$(part 2)
 	LOOPS="$DATA $LOOPS"
-	fsck.hfsplus -f -y $DATA | tail -1 || true
+	hfs_settle $DATA || echo "$DATA: not settled before the mount (mounting it anyway)"
 	mount -t hfsplus -o force $DATA $R/private/var
 fi
 export R
