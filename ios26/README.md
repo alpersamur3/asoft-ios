@@ -467,7 +467,15 @@ installed (step 5.3 / `apply-apps.sh`). `Install-Ipa.ps1` does that offline, in 
 without WSL, in the helper VM (about a minute). Tested with a small Hello app: it appears on the home
 screen and opens. An `.ipa` signed with a development profile (get-task-allow, which AMFI refuses while
 Developer Mode is off) is handled on the way: `scripts/noget.py` switches the entitlement off in every
-Mach-O of the app before the CDHashes are taken. The live `asoftinstalld` path is waiting on an APFS Data volume.
+Mach-O of the app before the CDHashes are taken. Then every 64-bit slice of every Mach-O is signed again ad
+hoc with one SHA-256 code directory of ours (`scripts/adhoc.py`, run by `scripts/ipa-hashes.py`), whatever
+signature it came with, and the install fails unless each slice ends with exactly one CDHash that goes into the trust
+cache: a foreign signature that looks usable is not trusted (a library with restricted entitlements was killed in
+dyld that way on the phone). Libraries are signed without entitlements, the main executable keeps its own. The app is
+made in `/Applications/.asoft-stage` (`scripts/ipa-place.py`) and replaces an app of the same name only when whole; an
+app of Apple's (no mark of ours, a `com.apple.*` bundle id or no readable Info.plist) is never replaced. These three
+files and their tests (`scripts/test/run.py`) are copies of the Android app's own: change them there. The live
+`asoftinstalld` path is waiting on an APFS Data volume.
 
 ### Without WSL (the helper VM)
 

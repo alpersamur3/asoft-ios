@@ -13,6 +13,13 @@
 # to the other one when it cannot run here and the other can; -Linux does not. Left to itself, WSL
 # if it has the distro, else the helper VM in <Work>\tools\helper.
 #
+# Signatures and placing are the Android app's own code, copied beside the other scripts (adhoc.py,
+# ipa-hashes.py, ipa-place.py: see their first lines): every 64-bit slice of every Mach-O is signed again ad hoc
+# with one SHA-256 code directory, whatever signature it came with, and the install fails unless each slice
+# ends with exactly one CDHash that goes into the trust cache. The app is made in /Applications/.asoft-stage
+# and takes the place of an app of the same name only when it is whole; an app of Apple's (no mark of ours,
+# a com.apple.* bundle id or no readable Info.plist) is never replaced.
+#
 # It writes an "apps" overlay (<base>-apps.qcow2) and trust cache (<base-tc>-apps.tc) next to the
 # base, accumulating every .ipa installed, and prints the pair to boot with:
 #   Start-iOS26.ps1 -Disk <apps.qcow2> -Tc <apps.tc> -Keep
@@ -32,6 +39,9 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 function Fail($m) { Write-Error $m; exit 1 }
 function To-Wsl([string]$p) { '/mnt/' + $p.Substring(0, 1).ToLower() + ($p.Substring(2) -replace '\\', '/') }
+function Sh-Quote([string]$s) { "'" + ($s -replace "'", "'\''") + "'" }
+# The reason ipa-place.py gave for refusing or failing ("ASOFT: ipa-fail ..."), for the message that ends the install
+$script:placeFail = ''
 
 if (-not (Test-Path $Ipa)) { Fail "no such .ipa: $Ipa" }
 $Ipa = (Resolve-Path $Ipa).Path
@@ -64,9 +74,12 @@ $scriptsDir = if (Test-Path (Join-Path $here 'scripts\cdhash.py')) { Join-Path $
 $cdhashPy = Join-Path $scriptsDir 'cdhash.py'
 $mktcPy = Join-Path $scriptsDir 'mktc.py'
 $nogetPy = Join-Path $scriptsDir 'noget.py'
+$ipaHashesPy = Join-Path $scriptsDir 'ipa-hashes.py'   # needs cdhash.py (above) and adhoc.py beside it
+$adhocPy = Join-Path $scriptsDir 'adhoc.py'
+$placePy = Join-Path $scriptsDir 'ipa-place.py'
 $doSh = Join-Path $scriptsDir 'root26-do.sh'
 $settleSh = Join-Path $scriptsDir 'hfs-settle.sh'
-foreach ($t in @($cdhashPy, $mktcPy, $nogetPy, $doSh, $settleSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
+foreach ($t in @($cdhashPy, $mktcPy, $nogetPy, $ipaHashesPy, $adhocPy, $placePy, $doSh, $settleSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
 $qemuImg = @("$here\qemu\qemu-img.exe", "$Work\qemu\qemu-img.exe", 'C:\Program Files\qemu\qemu-img.exe') |
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $qemuImg) { Fail 'no qemu-img.exe (looked next to the launcher and in Program Files)' }
@@ -127,20 +140,22 @@ if ($Linux) {
 }
 
 # The helper VM's job (installer\helper\job-run.sh) on the disk and the app: scripts in a tar, QEMU
-# opens the disk with its backing chain, the app goes in as a second tar (it may not fit in /work)
-function Run-HelperJob([string]$jobDir, [string]$appTar, [string]$disk) {
+# opens the disk with its backing chain, the signed app goes in as a second disk: a zip (a .ipa), as the phone's job
+# gets it
+function Run-HelperJob([string]$jobDir, [string]$appIpa, [string]$disk) {
     $utf8 = New-Object System.Text.UTF8Encoding $false
     New-Item -ItemType Directory -Force "$jobDir\.job" | Out-Null
     Copy-Item $doSh "$jobDir\root26-do.sh"
     Copy-Item $settleSh "$jobDir\hfs-settle.sh"	# root26-do.sh sources it
+    Copy-Item $placePy "$jobDir\ipa-place.py"
     [IO.File]::WriteAllText("$jobDir\run.sh", "set -eu`nbash root26-do.sh /work/disk 'bash /work/place.sh'`n", $utf8)
     [IO.File]::WriteAllText("$jobDir\.job\run", "run.sh`n", $utf8)
-    [IO.File]::WriteAllText("$jobDir\.job\disks", "d0 disk`nd1 app.tar`n", $utf8)
+    [IO.File]::WriteAllText("$jobDir\.job\disks", "d0 disk`nd1 app.ipa`n", $utf8)
     $inTar = Join-Path $tmp 'in.tar'
     & tar.exe -cf $inTar -C $jobDir .
     if ($LASTEXITCODE) { Fail 'tar could not pack the helper VM''s job' }
     $d = @()
-    foreach ($x in @(@($inTar, 'in', 'raw', ',readonly=on'), @($disk, 'd0', 'qcow2', ''), @($appTar, 'd1', 'raw', ',readonly=on'))) {
+    foreach ($x in @(@($inTar, 'in', 'raw', ',readonly=on'), @($disk, 'd0', 'qcow2', ''), @($appIpa, 'd1', 'raw', ',readonly=on'))) {
         # (a comma in a -drive file name is doubled)
         $d += '-drive', "file=$($x[0] -replace ',', ',,'),format=$($x[2]),if=none,id=$($x[1])$($x[3])", '-device', "virtio-blk-device,drive=$($x[1]),serial=$($x[1])"
     }
@@ -155,10 +170,51 @@ function Run-HelperJob([string]$jobDir, [string]$appTar, [string]$disk) {
     & "$Work\qemu\qemu-system-aarch64.exe" @a 2>&1 | ForEach-Object {
         $l = "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd()
         if ($l -cmatch '^ASOFT: done (-?\d+)') { $rc = [int]$Matches[1] }
+        if ($l -cmatch '^ASOFT: ipa-fail (.+)') { $script:placeFail = $Matches[1] }
         Write-Host "  $l"
     }
     $ErrorActionPreference = 'Stop'
     $rc
+}
+
+# The script that runs on the mounted disk ($R), in WSL or in the helper VM (root26-do.sh): the phone's ipa-place.py
+# puts the .ipa's app in /Applications/.asoft-stage and, when that went well, swaps it in for an app of the same name.
+# ipa-place.py keeps two small result files in /work, which only the phone's helper VM has: here they go in a temporary
+# folder (sed on a copy, so the script stays the phone's own). LaunchServices builds its list again at the next start.
+function Get-PlaceScript([string]$placeAt, [string]$ipaAt, [string]$ipaName) {
+    $t = @'
+set -eu
+W=$(mktemp -d /tmp/ipa-place.XXXXXX)
+trap 'rm -rf "$W"' EXIT
+sed "s#/work/#$W/#g" {PLACE} > "$W/ipa-place.py"
+if grep -q '/work' "$W/ipa-place.py"; then echo "ASOFT: ipa-fail ipa-place.py names a /work path this installer does not know"; exit 1; fi
+drop() { python3 -I "$W/ipa-place.py" --drop "$R" || true; }
+python3 -I "$W/ipa-place.py" {IPA} "$R" {NAME} || { rc=$?; drop; exit $rc; }
+APP=$(cat "$W/ipa.name")
+python3 -I "$W/ipa-place.py" --swap "$R" "$APP" || { rc=$?; drop; exit $rc; }
+echo "placed $R/Applications/$APP"
+find "$R/private/var/mobile/Containers/Data/InternalDaemon" -maxdepth 4 -name 'com.apple.LaunchServices-*.csstore' 2>/dev/null | while read f; do mv "$f" "$f.stale"; echo "stale: ${f#$R}"; done
+echo done
+'@
+    ($t.Replace('{PLACE}', (Sh-Quote $placeAt)).Replace('{IPA}', (Sh-Quote $ipaAt)).Replace('{NAME}', (Sh-Quote $ipaName))) -replace "`r`n", "`n"
+}
+
+# A folder (Payload) as a stored zip whose entries are Payload/..., with / in the names: ZipFile.CreateFromDirectory in
+# Windows PowerShell 5.1 writes \ and ipa-place.py, on Linux, then finds no Payload/NAME.app
+function Pack-Payload([string]$dir, [string]$zipPath) {
+    Add-Type -AssemblyName System.IO.Compression
+    $root = (Get-Item -LiteralPath $dir).Parent.FullName.TrimEnd('\') + '\'
+    $fs = [IO.File]::Create($zipPath)
+    $z = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($item in @(Get-Item -LiteralPath $dir) + @(Get-ChildItem -LiteralPath $dir -Recurse -Force)) {
+            $name = $item.FullName.Substring($root.Length) -replace '\\', '/'
+            if ($item.PSIsContainer) { [void]$z.CreateEntry($name + '/'); continue }
+            $e = $z.CreateEntry($name, [System.IO.Compression.CompressionLevel]::NoCompression)
+            $es = $e.Open(); $in = [IO.File]::OpenRead($item.FullName)
+            try { $in.CopyTo($es) } finally { $in.Dispose(); $es.Dispose() }
+        }
+    } finally { $z.Dispose(); $fs.Dispose() }
 }
 
 # work area (extract + generated scripts), under the base disk's folder
@@ -186,17 +242,27 @@ try {
     if ($ngRc -and -not ($ng | Where-Object { $_ -cmatch '^FAILED ' })) { Write-Warning "noget.py exited with ${ngRc}: $($ng -join ' | ')" }
     if ($ngDone) { Write-Host "get-task-allow switched off in $($ngDone.Count) file$(if ($ngDone.Count -ne 1) { 's' })" }
 
-    # CDHash of every Mach-O in the .app (main binary, frameworks, plug-ins): cdhash.py prints
-    # "<40hex> <type> <path>" for a signed Mach-O and nothing for other files.
-    $hashes = [System.Collections.Generic.List[string]]::new()
-    foreach ($f in Get-ChildItem $app.FullName -Recurse -File) {
-        $out = (Py $cdhashPy $f.FullName) 2>$null
-        foreach ($line in $out) {
-            if ("$line" -match '^([0-9a-fA-F]{40})\b') { $hashes.Add($Matches[1].ToLower()) }
-        }
+    # Every 64-bit slice of every Mach-O gets a signature of ours (adhoc.py, run by ipa-hashes.py): one SHA-256
+    # code directory, whatever it came with. A foreign signature that looks usable is not trusted: on the phone a
+    # library with restricted entitlements died in dyld ("code signature invalid"). Libraries are signed without
+    # entitlements, the main executable keeps its own. Then each slice's CDHash is read back; the install fails
+    # unless every slice ends with exactly one that is in the list for the trust cache.
+    $rawHashes = Join-Path $tmp 'ipa.hashes'
+    $ErrorActionPreference = 'Continue'
+    $ih = @(Py $ipaHashesPy $scriptsDir $app.FullName $rawHashes 2>&1 | ForEach-Object { "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd() })
+    $ihRc = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    $ihFail = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-fail ' })
+    if ($ihRc -or $ihFail) {
+        Fail "the app's signatures: $(if ($ihFail) { ($ihFail[0] -replace '^ASOFT: ipa-fail ', '') } else { "ipa-hashes.py exited with ${ihRc}: $($ih -join ' | ')" })"
     }
-    $hashes = $hashes | Select-Object -Unique
-    if (-not $hashes) { Fail 'no signed Mach-O found in the app (is it code-signed?)' }
+    foreach ($l in $ih) { if ($l -cmatch '^ASOFT: ipa-warn (.+)') { Write-Warning $Matches[1] } }
+    $signed = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-signed ' })
+    if ($signed) { Write-Host "$($signed.Count) file$(if ($signed.Count -ne 1) { 's' }) signed again here so that iOS 26 accepts them" }
+    $dropped = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-ents-dropped ' } | ForEach-Object { ($_ -split ' ')[2] })
+    if ($dropped) { Write-Host "the entitlements of $($dropped.Count) librar$(if ($dropped.Count -ne 1) { 'ies' } else { 'y' }) were left out (only the main executable's count): $($dropped -join ', ')" }
+    $hashes = @(Get-Content $rawHashes -ErrorAction SilentlyContinue | Where-Object { "$_" -match '^[0-9a-f]{40}$' })
+    if (-not $hashes) { Fail 'no Mach-O with 64-bit code found in the app' }
     Write-Host "CDHashes: $($hashes.Count)"
     $hashFile = Join-Path $tmp 'cdhashes.txt'
     # a non-zero-hex char first so mktc.py reads it as a hash list, not a trust cache
@@ -216,29 +282,24 @@ try {
         Write-Host "New apps overlay $([IO.Path]::GetFileName($AppsDisk)) (on $([IO.Path]::GetFileName($Disk)))"
     }
 
-    # place the .app into /Applications and rebuild LaunchServices, offline. WSL copies it from the
-    # Windows folder, with every file 0777; the helper VM unpacks it, with those modes too (a tar
-    # from Windows has no x bits).
+    # The signed app as a .ipa (a zip, stored, Payload\NAME.app\...): what ipa-place.py reads, as on the phone. The
+    # extracted folder goes first, so the two never take room together with the guest's disk. (Symlinks of the .ipa came
+    # out of the extraction as files, as they always did here.)
+    $signedIpa = Join-Path $tmp 'signed.ipa'
+    Pack-Payload (Join-Path $ex 'Payload') $signedIpa
+    Remove-Item -Recurse -Force $ex
+    # (a whole number of sectors for the helper VM's disk; the zip's end record is found from the back past zeros)
+    $pad = (512 - ((Get-Item $signedIpa).Length % 512)) % 512
+    if ($pad) { $fs = [IO.File]::Open($signedIpa, 'Append'); $fs.Write((New-Object byte[] $pad), 0, $pad); $fs.Close() }
+
+    # place the app into /Applications and rebuild LaunchServices, offline: ipa-place.py (the phone's) makes it in
+    # /Applications/.asoft-stage and then swaps it in; root owns it, the folder is root:wheel 0775, every file 0777.
     $jobDir = Join-Path $tmp 'job'
     New-Item -ItemType Directory -Force $jobDir | Out-Null
     $inner = Join-Path $jobDir 'place.sh'
-    $copy = if ($Linux -ceq 'wsl') { "cp -a `"$(To-Wsl $app.FullName)`" `"`$DST`" 2>/dev/null || true" }
-            else { "tar -xf /work/app.tar -C `"`$R/Applications`" && chmod -R 777 `"`$DST`" || true" }
-    @"
-set -eu
-DST="`$R/Applications/$($app.Name)"
-rm -rf "`$DST"
-$copy
-[ -e "`$DST" ] || { echo "COPY FAILED"; exit 1; }
-chown -R 0:0 "`$DST"
-chown 0:80 "`$DST"
-chmod 775 "`$DST"
-echo "placed `$DST"
-find "`$R/private/var/mobile/Containers/Data/InternalDaemon" -maxdepth 4 -name 'com.apple.LaunchServices-*.csstore' 2>/dev/null | while read f; do mv "`$f" "`$f.stale"; echo "stale: `${f#`$R}"; done
-echo done
-"@ | Set-Content -Encoding ASCII -NoNewline $inner
-    # LF line endings for bash
-    (Get-Content $inner -Raw) -replace "`r`n", "`n" | Set-Content -Encoding ASCII -NoNewline $inner
+    $placeAt = if ($Linux -ceq 'wsl') { To-Wsl $placePy } else { '/work/ipa-place.py' }
+    $ipaAt = if ($Linux -ceq 'wsl') { To-Wsl $signedIpa } else { '/work/app.ipa' }
+    (Get-PlaceScript $placeAt $ipaAt ([IO.Path]::GetFileName($Ipa))) | Set-Content -Encoding ASCII -NoNewline $inner
 
     if ($Linux -ceq 'wsl') {
         Write-Host "Placing into /Applications (WSL $WslDistro)..."
@@ -256,15 +317,20 @@ done
 bash "$(To-Wsl $doSh)" "$(To-Wsl $AppsDisk)" "bash $(To-Wsl $inner)"
 "@ | Set-Content -Encoding ASCII -NoNewline $run
         (Get-Content $run -Raw) -replace "`r`n", "`n" | Set-Content -Encoding ASCII -NoNewline $run
-        & wsl -d $WslDistro -u root -- bash (To-Wsl $run)
-        if ($LASTEXITCODE) { Fail 'the offline disk edit failed' }
+        # Windows PowerShell 5.1 turns a native tool's stderr into errors: here they are just lines
+        $ErrorActionPreference = 'Continue'
+        & wsl -d $WslDistro -u root -- bash (To-Wsl $run) 2>&1 | ForEach-Object {
+            $l = "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd()
+            if ($l -cmatch '^ASOFT: ipa-fail (.+)') { $script:placeFail = $Matches[1] }
+            Write-Host $l
+        }
+        $placeRc = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($placeRc) { Fail "the offline disk edit failed$(if ($script:placeFail) { ": $script:placeFail" })" }
     } else {
         Write-Host 'Placing into /Applications (the helper VM)...'
-        $appTar = Join-Path $tmp 'app.tar'
-        & tar.exe -cf $appTar -C (Split-Path $app.FullName) $app.Name
-        if ($LASTEXITCODE) { Fail 'tar could not pack the app' }
-        $rc = Run-HelperJob $jobDir $appTar $AppsDisk
-        if ($rc -ne 0) { Fail "the offline disk edit failed in the helper VM (exit $(if ($null -eq $rc) { 'unknown' } else { $rc }))" }
+        $rc = Run-HelperJob $jobDir $signedIpa $AppsDisk
+        if ($rc -ne 0) { Fail "the offline disk edit failed in the helper VM$(if ($script:placeFail) { ": $script:placeFail" } else { " (exit $(if ($null -eq $rc) { 'unknown' } else { $rc }))" })" }
     }
 
     Write-Host ''
