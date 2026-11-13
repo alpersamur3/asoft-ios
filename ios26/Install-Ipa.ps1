@@ -63,8 +63,9 @@ function Py { param([string]$script) & $python '-I' $script @args }
 $scriptsDir = if (Test-Path (Join-Path $here 'scripts\cdhash.py')) { Join-Path $here 'scripts' } else { $here }
 $cdhashPy = Join-Path $scriptsDir 'cdhash.py'
 $mktcPy = Join-Path $scriptsDir 'mktc.py'
+$nogetPy = Join-Path $scriptsDir 'noget.py'
 $doSh = Join-Path $scriptsDir 'root26-do.sh'
-foreach ($t in @($cdhashPy, $mktcPy, $doSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
+foreach ($t in @($cdhashPy, $mktcPy, $nogetPy, $doSh)) { if (-not (Test-Path $t)) { Fail "missing tool $t" } }
 $qemuImg = @("$here\qemu\qemu-img.exe", "$Work\qemu\qemu-img.exe", 'C:\Program Files\qemu\qemu-img.exe') |
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $qemuImg) { Fail 'no qemu-img.exe (looked next to the launcher and in Program Files)' }
@@ -170,6 +171,18 @@ try {
     $app = Get-ChildItem (Join-Path $ex 'Payload') -Directory -Filter *.app -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $app) { Fail 'no Payload\*.app in the .ipa' }
     Write-Host "App: $($app.Name)"
+
+    # A developer-signed .app has get-task-allow = true, which AMFI in the guest refuses (Developer Mode
+    # is off). noget.py switches it off in every Mach-O (XML + DER entitlements, same length, special
+    # slots rehashed); the CDHashes below are then read from the changed files. Others are left as they are.
+    $ErrorActionPreference = 'Continue'   # Windows PowerShell 5.1 turns a native tool's stderr into errors
+    $ng = @(Py $nogetPy $app.FullName 2>&1 | ForEach-Object { "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd() })
+    $ngRc = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    $ngDone = @($ng | Where-Object { $_ -cmatch '^get-task-allow off: ' })
+    foreach ($l in $ng) { if ($l -cmatch '^FAILED ') { Write-Warning "get-task-allow: $l" } }
+    if ($ngRc -and -not ($ng | Where-Object { $_ -cmatch '^FAILED ' })) { Write-Warning "noget.py exited with ${ngRc}: $($ng -join ' | ')" }
+    if ($ngDone) { Write-Host "get-task-allow switched off in $($ngDone.Count) file$(if ($ngDone.Count -ne 1) { 's' })" }
 
     # CDHash of every Mach-O in the .app (main binary, frameworks, plug-ins): cdhash.py prints
     # "<40hex> <type> <path>" for a signed Mach-O and nothing for other files.
