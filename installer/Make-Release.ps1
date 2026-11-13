@@ -11,7 +11,10 @@ param(
     [string]$QemuDist = 'C:\asoft-build\ios26\dist-win',
     [string]$Out = "$PSScriptRoot\..\release",
     # a package whose QEMU lacks visionOS's options, made on purpose (its visionOS installs need -VisionQemu)
-    [switch]$NoVision
+    [switch]$NoVision,
+    # a package whose QEMU has no TV window (usb-consumer tv-remote, qemu-sptm asoft-tv), made on purpose: tvOS then
+    # starts in the plain window (Install-tvOS.ps1 asks for the TV window but does not need it)
+    [switch]$NoTv
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
@@ -42,6 +45,13 @@ if ($lacks) {
     $why = "$QemuDist's QEMU has no $($lacks -join ' and ') (visionOS's options): visionOS installs from this package would need -VisionQemu"
     if (-not $NoVision) { throw "$why. Give a build that has them with -QemuDist (qemu-sptm asoft-release, win-build.sh's dist), or -NoVision to make such a package on purpose" }
     Write-Warning "$why (-NoVision)"
+}
+# tvOS's window (a drawn TV with its Siri Remote): usb-consumer's tv-remote option, from the asoft-tv commits of
+# qemu-sptm (usb-consumer tv-remote, gtk TV window); the one QEMU runs every guest, so it is the package's QEMU
+if ((Qemu-Probe "$QemuDist\qemu-system-aarch64.exe" @('-device', 'usb-consumer,help')) -cnotmatch '\btv-remote=') {
+    $whyTv = "$QemuDist's QEMU has no usb-consumer tv-remote (the TV window of qemu-sptm asoft-tv): tvOS would start in the plain window"
+    if (-not $NoTv) { throw "$whyTv. Give a build that has it with -QemuDist (D:\asoft-vision\dist-tv), or -NoTv to make such a package on purpose" }
+    Write-Warning "$whyTv (-NoTv)"
 }
 
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
@@ -83,6 +93,9 @@ if (-not $qemuBuild) { $qemuBuild = 'see its --version' }
   metal2vulkan (https://github.com/alpersamur3/metal2vulkan, branch asoft/release-win) in it, built by
   ios26/scripts/win-build.sh; the DLLs next to it are MSYS2's UCRT64 packages (GTK, GLib, ANGLE,
   libslirp and others, under their own licenses; sources at https://packages.msys2.org).
+- ``tvos\``: the tvOS 27.2 installer (a research preview) and its scripts. It carries no Apple binaries: the installer
+  downloads Apple's OTA update itself, builds liblzraven (0BSD; fetched from GitHub at a pinned commit by
+  tvos\steps\lzraven.sh) in WSL and makes the root on the user's PC.
 - ``xnu\$($kernel.Directory.Name)``: Apple's XNU (APSL 2.0) with xnu/patches, built by
   .github/workflows/xnu.yml.
 - ``ASoftware.exe``: the launcher, ``launcher\`` of this repository (MIT), C# on .NET Framework 4.8 (WPF),
