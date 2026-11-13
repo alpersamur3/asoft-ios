@@ -425,6 +425,8 @@ namespace ASoftware.Views
         {
             var p = Page(L.K("CheckPc"), L.T("What this PC has, and what the install takes here (Setup's own estimate, its times scaled to this PC).", "Bu PC'de ne var ve kurulum burada ne gerektirir (Setup'ın kendi tahmini, süreleri bu PC'ye göre ölçeklenir)."));
             if (choice.Ios26 || choice.Watch || choice.Vision || choice.Tv) p.Children.Add(GpuBox());
+            var gpuWarn = GpuWarnBox();
+            if (gpuWarn != null) p.Children.Add(gpuWarn);
             p.Children.Add(EstimateBox());
             bool blocked = estimate == null || estimate.Stops.Count > 0 || gpuResult == "none" || gpuResult == "fail" && choice.GpuMode != "gpuless";
             var back = Ui.Btn(L.K("Back"), () => { page = 1; Build(); });
@@ -465,6 +467,18 @@ namespace ASoftware.Views
                 sp.Children.Add(b);
             }
             return Box(tone, sp);
+        }
+
+        /// <summary>The old-driver warning of gpu-check.cs (Warn: Vulkan below 1.2, no VK_EXT_external_memory_host, or a driver more
+        /// than two years old): a note under the GPU box, never in the way of Start. The text is built here from the line's fields.</summary>
+        UIElement GpuWarnBox()
+        {
+            var w = gpuLines.LastOrDefault(l => l[0] == "warn" && l.Length >= 4);
+            if (w == null) return null;
+            var sp = new StackPanel();
+            sp.Children.Add(StatusHead("Warn", L.T("The GPU driver is old", "GPU sürücüsü eski")));
+            sp.Children.Add(Ui.Text(global::GpuCheck.WarnText(new[] { w[1], w[2], w[3] }, L.Tr), "Sub", 6));
+            return Box("Warn", sp);
         }
 
         UIElement EstimateBox()

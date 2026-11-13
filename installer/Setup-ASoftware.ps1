@@ -551,6 +551,27 @@ function Sum-Plan($steps, [double]$bps) {
     @{ Dl = $dl; S = $sec; Peak = $peak * 1e9; After = $cum * 1e9; Need = ($peak - $there) * 1e9 }
 }
 
+# The old-driver warning of ios26\scripts\gpu-check.cs (Vulkan below 1.2, no VK_EXT_external_memory_host, or a driver more
+# than two years old), in the language asked for: the `warn|code|vendor|detail|sentence` line of that check's output, its sentence
+# ('' when there is no such line)
+function ConvertFrom-GpuWarn([string[]]$lines) {
+    $w = @($lines | Where-Object { "$_" -clike 'warn|*' }) | Select-Object -Last 1
+    if ($w) { $f = "$w" -split '\|', 5; if ($f.Count -eq 5) { return $f[4].Trim() } }
+    ''
+}
+# gpu-check.ps1 (the launcher's GPU check, not a second one) in a process of its own with a time limit, since a Vulkan driver can
+# crash or hang it. A warning only: whatever goes wrong here gives '' and nothing stops
+function Get-GpuWarning([string]$script, [string]$lang) {
+    if (-not (Test-Path -LiteralPath $script)) { return '' }
+    $o = [IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $script + '"'), '-Lang', $lang) -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError "$o.err"
+        $null = $p.Handle
+        if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch { }; return '' }
+        return ConvertFrom-GpuWarn ([IO.File]::ReadAllLines($o, [Console]::OutputEncoding))
+    } catch { return '' } finally { Remove-Item -LiteralPath $o, "$o.err" -Force -ErrorAction SilentlyContinue }
+}
+
 # --- This PC -----------------------------------------------------------------------------------
 function Get-Pc {
     $os = [Environment]::OSVersion.Version
@@ -1095,6 +1116,11 @@ if ($WantWatch -or $WantVision -or $WantTv) {
 if ($Want26 -and $Linux -eq 'wsl' -and $Pc.Build -lt 19041) { $stop += L 'Windows 10 2004 (build 19041) or later for WSL 2' 'WSL 2 için Windows 10 2004 (yapı 19041) ya da sonrası' }
 if ($Want26 -and -not $Pc.VkLoader) { $stop += L "a Vulkan driver for iOS 26 (vulkan-1.dll; your GPU vendor's driver)" "iOS 26 için Vulkan sürücüsü (vulkan-1.dll; GPU üreticinizin sürücüsü)" }
 elseif ($Want26 -and -not $Pc.VkDrivers) { $warn += L 'no Vulkan driver found in the registry (the loader is there); iOS 26 draws on the GPU through Vulkan' 'kayıt defterinde Vulkan sürücüsü bulunamadı (yükleyici var); iOS 26 GPU''da Vulkan ile çizer' }
+# the GPU driver's age (a warning only; -Estimate skips it: the launcher shows the same warning from its own run of the check)
+if ($Want26 -and $Pc.VkLoader -and -not $Estimate -and -not $DryRun) {
+    $gw = Get-GpuWarning (Join-Path $src 'ios26\scripts\gpu-check.ps1') $Lang
+    if ($gw) { $warn += $gw }
+}
 if ($Pc.Ram -lt 16) { $warn += L "$($Pc.Ram) GB of RAM: 16 GB is what we ask for" "$($Pc.Ram) GB RAM: istenen 16 GB" }
 if ($Want26 -and $Pc.Cores -lt 8) { $warn += L "$($Pc.Cores) logical processors: iOS 26 asks for 8 or more" "$($Pc.Cores) mantıksal işlemci: iOS 26 8 ya da fazlasını ister" }
 elseif ($Pc.Cores -lt 4) { $warn += L "$($Pc.Cores) logical processors: iOS 16 asks for 4 or more" "$($Pc.Cores) mantıksal işlemci: iOS 16 4 ya da fazlasını ister" }
