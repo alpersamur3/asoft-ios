@@ -8,6 +8,10 @@
 // a Vulkan 1.2 device with the extension, whose driver imports private pages and such a view, binds
 // a buffer to them, and whose GPU writes reach them. Prints lines, and returns 0 when that device
 // passes, 1 when it does not, 3 when there is no Vulkan or no device.
+//
+// It also says when the driver of the device the guest will use is old (a `warn` line, never a
+// refusal and never a change of the result): see Warn() for the rule. The Turkish text uses \u escapes
+// because gpu-check.ps1 reads this file with Windows PowerShell's default (ANSI) encoding.
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -83,6 +87,7 @@ public static class GpuCheck
         public uint Api;
         public uint Vendor;
         public uint Driver;
+        public bool HostExt;
     }
 
     static Device Describe(IntPtr pd, out ulong alignment)
@@ -110,6 +115,7 @@ public static class GpuCheck
             Api = (uint)Marshal.ReadInt32(props, 16 + 0),
             Driver = (uint)Marshal.ReadInt32(props, 16 + 4),
             Vendor = (uint)Marshal.ReadInt32(props, 16 + 8),
+            HostExt = HasExtension(pd),
         };
     }
 
@@ -316,6 +322,107 @@ public static class GpuCheck
         }
     }
 
+    // The date of the display driver of a PCI vendor, from the registry (the values Win32_VideoController's
+    // DriverDate reads; the class key's Properties subkey refuses a user, these values do not). The newest
+    // one of that vendor, so a second, older adapter of the same vendor never makes a warning the newer
+    // one would not. null when not found or not a plausible date.
+    static DateTime? DriverDate(uint vendor)
+    {
+        DateTime? best = null;
+        try
+        {
+            using (Microsoft.Win32.RegistryKey cls = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"))
+            {
+                if (cls == null) return null;
+                string ven = "ven_" + vendor.ToString("x4");
+                foreach (string name in cls.GetSubKeyNames())
+                    try
+                    {
+                        using (Microsoft.Win32.RegistryKey k = cls.OpenSubKey(name))
+                        {
+                            string id = k == null ? null : k.GetValue("MatchingDeviceId") as string;
+                            if (id == null || id.ToLowerInvariant().IndexOf(ven) < 0) continue;
+                            DateTime? d = null;
+                            byte[] raw = k.GetValue("DriverDateData") as byte[];
+                            if (raw != null && raw.Length >= 8) d = DateTime.FromFileTimeUtc(BitConverter.ToInt64(raw, 0));
+                            else
+                            {
+                                DateTime t;   // "M-d-yyyy"
+                                string text = k.GetValue("DriverDate") as string;
+                                if (text != null && DateTime.TryParseExact(text.Trim(), new[] { "M-d-yyyy", "M/d/yyyy" }, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out t)) d = t;
+                            }
+                            if (d.HasValue && d.Value.Year >= 2000 && (!best.HasValue || d.Value > best.Value)) best = d;
+                        }
+                    }
+                    catch (Exception) { }
+            }
+        }
+        catch (Exception) { }
+        return best;
+    }
+
+    // Is the driver of the device the guest will use too old for iOS 26? A warning only, never a refusal.
+    // Returns null (nothing to say) or { code, vendor name or "", detail }; the first rule that holds:
+    //   api   the device's Vulkan is below 1.2 (what Try() needs)
+    //   ext   it lacks VK_EXT_external_memory_host (what Try() needs)
+    //   date  the driver's date is more than 730 days before `now`
+    // Only a real GPU (discrete or integrated) gets one: a software renderer (kind "cpu": llvmpipe,
+    // SwiftShader) or a virtual device has no driver to update, and its date means nothing. A driver whose
+    // date is unknown gets no date warning. The Vulkan 1.2 and extension rules are the engine's own, so
+    // they only repeat what the probe's "why" says, in the vendor's words; the two years are a rule of
+    // thumb (the reported failure was a driver of several years).
+    public static string[] Warn(uint vendor, uint api, bool hostExt, string kind, DateTime? date, DateTime now)
+    {
+        if (kind != "discrete" && kind != "integrated") return null;
+        string v = Vendor(vendor);
+        if (v.StartsWith("0x")) v = "";
+        if (api < (1u << 22 | 2u << 12)) return new[] { "api", v, (api >> 22 & 0x7F) + "." + (api >> 12 & 0x3FF) };
+        if (!hostExt) return new[] { "ext", v, Ext };
+        if (date.HasValue && (now - date.Value).TotalDays > 730)
+            return new[] { "date", v, date.Value.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture) };
+        return null;
+    }
+
+    // the vendors' own main driver pages
+    static string DriverPage(string vendor)
+    {
+        switch (vendor)
+        {
+            case "NVIDIA": return "https://www.nvidia.com/Download/index.aspx";
+            case "AMD": return "https://www.amd.com/en/support/download/drivers.html";
+            case "Intel": return "https://www.intel.com/content/www/us/en/download-center/home.html";
+            default: return null;
+        }
+    }
+
+    // One plain sentence for a Warn() result, in English or Turkish.
+    public static string WarnText(string[] w, bool turkish)
+    {
+        string v = w[1], page = DriverPage(v);
+        if (turkish)
+        {
+            string who = (v == "" ? "" : v + " ") + "GPU sürücünüz";
+            string end = "; iOS 26 açılmayabilir ya da yanlış çizebilir: güncel sürücüyü " +
+                         (page != null ? page + " adresinden" : "GPU ya da PC üreticinizin sitesinden") + " alın.";
+            if (w[0] == "api") return who + " yalnız Vulkan " + w[2] + " sunuyor, iOS 26 için 1.2 gerekir" + end;
+            if (w[0] == "ext") return who + " iOS 26'nın istediği " + w[2] + " desteğine sahip değil (çok eski)" + end;
+            return who + " " + w[2] + " tarihli, iki yıldan eski" + end;
+        }
+        else
+        {
+            string who = "Your " + (v == "" ? "" : v + " ") + "GPU driver";
+            string end = ", so iOS 26 may fail to start or draw wrong: get the current driver " +
+                         (page != null ? "at " + page : "from your GPU maker's or PC maker's site") + ".";
+            if (w[0] == "api") return who + " only offers Vulkan " + w[2] + ", and iOS 26 needs 1.2" + end;
+            if (w[0] == "ext") return who + " is too old to have " + w[2] + ", which iOS 26 needs" + end;
+            return who + " is from " + w[2] + ", more than two years old" + end;
+        }
+    }
+
+    // gpu-check.ps1 -Lang tr sets this, for the sentence of the warn line; the launcher builds its own
+    // from the line's fields (WarnText) so it does not depend on the pipe's encoding
+    public static bool Turkish;
+
     public static int Run()
     {
         uint api;
@@ -369,6 +476,7 @@ public static class GpuCheck
             }
 
         int code = 0;
+        string[] warn = null;
         for (int i = 0; i < devices.Count; i++)
         {
             Device d = devices[i];
@@ -377,7 +485,10 @@ public static class GpuCheck
             Console.WriteLine("gpu|" + (i == 0 ? "used" : "other") + "|" + d.Name + "|" + d.Kind + "|" + Vendor(d.Vendor) + "|" + Version(d.Api) + "|0x" +
                               d.Driver.ToString("x") + "|" + alignments[i] + "|" + (why ?? "ok"));
             if (i == 0 && why != null) code = 1;
+            if (i == 0) warn = Warn(d.Vendor, d.Api, d.HostExt, d.Kind, DriverDate(d.Vendor), DateTime.Now);
         }
+        // warn|code|vendor|detail|sentence: only for the device the guest will use
+        if (warn != null) Console.WriteLine("warn|" + warn[0] + "|" + warn[1] + "|" + warn[2] + "|" + WarnText(warn, Turkish));
         vkDestroyInstance(instance, IntPtr.Zero);
         Console.WriteLine("result|" + (code == 0 ? "ok" : "fail"));
         return code;
