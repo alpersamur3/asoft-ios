@@ -1,7 +1,5 @@
 # Copy of the Android app repo's setup/phone/adhoc.py (branch rc-0.1.6, bc272aa): that is the source of truth, change it there and
 # copy it again, not here. The PC installer (Install-Ipa.ps1) and the phone sign and place an .ipa with the same code.
-# The one change from the source: machos() yields after closing the file (Windows cannot replace an open file; the PC signs
-# a Windows folder). The same change belongs in the source.
 """adhoc.py: give every Mach-O of an app a code signature the iOS 26 trust cache can carry.
 
     adhoc.py APP                  sign every Mach-O under the folder ad hoc, in place
@@ -24,8 +22,10 @@ gets its entitlements from its main executable only, so a library's are never us
 signature claims restricted ones (platform-application, com.apple.private.*, task_for_pid-allow ...): the one file of
 Angry Birds 2 that dyld rejected (iGameGod) was the only one of its 35 Mach-Os that carried them. `--keep-library-entitlements` turns that off.
 `--add-exec-entitlement KEY` (repeatable) adds KEY = true to the entitlements of every main executable (MH_EXECUTE) it signs
-(XML and DER, special slots 5 and 7 hashed again); nothing adds one by default (a test knob: the iOS 26 kernel lets a task
-whose own entitlements hold com.apple.private.set-exception-port register exception ports as it likes).
+(XML and DER, special slots 5 and 7 hashed again); adhoc.py itself adds none; ipa-hashes.py, its caller, adds
+com.apple.private.set-exception-port by default (the iOS 26 kernel lets a task whose own entitlements hold it register
+exception ports, which crash reporters such as Sentry's do). MH_EXECUTE covers the app's executable, its app extensions
+and XPC services; libraries (MH_DYLIB, MH_BUNDLE) get none.
 Prints "signed REL REASON CDHASH [CDHASH ...]" per file (CDHash = first 20 bytes of the directory's SHA-256).
 
 Fat files are handled per slice: every 64-bit slice (arm64 and arm64e alike) is checked and, when needed, re-signed in

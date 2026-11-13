@@ -7,11 +7,15 @@
 #
 #   Install-Ipa.ps1 -Ipa app.ipa [-Work D:\ios26] [-Wallpaper ios26|collections]
 #                   [-Disk base.qcow2] [-Tc base.tc] [-AppsDisk out.qcow2] [-AppsTc out.tc]
-#                   [-Linux wsl|helper] [-WslDistro name]
+#                   [-Linux wsl|helper] [-WslDistro name] [-NoExceptionPortEntitlement]
 #
 # -Linux, -WslDistro: as the installer's, whose config has them. The config's LinuxMode gives way
 # to the other one when it cannot run here and the other can; -Linux does not. Left to itself, WSL
 # if it has the distro, else the helper VM in <Work>\tools\helper.
+#
+# Every main executable of the app (its own, app extensions, XPC services) also gets the entitlement
+# com.apple.private.set-exception-port: the iOS 26 kernel kills a task that sets exception ports without it (EXC_GUARD,
+# what Sentry's crash reporter does, six seconds after the launch). -NoExceptionPortEntitlement leaves it out (a test).
 #
 # Signatures and placing are the Android app's own code, copied beside the other scripts (adhoc.py,
 # ipa-hashes.py, ipa-place.py: see their first lines): every 64-bit slice of every Mach-O is signed again ad hoc
@@ -33,7 +37,8 @@ param(
     [string]$AppsDisk = '',
     [string]$AppsTc = '',
     [ValidateSet('', 'wsl', 'helper')][string]$Linux = '',
-    [string]$WslDistro = ''
+    [string]$WslDistro = '',
+    [switch]$NoExceptionPortEntitlement
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -248,8 +253,15 @@ try {
     # entitlements, the main executable keeps its own. Then each slice's CDHash is read back; the install fails
     # unless every slice ends with exactly one that is in the list for the trust cache.
     $rawHashes = Join-Path $tmp 'ipa.hashes'
+    $ipaArgs = @($scriptsDir, $app.FullName, $rawHashes)
+    if ($NoExceptionPortEntitlement) {
+        # ipa-hashes.py's optional 4th argument: a file of entitlement lines; "-default" leaves its default key out
+        $entsFile = Join-Path $tmp 'ipa.ents'
+        Set-Content -Encoding ASCII $entsFile '-default'
+        $ipaArgs += $entsFile
+    }
     $ErrorActionPreference = 'Continue'
-    $ih = @(Py $ipaHashesPy $scriptsDir $app.FullName $rawHashes 2>&1 | ForEach-Object { "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd() })
+    $ih = @(Py $ipaHashesPy @ipaArgs 2>&1 | ForEach-Object { "$(if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ })".TrimEnd() })
     $ihRc = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     $ihFail = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-fail ' })
@@ -259,6 +271,9 @@ try {
     foreach ($l in $ih) { if ($l -cmatch '^ASOFT: ipa-warn (.+)') { Write-Warning $Matches[1] } }
     $signed = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-signed ' })
     if ($signed) { Write-Host "$($signed.Count) file$(if ($signed.Count -ne 1) { 's' }) signed again here so that iOS 26 accepts them" }
+    $entAdded = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-ent ' } | ForEach-Object { $_ -replace '^ASOFT: ipa-ent ', '' })
+    if ($entAdded) { Write-Host "entitlement added to $($entAdded.Count) executable$(if ($entAdded.Count -ne 1) { 's' }): $($entAdded -join ', ')" }
+    elseif ($NoExceptionPortEntitlement) { Write-Host 'the exception-port entitlement was left out (-NoExceptionPortEntitlement)' }
     $dropped = @($ih | Where-Object { $_ -cmatch '^ASOFT: ipa-ents-dropped ' } | ForEach-Object { ($_ -split ' ')[2] })
     if ($dropped) { Write-Host "the entitlements of $($dropped.Count) librar$(if ($dropped.Count -ne 1) { 'ies' } else { 'y' }) were left out (only the main executable's count): $($dropped -join ', ')" }
     $hashes = @(Get-Content $rawHashes -ErrorAction SilentlyContinue | Where-Object { "$_" -match '^[0-9a-f]{40}$' })

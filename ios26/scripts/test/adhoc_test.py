@@ -338,6 +338,44 @@ if os.path.exists(os.path.join(scripts, 'cdhash.py')):
           and 'ipa-signed Main a_signature_from_elsewhere' in r.stdout and len(hs) == 3)
     check('ipa-hashes: every listed hash is the CDHash of a SHA-256 directory that matches its file',
           sorted(hs) == sorted(slice_state(read(os.path.join(app, n)))[2] for n in ('Main', 'Frameworks/Lib.dylib', 'Frameworks/Old.dylib')))
+    # every executable (the app's own, an app extension) gets set-exception-port by default, libraries none; the ENTS file
+    # adds keys or leaves the default out; the log line names key and file
+    exe_ents = plistlib.dumps({'application-identifier': 'T.app'}, fmt=plistlib.FMT_XML)
+    def ents_of(path):
+        b5 = blob_at(read(path), 5)
+        return plistlib.loads(b5[8:]) if b5 else None
+    def make_app(name):
+        put(name + '/Game', signed(2, ents=exe_ents, filetype=2))
+        put(name + '/PlugIns/Share.appex/Share', signed(2, filetype=2))
+        put(name + '/Frameworks/Lib.dylib', signed(2, ents=exe_ents))
+        return os.path.join(tmp, name)
+    def run_hashes(a, ents_file=None):
+        cmd = [PY, '-I', os.path.join(HERE, '..', 'ipa-hashes.py'), scripts, a, os.path.join(tmp, 'hh.txt')]
+        if ents_file:
+            w = os.path.join(tmp, 'ipa.ents')
+            with open(w, 'w') as f:
+                f.write(ents_file)
+            cmd.append(w)
+        return subprocess.run(cmd, capture_output=True, text=True)
+    a = make_app('App3.app')
+    r = run_hashes(a)
+    check('ipa-hashes: by default the app and its extension get the exception-port key, a library none',
+          r.returncode == 0 and ents_of(os.path.join(a, 'Game')) == {'application-identifier': 'T.app', KEY: True}
+          and ents_of(os.path.join(a, 'PlugIns/Share.appex/Share')) == {KEY: True} and ents_of(os.path.join(a, 'Frameworks/Lib.dylib')) is None
+          and 'ipa-ent Game ' + KEY in r.stdout and 'ipa-ent PlugIns/Share.appex/Share ' + KEY in r.stdout and 'ipa-ent Frameworks' not in r.stdout)
+    a = make_app('App4.app')
+    r = run_hashes(a, '-default\n')
+    check('ipa-hashes: the ENTS line "-default" leaves the key out',
+          r.returncode == 0 and ents_of(os.path.join(a, 'Game')) == {'application-identifier': 'T.app'}
+          and ents_of(os.path.join(a, 'PlugIns/Share.appex/Share')) is None and 'ipa-ent ' not in r.stdout)
+    a = make_app('App5.app')
+    r = run_hashes(a, 'com.example.more\n')
+    check('ipa-hashes: an ENTS key comes besides the default',
+          r.returncode == 0 and ents_of(os.path.join(a, 'Game')) == {'application-identifier': 'T.app', KEY: True, 'com.example.more': True})
+    a = make_app('App6.app')
+    r = run_hashes(a, '-default\ncom.example.more\n')
+    check('ipa-hashes: -default with an own key gives only that key',
+          r.returncode == 0 and ents_of(os.path.join(a, 'Game')) == {'application-identifier': 'T.app', 'com.example.more': True})
     put('App2.app/Main', signed(2))
     put('App2.app/Frameworks/Enc.dylib', macho(cryptid=1))
     r = subprocess.run([PY, '-I', os.path.join(HERE, '..', 'ipa-hashes.py'), scripts, os.path.join(tmp, 'App2.app'), os.path.join(tmp, 'h2.txt')],
