@@ -11,8 +11,9 @@ namespace ASoftware.Views
     /// metal frame, a black front, and on its screen what the system last showed (Engine\Thumbs). iOS 26 is an iPhone
     /// with the island; iOS 16 the iPhone X its 1080x2400 screen belongs to (a notch); watchOS a watch with its crown,
     /// side button and band; visionOS the headset its QEMU window draws (its glass is its screen: the 1920x1080 picture
-    /// fills it, the glass's outline cuts its corners). Without a picture the screen is a home screen in the logo's
-    /// colours (the watch: its rings; the headset: icons in a dim room); not installed, an empty faint device with a
+    /// fills it, the glass's outline cuts its corners); tvOS a flat TV on a foot with a Siri Remote standing beside it, as its
+    /// QEMU window draws them (the picture fills the TV's screen). Without a picture the screen is a home screen in the logo's
+    /// colours (the watch: its rings; the headset: icons in a dim room; the TV: tvOS's top shelf and a row of apps); not installed, an empty faint device with a
     /// plus; while it is installed, a black screen with a thin progress bar, as on an iPhone being restored. Its height
     /// sets its size.</summary>
     public class DeviceArt : FrameworkElement
@@ -31,7 +32,7 @@ namespace ASoftware.Views
         /// page's level reads as a grey block).</summary>
         public static readonly DependencyProperty FaintProperty = DependencyProperty.Register(nameof(Faint), typeof(double), typeof(DeviceArt), Meta(0.32));
 
-        /// <summary>ios26, ios16, watch or vision.</summary>
+        /// <summary>ios26, ios16, watch, vision or tv.</summary>
         public string Os { get => (string)GetValue(OsProperty); set => SetValue(OsProperty, value); }
         /// <summary>The system's last screen, or null.</summary>
         public ImageSource Shot { get => (ImageSource)GetValue(ShotProperty); set => SetValue(ShotProperty, value); }
@@ -45,12 +46,12 @@ namespace ASoftware.Views
         public ICommand Command { get => (ICommand)GetValue(CommandProperty); set => SetValue(CommandProperty, value); }
         public double Faint { get => (double)GetValue(FaintProperty); set => SetValue(FaintProperty, value); }
 
-        enum Kind { Island, Notch, Watch, Headset }
-        Kind K => Os == "ios26" ? Kind.Island : Os == "ios16" ? Kind.Notch : Os == "watch" ? Kind.Watch : Kind.Headset;
+        enum Kind { Island, Notch, Watch, Headset, Tv }
+        Kind K => Os == "ios26" ? Kind.Island : Os == "ios16" ? Kind.Notch : Os == "watch" ? Kind.Watch : Os == "tv" ? Kind.Tv : Kind.Headset;
 
         // width / height of the whole drawing: the body and the room for its buttons (the phones), the band (the watch),
-        // the knobs on top and the strap's ends at the sides (the headset)
-        static double Aspect(Kind k) => k == Kind.Island ? 0.512 : k == Kind.Notch ? 0.503 : k == Kind.Watch ? 0.606 : HsWide / HsHigh;
+        // the knobs on top and the strap's ends at the sides (the headset), the TV's foot and the remote beside it
+        static double Aspect(Kind k) => k == Kind.Island ? 0.512 : k == Kind.Notch ? 0.503 : k == Kind.Watch ? 0.606 : k == Kind.Tv ? TvW / TvH : HsWide / HsHigh;
 
         static readonly Color[] MetalColors = { C(0x8A909D), C(0x3A3F4B), C(0x2A2E38), C(0x737986) };
         static readonly Color[] MetalLitColors = { C(0xA9AEB9), C(0x555A66), C(0x434753), C(0x8F95A1) };
@@ -137,6 +138,7 @@ namespace ASoftware.Views
             {
                 case Kind.Watch: Watch(dc, w, h); break;
                 case Kind.Headset: Headset(dc, w, h); break;
+                case Kind.Tv: Tv(dc, w, h); break;
                 default: Phone(dc, w, h, k); break;
             }
             if (dim) dc.Pop();
@@ -219,6 +221,187 @@ namespace ASoftware.Views
             var s = r;
             s.Inflate(-b, -b);
             Screen(dc, s, Math.Max(0, rad - f - b), Kind.Watch, 1.6 * d);
+        }
+
+        // --- the TV and its remote --------------------------------------------------------------------------
+        // An Apple TV 4K's screen as a flat TV: a thin metal edge round a black front, the 16:9 picture in it, a neck and
+        // a foot, with a Siri Remote standing beside it (as the TV window of the asoft-tv QEMU draws them). Lengths are in
+        // units of a hundredth of the whole drawing's height; the picture fills the screen.
+        const double TvW = 156, TvH = 90;
+        const double TvPanelW = 134.8, TvPanelH = 78, TvFootBottom = 88.4;
+        const double RmX = 140.2, RmW = 14.6, RmH = 54;
+
+        void Tv(DrawingContext dc, double w, double h)
+        {
+            double u = Math.Min(w / TvW, h / TvH), ox = (w - TvW * u) / 2, oy = (h - TvH * u) / 2;
+            double X(double v) => ox + v * u;
+            double Y(double v) => oy + v * u;
+            // the foot and the neck behind the panel
+            var foot = Metal(X(TvPanelW / 2 - 23), X(TvPanelW / 2 + 23));
+            var neck = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(X(TvPanelW / 2 - 5), 0), EndPoint = new Point(X(TvPanelW / 2 + 5), 0) };
+            neck.GradientStops.Add(new GradientStop(C(0x2A2E38), 0));
+            neck.GradientStops.Add(new GradientStop(C(0x434753), 0.45));
+            neck.GradientStops.Add(new GradientStop(C(0x2A2E38), 1));
+            neck.Freeze();
+            var ng = new StreamGeometry();
+            using (var c = ng.Open())
+            {
+                c.BeginFigure(new Point(X(TvPanelW / 2 - 4.6), Y(TvPanelH - 1)), true, true);
+                c.LineTo(new Point(X(TvPanelW / 2 + 4.6), Y(TvPanelH - 1)), false, false);
+                c.LineTo(new Point(X(TvPanelW / 2 + 6.4), Y(TvFootBottom - 2)), false, false);
+                c.LineTo(new Point(X(TvPanelW / 2 - 6.4), Y(TvFootBottom - 2)), false, false);
+            }
+            ng.Freeze();
+            dc.DrawGeometry(neck, null, ng);
+            Round(dc, foot, X(TvPanelW / 2 - 23), Y(TvFootBottom - 3.6), X(TvPanelW / 2 + 23), Y(TvFootBottom), 1.7 * u);
+            // the panel: metal edge, black front, the screen
+            double rad = 2.4 * u;
+            var panel = new Rect(X(0), Y(0), TvPanelW * u, TvPanelH * u);
+            dc.DrawRoundedRectangle(Metal(panel.Left, panel.Right), null, panel, rad, rad);
+            double f = Math.Max(0.8, 0.55 * u);
+            var front = panel; front.Inflate(-f, -f);
+            dc.DrawRoundedRectangle(Front, null, front, rad - f, rad - f);
+            var screen = new Rect(X((TvPanelW - 131.6) / 2), Y(1.6), 131.6 * u, 74 * u);
+            Screen(dc, screen, Math.Max(0, 0.9 * u), Kind.Tv, Math.Max(1.2, 1.5 * u));
+            // the glass's light: a faint glare from the upper left across the picture
+            if (Present && Progress < 0)
+            {
+                var glare = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(screen.Left, screen.Top), EndPoint = new Point(screen.Left + screen.Width * 0.55, screen.Bottom) };
+                glare.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(Awake ? 0x1C : 0x0E), 0xFF, 0xFF, 0xFF), 0));
+                glare.GradientStops.Add(new GradientStop(Color.FromArgb(0, 0xFF, 0xFF, 0xFF), 0.55));
+                glare.Freeze();
+                dc.DrawRoundedRectangle(glare, null, screen, 0.9 * u, 0.9 * u);
+            }
+            Remote(dc, X(RmX), Y(TvFootBottom - RmH), RmW * u, RmH * u, u);
+        }
+
+        /// <summary>A Siri Remote (the 2022 one): an aluminium body with a dark front, the clickpad ring at the top, Back and
+        /// TV, Play/Pause and Mute under it, the power button above it; volume and Siri on the right edge.</summary>
+        void Remote(DrawingContext dc, double x, double y, double w, double h, double u)
+        {
+            // the buttons on the right edge: volume (a long one) and Siri
+            Round(dc, Buttons, x + w - 0.6 * u, y + h * 0.20, x + w + 0.9 * u, y + h * 0.34, 0.7 * u);
+            Round(dc, Buttons, x + w - 0.6 * u, y + h * 0.40, x + w + 0.9 * u, y + h * 0.47, 0.7 * u);
+            double rad = w * 0.30;
+            dc.DrawRoundedRectangle(Metal(x, x + w, true), null, new Rect(x, y, w, h), rad, rad);
+            double f = Math.Max(0.8, 0.6 * u);
+            var face = new Rect(x + f, y + f, w - 2 * f, h - 2 * f);
+            dc.DrawRoundedRectangle(Front, null, face, rad - f, rad - f);
+            double cx = x + w / 2, top = face.Top;
+            var ink = Solid(0xD6DAE3, 0xD0);
+            var edge = Solid(0x4B505C);
+            // the power button, a ring with the TV's dot
+            double px = x + w - 3.4 * u, py = top + 2.5 * u;
+            dc.DrawEllipse(null, new Pen(edge, Math.Max(0.5, 0.3 * u)), new Point(px, py), 0.95 * u, 0.95 * u);
+            dc.DrawEllipse(ink, null, new Point(px, py), 0.28 * u, 0.28 * u);
+            // the clickpad: a ring of the metal round a dark touch surface
+            double ry = top + 10.8 * u, rr = 5.0 * u;
+            dc.DrawEllipse(Solid(0x161920), new Pen(Metal(cx - rr, cx + rr, true), Math.Max(0.7, 0.55 * u)), new Point(cx, ry), rr, rr);
+            var pad = new RadialGradientBrush { GradientOrigin = new Point(0.4, 0.3), Center = new Point(0.5, 0.5), RadiusX = 0.6, RadiusY = 0.6 };
+            pad.GradientStops.Add(new GradientStop(C(0x2C303A), 0));
+            pad.GradientStops.Add(new GradientStop(C(0x0F1116), 1));
+            pad.Freeze();
+            dc.DrawEllipse(pad, null, new Point(cx, ry), rr * 0.66, rr * 0.66);
+            // two rows of round buttons: Back, TV / Play-Pause, Mute
+            double br = 2.15 * u, dx = 3.5 * u, r1 = top + 21.6 * u, r2 = top + 28.2 * u;
+            var bface = Solid(0x1C1F27);
+            var bpen = new Pen(edge, Math.Max(0.5, 0.3 * u));
+            foreach (var by in new[] { r1, r2 })
+                foreach (int s in new[] { -1, 1 })
+                    dc.DrawEllipse(bface, bpen, new Point(cx + s * dx, by), br, br);
+            if (u < 0.7) return;
+            var gp = new Pen(ink, Math.Max(0.55, 0.28 * u)) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
+            double g = u;
+            // Back: a chevron
+            var bk = new StreamGeometry();
+            using (var c = bk.Open())
+            {
+                c.BeginFigure(new Point(cx - dx + 0.45 * g, r1 - 0.95 * g), false, false);
+                c.LineTo(new Point(cx - dx - 0.5 * g, r1), true, true);
+                c.LineTo(new Point(cx - dx + 0.45 * g, r1 + 0.95 * g), true, true);
+            }
+            bk.Freeze();
+            dc.DrawGeometry(null, gp, bk);
+            // TV: a screen on a stand
+            dc.DrawRoundedRectangle(null, gp, new Rect(cx + dx - 1.0 * g, r1 - 0.95 * g, 2.0 * g, 1.35 * g), 0.25 * g, 0.25 * g);
+            dc.DrawLine(gp, new Point(cx + dx - 0.55 * g, r1 + 0.95 * g), new Point(cx + dx + 0.55 * g, r1 + 0.95 * g));
+            // Play/Pause: a triangle and a bar
+            var pl = new StreamGeometry();
+            using (var c = pl.Open())
+            {
+                c.BeginFigure(new Point(cx - dx - 1.0 * g, r2 - 0.85 * g), true, true);
+                c.LineTo(new Point(cx - dx + 0.1 * g, r2), false, false);
+                c.LineTo(new Point(cx - dx - 1.0 * g, r2 + 0.85 * g), false, false);
+            }
+            pl.Freeze();
+            dc.DrawGeometry(ink, null, pl);
+            dc.DrawLine(gp, new Point(cx - dx + 0.9 * g, r2 - 0.8 * g), new Point(cx - dx + 0.9 * g, r2 + 0.8 * g));
+            // Mute: a speaker and a slash
+            var sp = new StreamGeometry();
+            using (var c = sp.Open())
+            {
+                c.BeginFigure(new Point(cx + dx - 1.2 * g, r2 - 0.5 * g), true, true);
+                c.LineTo(new Point(cx + dx - 0.45 * g, r2 - 0.5 * g), false, false);
+                c.LineTo(new Point(cx + dx + 0.3 * g, r2 - 1.05 * g), false, false);
+                c.LineTo(new Point(cx + dx + 0.3 * g, r2 + 1.05 * g), false, false);
+                c.LineTo(new Point(cx + dx - 0.45 * g, r2 + 0.5 * g), false, false);
+                c.LineTo(new Point(cx + dx - 1.2 * g, r2 + 0.5 * g), false, false);
+            }
+            sp.Freeze();
+            dc.DrawGeometry(ink, null, sp);
+            dc.DrawLine(gp, new Point(cx + dx + 0.7 * g, r2 - 0.9 * g), new Point(cx + dx + 1.4 * g, r2 + 0.9 * g));
+        }
+
+        /// <summary>tvOS's home without a picture: its wallpaper, the top shelf's card with its title, and a row of apps with
+        /// the first one in focus (lifted, with a white edge), a second row cut off below.</summary>
+        static void TvHome(DrawingContext dc, Rect s)
+        {
+            var wall = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(s.Left, s.Top), EndPoint = new Point(s.Right * 0.8, s.Bottom) };
+            wall.GradientStops.Add(new GradientStop(C(0x2F55C8), 0));
+            wall.GradientStops.Add(new GradientStop(C(0x5B36CF), 0.55));
+            wall.GradientStops.Add(new GradientStop(C(0x1E1553), 1));
+            wall.Freeze();
+            dc.DrawRectangle(wall, null, s);
+            double W = s.Width, H = s.Height, L0 = s.Left + W * 0.055, rw = W * 0.89;
+            // the top shelf: the focused app's card
+            var card = new Rect(L0, s.Top + H * 0.11, rw, H * 0.40);
+            var cardFill = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(card.Left, card.Top), EndPoint = new Point(card.Right, card.Bottom) };
+            cardFill.GradientStops.Add(new GradientStop(Color.FromArgb(0x70, 0xFF, 0x7A, 0x59), 0));
+            cardFill.GradientStops.Add(new GradientStop(Color.FromArgb(0x58, 0xE5, 0x48, 0x8D), 0.6));
+            cardFill.GradientStops.Add(new GradientStop(Color.FromArgb(0x40, 0x7A, 0x5C, 0xF5), 1));
+            cardFill.Freeze();
+            dc.DrawRoundedRectangle(cardFill, null, card, H * 0.035, H * 0.035);
+            dc.DrawRoundedRectangle(Solid(0xFFFFFF, 0xE0), null, new Rect(card.Left + W * 0.03, card.Bottom - H * 0.115, W * 0.17, H * 0.032), H * 0.016, H * 0.016);
+            dc.DrawRoundedRectangle(Solid(0xFFFFFF, 0x80), null, new Rect(card.Left + W * 0.03, card.Bottom - H * 0.065, W * 0.28, H * 0.02), H * 0.01, H * 0.01);
+            // the row of apps: landscape icons, each in its own colour
+            int[] hues = { 0xE5484D, 0x3A8DDE, 0x2FB67C, 0xF0A23A, 0x8A5CF5, 0x20C4D6, 0xF063A4 };
+            double iw = W * 0.105, ih = H * 0.215, gap = (rw - 7 * iw) / 6, iy = s.Top + H * 0.58;
+            for (int i = 0; i < 7; i++)
+            {
+                var ic = new Rect(L0 + i * (iw + gap), iy, iw, ih);
+                if (i == 0) ic.Inflate(iw * 0.07, ih * 0.07);
+                var g = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = new Point(ic.Left, ic.Top), EndPoint = new Point(ic.Right, ic.Bottom) };
+                var hc = C(hues[i]);
+                g.GradientStops.Add(new GradientStop(Color.FromRgb((byte)Math.Min(255, hc.R + 40), (byte)Math.Min(255, hc.G + 40), (byte)Math.Min(255, hc.B + 40)), 0));
+                g.GradientStops.Add(new GradientStop(hc, 1));
+                g.Freeze();
+                if (i == 0)
+                {
+                    // the focus: a soft halo, a white edge
+                    var halo = ic; halo.Inflate(iw * 0.05, ih * 0.06);
+                    dc.DrawRoundedRectangle(Solid(0xFFFFFF, 0x30), null, halo, H * 0.03, H * 0.03);
+                    dc.DrawRoundedRectangle(g, new Pen(Solid(0xFFFFFF, 0xF0), Math.Max(0.8, H * 0.008)), ic, H * 0.024, H * 0.024);
+                }
+                else dc.DrawRoundedRectangle(g, null, ic, H * 0.024, H * 0.024);
+                // a mark on the icon: a pale disc, as an app's own art
+                dc.DrawEllipse(Solid(0xFFFFFF, 0x66), null, new Point(ic.Left + ic.Width / 2, ic.Top + ic.Height / 2), ih * 0.22, ih * 0.22);
+            }
+            // the focused app's name, under it
+            dc.DrawRoundedRectangle(Solid(0xFFFFFF, 0xC8), null, new Rect(L0 + iw * 0.15, iy + ih * 1.18, iw * 0.7, H * 0.018), H * 0.009, H * 0.009);
+            // the next row, cut off at the screen's edge
+            double ry = s.Top + H * 0.90;
+            for (int i = 0; i < 7; i++)
+                dc.DrawRoundedRectangle(Solid(0xFFFFFF, 0x26), null, new Rect(L0 + i * (iw + gap), ry, iw, ih), H * 0.024, H * 0.024);
         }
 
         // --- the headset ----------------------------------------------------------------------------------
@@ -470,7 +653,7 @@ namespace ASoftware.Views
             if (installing)
             {
                 dc.DrawRectangle(Black, null, s);
-                double bw = s.Width * (kind == Kind.Watch ? 0.5 : 0.42), bh = Math.Max(2, s.Width * 0.018);
+                double bw = s.Width * (kind == Kind.Watch ? 0.5 : kind == Kind.Tv ? 0.28 : 0.42), bh = Math.Max(2, s.Width * (kind == Kind.Tv ? 0.011 : 0.018));
                 var bar = new Rect(s.Left + (s.Width - bw) / 2, s.Top + (s.Height - bh) / 2, bw, bh);
                 dc.DrawRoundedRectangle(BarTrack, null, bar, bh / 2, bh / 2);
                 var done = new Rect(bar.Left, bar.Top, bw * Math.Min(1, Progress / 100), bh);
@@ -483,6 +666,7 @@ namespace ASoftware.Views
             }
             else if (Shot != null) dc.DrawRectangle(ShotBrush(s), null, s);
             else if (kind == Kind.Watch) Rings(dc, s);
+            else if (kind == Kind.Tv) TvHome(dc, s);
             else HomeScreen(dc, s, kind);
             if (Present && !Awake && !installing) dc.DrawRectangle(Scrim, null, s);
             if (Present || installing)

@@ -46,8 +46,9 @@ namespace ASoftware.Views
             get => phone;
             set { if (Math.Abs(phone - value) < 0.5) return; phone = value; Raise(nameof(DeviceHeight)); Raise(nameof(DeviceRow)); }
         }
-        /// <summary>The watch with its band stands at 0.85 of a phone, the headset at 0.555 (about 214 px wide).</summary>
-        public double DeviceHeight => Math.Round(Os == "watch" ? phone * 0.85 : Os == "vision" ? phone * 0.555 : phone);
+        /// <summary>The watch with its band stands at 0.85 of a phone, the headset at 0.555 (about 214 px wide), the TV with
+        /// its remote at 0.5 (about 226 px wide).</summary>
+        public double DeviceHeight => Math.Round(Os == "watch" ? phone * 0.85 : Os == "vision" ? phone * 0.555 : Os == "tv" ? phone * 0.5 : phone);
         /// <summary>The devices' row: a phone's height and room for its lift.</summary>
         public GridLength DeviceRow => new GridLength(Math.Round(phone) + 8);
         public ICommand PrimaryCmd { get; }
@@ -154,7 +155,8 @@ namespace ASoftware.Views
                     case "loading": StateText = L.T("Loading a save…", "Kayıt yükleniyor…"); Tone("Warn"); Busy = true; break;
                     default: StateText = L.T("Running", "Çalışıyor") + (run.Ours ? " · " + L.Duration(uptime.TotalSeconds) : ""); Tone("Good"); break;
                 }
-                Line1 = $"{run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB · " + (run.Disk == "" ? L.T("throwaway disk", "atılan disk") : L.T("keeps changes", "değişiklikleri saklar"));
+                Line1 = (Os == "tv" && Guests.ShapeParts(run.Shape).TryGetValue("res", out var runRes) ? Guests.ResolutionLabel(runRes) + " · " : "")
+                        + $"{run.Smp} vCPU · {run.RamMiB / 1024.0:0.#} GB · " + (run.Disk == "" ? L.T("throwaway disk", "atılan disk") : L.T("keeps changes", "değişiklikleri saklar"));
                 Line2 = run.Ours ? "" : L.T("Started outside the launcher (pid ", "Başlatıcı dışında açıldı (pid ") + run.QemuPid + ")";
                 // visionOS's window stays dark for minutes when it boots (a CPU in software): the card says it has not hung
                 if (Os == "vision" && run.Ours && !run.Resumed && uptime.TotalMinutes < 8 && run.Busy == "")
@@ -211,6 +213,10 @@ namespace ASoftware.Views
                           : Os == "ios26" ? L.T("About 1.5–2.5 h · 11 GB from Apple · 23 GB of disk; a Vulkan GPU", "Yaklaşık 1,5–2,5 sa · Apple'dan 11 GB · 23 GB disk; Vulkan GPU")
                           // (visionOS, as the watch, needs only the base it shares with iOS 26: made here when none is there;
                           // the figures are Setup-ASoftware.ps1's own, from its visionOS question and its menu's entry)
+                          // (tvOS likewise: Setup-ASoftware.ps1's tvOS question and menu entry; Apple's OTA is 4.97 GB, the base
+                          // adds what iOS 26 shares)
+                          : Os == "tv" ? (Guests.HasBase(Os) ? L.T("About 1.5 h · 5 GB from Apple · 13 GB of disk", "Yaklaşık 1,5 sa · Apple'dan 5 GB · 13 GB disk")
+                                                             : L.T("About 1.5 h · 6 GB from Apple; no\u00a0iOS 26 needed", "Yaklaşık 1,5 sa · Apple'dan 6 GB; iOS 26 gerekmez"))
                           : Os == "vision" ? (Guests.HasBase(Os) ? L.T("About 2 h · 17.7 GB from Apple · 21 GB of disk", "Yaklaşık 2 sa · Apple'dan 17,7 GB · 21 GB disk")
                                                                  : L.T("About 2 h · 19 GB from Apple; no\u00a0iOS 26 needed", "Yaklaşık 2 sa · Apple'dan 19 GB; iOS 26 gerekmez"))
                           // (the watch needs only the base it shares with iOS 26: made here when neither is there)
@@ -225,7 +231,7 @@ namespace ASoftware.Views
             if (Test == "saved") Quick = new Guests.Snap { Name = Guests.QuickName, When = DateTime.Now.AddHours(-2) };
             else if (Test == "ready") Quick = null;
             bool keep = c.DiskMode != "throwaway";
-            Line1 = $"{c.Smp} vCPU · {Guests.Ram(Os) / 1024.0:0.#} GB · " + (keep ? L.T("keeps changes", "değişiklikleri saklar") : L.T("throwaway disk", "atılan disk"));
+            Line1 = (Os == "tv" ? Guests.ResolutionLabel(Guests.Resolution()) + " · " : "") + $"{c.Smp} vCPU · {Guests.Ram(Os) / 1024.0:0.#} GB · " + (keep ? L.T("keeps changes", "değişiklikleri saklar") : L.T("throwaway disk", "atılan disk"));
             // a save no start has resumed yet, made with the settings it has now (else the start boots afresh with them,
             // and the save becomes the way back: Machines.Start)
             bool saves = Guests.HasQuickSave(Os);

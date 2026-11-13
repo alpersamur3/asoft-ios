@@ -44,7 +44,7 @@ namespace ASoftware.Views
 
         static IEnumerable<(string value, string label)> Areas() => new[]
         {
-            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"), ("vision", "visionOS"),
+            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"), ("vision", "visionOS"), ("tv", "tvOS"),
             ("install", L.T("Install", "Kurulum")), ("phone", L.T("Phone", "Telefon")), ("launcher", L.T("Launcher", "Başlatıcı"))
         };
 
