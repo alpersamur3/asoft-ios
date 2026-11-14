@@ -12,7 +12,11 @@ namespace ASoftware.Engine
     /// <summary>What the launcher knows of each OS: its scripts, folders, ports and disks, as the scripts lay them out.</summary>
     public static class Guests
     {
-        public static readonly string[] Ids = { "ios16", "ios26", "watch", "vision", "tv" };
+        /// <summary>Is tvOS in this package? Only when its installer (tvos\Install-tvOS.ps1) is there next to the launcher's
+        /// scripts: a package made with Make-Release.ps1 -NoTvOS has none, and then tvOS does not exist for the launcher (no
+        /// card, page, install choice or text). The one place that decides it.</summary>
+        public static readonly bool HasTv = File.Exists(Path.Combine(AppPaths.Root, "tvos", "Install-tvOS.ps1"));
+        public static readonly string[] Ids = HasTv ? new[] { "ios16", "ios26", "watch", "vision", "tv" } : new[] { "ios16", "ios26", "watch", "vision" };
         /// <summary>The systems the phone app runs (visionOS and tvOS are PC only).</summary>
         public static readonly string[] PhoneIds = { "ios16", "ios26", "watch" };
 

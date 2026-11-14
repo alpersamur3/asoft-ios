@@ -12,7 +12,13 @@ namespace ASoftware.Views
             new FrameworkPropertyMetadata(270.0, FrameworkPropertyMetadataOptions.AffectsMeasure | FrameworkPropertyMetadataOptions.AffectsArrange));
         public double ItemWidth { get => (double)GetValue(ItemWidthProperty); set => SetValue(ItemWidthProperty, value); }
 
-        int Columns(double width) => double.IsInfinity(width) ? Math.Max(1, InternalChildren.Count) : Math.Max(1, (int)Math.Floor(width / ItemWidth));
+        int Columns(double width)
+        {
+            if (double.IsInfinity(width)) return Math.Max(1, InternalChildren.Count);
+            int cols = Math.Max(1, (int)Math.Floor(width / ItemWidth));
+            // four systems (no tvOS in the package) as two over two, not three over one
+            return InternalChildren.Count == 4 && cols == 3 ? 2 : cols;
+        }
 
         protected override Size MeasureOverride(Size available)
         {

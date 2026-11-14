@@ -223,7 +223,11 @@ if ($free -lt $needed + 1) {
 
 Step '1/6 App files'
 if ($src.Path -ne $Dir) {
-    Show "copy ASoftware.exe, Start-iOS.cmd, Start-watchOS.cmd, Start-visionOS.cmd, Start-tvOS.cmd, Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, visionos, tvos, installer, the helper VM and the newest kernel -> $Dir"
+    # (tvOS's launcher and folder are named only when the package has them: Make-Release.ps1 -NoTvOS leaves them out)
+    $hasTv = Test-Path -LiteralPath "$($src.Path)\tvos\Install-tvOS.ps1" -PathType Leaf
+    $tvCmd = if ($hasTv) { ' Start-tvOS.cmd,' } else { '' }
+    $tvDir = if ($hasTv) { ' tvos,' } else { '' }
+    Show "copy ASoftware.exe, Start-iOS.cmd, Start-watchOS.cmd, Start-visionOS.cmd,$tvCmd Install-ASoftware.cmd, LICENSE, README.md, scripts, tools, assets, ios26, watchos, visionos,$tvDir installer, the helper VM and the newest kernel -> $Dir"
     if (-not $DryRun) {
         # ASoftware.exe: the launcher (install, start, settings), in the release package's root
         foreach ($item in 'ASoftware.exe', 'Start-iOS.cmd', 'Start-watchOS.cmd', 'Start-visionOS.cmd', 'Start-tvOS.cmd', 'Install-ASoftware.cmd', 'LICENSE', 'README.md') {

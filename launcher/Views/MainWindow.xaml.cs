@@ -28,7 +28,7 @@ namespace ASoftware.Views
         {
             InitializeComponent();
             // the line-up's order: the newest iPhone first
-            foreach (var os in new[] { "ios26", "ios16", "watch", "vision", "tv" }) cards.Add(new OsCardVm(os, this));
+            foreach (var os in new[] { "ios26", "ios16", "watch", "vision", "tv" }.Where(o => Guests.Ids.Contains(o))) cards.Add(new OsCardVm(os, this));
             TestRuns();
             Cards.ItemsSource = cards;
             foreach (var c in cards) c.Refresh();

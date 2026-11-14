@@ -61,7 +61,7 @@ namespace ASoftware.Engine
             {
                 a.Add("-Watch"); a.Add(c.Watch ? "yes" : "no");
                 a.Add("-Vision"); a.Add(c.Vision ? "yes" : "no");
-                a.Add("-Tv"); a.Add(c.Tv ? "yes" : "no");
+                if (Guests.HasTv) { a.Add("-Tv"); a.Add(c.Tv ? "yes" : "no"); }
                 a.Add("-Linux"); a.Add(c.Linux);
             }
             a.Add("-Dir"); a.Add(Runner.Q(c.Dir));

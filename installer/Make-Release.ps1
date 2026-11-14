@@ -14,7 +14,11 @@ param(
     [switch]$NoVision,
     # a package whose QEMU has no TV window (usb-consumer tv-remote, qemu-sptm asoft-tv), made on purpose: tvOS then
     # starts in the plain window (Install-tvOS.ps1 asks for the TV window but does not need it)
-    [switch]$NoTv
+    [switch]$NoTv,
+    # a package without tvOS (its installer has never run end to end): no tvos\, no Start-tvOS.cmd, no tvOS entry in
+    # asoft-setup.json, no tvOS paragraph in README.md or line in SOURCES.md, and no tv-remote probe of the QEMU (that
+    # probe exists only for tvOS). The launcher and Setup-ASoftware.ps1 then see no tvos\Install-tvOS.ps1 and hide tvOS
+    [switch]$NoTvOS
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot\..").Path
@@ -48,7 +52,7 @@ if ($lacks) {
 }
 # tvOS's window (a drawn TV with its Siri Remote): usb-consumer's tv-remote option, from the asoft-tv commits of
 # qemu-sptm (usb-consumer tv-remote, gtk TV window); the one QEMU runs every guest, so it is the package's QEMU
-if ((Qemu-Probe "$QemuDist\qemu-system-aarch64.exe" @('-device', 'usb-consumer,help')) -cnotmatch '\btv-remote=') {
+if (-not $NoTvOS -and (Qemu-Probe "$QemuDist\qemu-system-aarch64.exe" @('-device', 'usb-consumer,help')) -cnotmatch '\btv-remote=') {
     $whyTv = "$QemuDist's QEMU has no usb-consumer tv-remote (the TV window of qemu-sptm asoft-tv): tvOS would start in the plain window"
     if (-not $NoTv) { throw "$whyTv. Give a build that has it with -QemuDist (D:\asoft-vision\dist-tv), or -NoTv to make such a package on purpose" }
     Write-Warning "$whyTv (-NoTv)"
@@ -63,12 +67,32 @@ if (git -C $repo status --porcelain) { throw 'commit first: the package takes th
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
 if (-not (Test-Path $tar)) { throw "no $tar (Windows 10 1803 or later has it)" }
 
-git -C $repo archive --format=tar -o "$Out\src.tar" HEAD Start-iOS.cmd Start-watchOS.cmd Start-visionOS.cmd Start-tvOS.cmd Install-ASoftware.cmd Send-ToPhone.cmd LICENSE README.md scripts tools assets installer ios26 watchos visionos tvos
+$pack = @('Start-iOS.cmd', 'Start-watchOS.cmd', 'Start-visionOS.cmd', 'Start-tvOS.cmd', 'Install-ASoftware.cmd', 'Send-ToPhone.cmd', 'LICENSE', 'README.md', 'scripts', 'tools', 'assets', 'installer', 'ios26', 'watchos', 'visionos', 'tvos')
+# (-NoTvOS: what exists only for tvOS stays in the repository and out of the package)
+if ($NoTvOS) { $pack = @($pack | Where-Object { $_ -cne 'Start-tvOS.cmd' -and $_ -cne 'tvos' }) }
+git -C $repo archive --format=tar -o "$Out\src.tar" HEAD @pack
 if ($LASTEXITCODE) { throw "git archive failed ($LASTEXITCODE)" }
 & $tar -x -f "$Out\src.tar" -C $stage
 if ($LASTEXITCODE) { throw "tar could not unpack the repository's files into $stage ($LASTEXITCODE)" }
 Remove-Item "$Out\src.tar"
 if (-not (Test-Path "$stage\Install-ASoftware.cmd")) { throw "the repository's files did not reach $stage" }
+if ($NoTvOS) {
+    # asoft-setup.json without its os.tvos entry (the last one of os: the comma before it goes too), README.md without the
+    # paragraph between its tvos markers; the launcher and Setup-ASoftware.ps1 hide tvOS by tvos\Install-tvOS.ps1's absence
+    $utf8 = New-Object Text.UTF8Encoding $false
+    $jsonFile = "$stage\installer\asoft-setup.json"
+    $json = [IO.File]::ReadAllText($jsonFile)
+    $json2 = [regex]::Replace($json, '(?s),\r?\n    "tvos": \{.*?\r?\n    \}(?=\r?\n  \}\r?\n\})', '')
+    if ($json2 -ceq $json) { throw 'asoft-setup.json: no os.tvos entry (last under os) to leave out' }
+    try { $null = $json2 | ConvertFrom-Json } catch { throw "asoft-setup.json is not valid without its tvOS entry: $_" }
+    [IO.File]::WriteAllText($jsonFile, $json2, $utf8)
+    $readmeFile = "$stage\README.md"
+    $readme = [IO.File]::ReadAllText($readmeFile)
+    $readme2 = [regex]::Replace($readme, '(?s)<!-- tvos:begin[^\r\n]*-->\r?\n.*?<!-- tvos:end -->\r?\n(\r?\n)?', '')
+    if ($readme2 -ceq $readme) { throw 'README.md: no tvos:begin/tvos:end markers to leave out' }
+    [IO.File]::WriteAllText($readmeFile, $readme2, $utf8)
+    if ((Test-Path "$stage\tvos") -or (Test-Path "$stage\Start-tvOS.cmd")) { throw '-NoTvOS: tvos\ or Start-tvOS.cmd reached the package' }
+}
 # ASoftware.exe, the launcher (install, start, settings), stamped with this version (its update check
 # compares it with the releases), in the package's root: Install-ASoftware.ps1 copies it into -Dir
 & (Join-Path $repo 'launcher\Build-Launcher.ps1') -Version $Version -Out $stage
@@ -103,7 +127,7 @@ if (-not $qemuBuild) { $qemuBuild = 'see its --version' }
 - ``installer\helper\out``: Linux 6.12.114 (GPL v2, installer/helper/kernel.config) and an
   initramfs of Ubuntu 24.04 arm64 packages (sources at https://launchpad.net/ubuntu), apfs-fuse
   (GPL v2, https://github.com/sgan81/apfs-fuse) and our scripts and asoftinstalld (MIT).
-"@ | Set-Content -Encoding UTF8 "$stage\SOURCES.md"
+"@ | ForEach-Object { if ($NoTvOS) { [regex]::Replace($_, '(?ms)^- `tvos\\`:.*?(?=^- `)', '') } else { $_ } } | Set-Content -Encoding UTF8 "$stage\SOURCES.md"
 
 $zip = Join-Path $Out "$name-win64.zip"
 if (Test-Path $zip) { Remove-Item $zip }

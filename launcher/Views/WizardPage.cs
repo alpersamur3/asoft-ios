@@ -260,7 +260,7 @@ namespace ASoftware.Views
                     if (v && Guests.Installed("ios26")) FromIos26Install();
                 });
             // (Setup-ASoftware.ps1's own figures: its tvOS question with a base, its menu's entry without; Apple's OTA is 4.97 GB)
-            ct = OsChoice("tv", choice.Tv, L.T("Apple TV 4K on a drawn TV with its Siri Remote: Home and Settings, drawn by your PC's GPU at 1080p or 4K; the keyboard is the remote. A research preview, not a usable Apple TV: About shows Activation failed, Search and the Apple TV app say they are not available, keys answer slowly, and saves are untested. Needs only the base it shares with iOS 26.",
+            ct = !Guests.HasTv ? null : OsChoice("tv", choice.Tv, L.T("Apple TV 4K on a drawn TV with its Siri Remote: Home and Settings, drawn by your PC's GPU at 1080p or 4K; the keyboard is the remote. A research preview, not a usable Apple TV: About shows Activation failed, Search and the Apple TV app say they are not available, keys answer slowly, and saves are untested. Needs only the base it shares with iOS 26.",
                                                "Çizilmiş bir TV'de Siri Remote'lu Apple TV 4K: Home ve Ayarlar PC'nizin GPU'suyla 1080p ya da 4K çizilir; klavye kumandadır. Araştırma önizlemesi, kullanılabilir bir Apple TV değil: Hakkında'da Activation failed yazar, Search ve Apple TV uygulaması kullanılamıyor der, tuşlar geç yanıt verir, kayıtlar sınanmadı. iOS 26'nın yalnız ortak tabanını ister."),
                 Guests.HasBase("tv") ? L.T("about 1.5 h · 5 GB download · WSL", "yaklaşık 1,5 sa · 5 GB indirme · WSL")
                                      : L.T("about 1.5 h · 6 GB download · WSL", "yaklaşık 1,5 sa · 6 GB indirme · WSL"), v =>
@@ -268,7 +268,7 @@ namespace ASoftware.Views
                     choice.Tv = v;
                     if (v && Guests.Installed("ios26")) FromIos26Install();
                 });
-            cards.Children.Add(c16); cards.Children.Add(c26); cards.Children.Add(cw); cards.Children.Add(cv); cards.Children.Add(ct);
+            cards.Children.Add(c16); cards.Children.Add(c26); cards.Children.Add(cw); cards.Children.Add(cv); if (ct != null) cards.Children.Add(ct);
             p.Children.Add(cards);
             if (Guests.Installed("ios26"))
                 p.Children.Add(Ui.Text(L.T("iOS 26 is installed: choosing it again checks it and goes on with what is not done.", "iOS 26 kurulu: yeniden seçmek onu denetler ve bitmeyenlerle devam eder."), "Faint", 12));
@@ -339,7 +339,8 @@ namespace ASoftware.Views
                         if (f != null) { choice.GpuDriver = f; choice.GpuMode = "gpu"; }
                         Build();
                     }));
-                p.Children.Add(Radio("gpu", L.T("None (GPU-less)", "Yok (GPU'suz)"), L.T("iOS draws on the CPU: it works, slower; watchOS, visionOS and tvOS need a driver.", "iOS CPU'da çizer: çalışır, daha yavaş; watchOS, visionOS ve tvOS sürücü ister."),
+                p.Children.Add(Radio("gpu", L.T("None (GPU-less)", "Yok (GPU'suz)"), Guests.HasTv ? L.T("iOS draws on the CPU: it works, slower; watchOS, visionOS and tvOS need a driver.", "iOS CPU'da çizer: çalışır, daha yavaş; watchOS, visionOS ve tvOS sürücü ister.")
+                                                                                        : L.T("iOS draws on the CPU: it works, slower; watchOS and visionOS need a driver.", "iOS CPU'da çizer: çalışır, daha yavaş; watchOS ve visionOS sürücü ister."),
                     choice.GpuMode == "gpuless", () => choice.GpuMode = "gpuless", !onBase));
             }
 
