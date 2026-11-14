@@ -69,5 +69,48 @@ try {
     Check 'signature changes with a new frame' ((Get-GuestSignature @{ Dir = $tmp; Proc = $null }) -cne $s1) 'True'
 } finally { Remove-Item $tmp -Recurse -Force }
 
+# a lost GPU: the four lines that show it, and lines that do not
+Check 'gpu loss: Vulkan device was lost' (Find-GpuLoss "a`nreims-vgpu: fatal: platform call commandBuffer: the Vulkan runtime refused it: the Vulkan device was lost`nb") 'reims-vgpu: fatal: platform call commandBuffer: the Vulkan runtime refused it: the Vulkan device was lost'
+Check 'gpu loss: metal2vulkan line' (Find-GpuLoss 'metal2vulkan: the device was lost, first seen at D:\parity\x.rs:980; no sparse bind') 'metal2vulkan: the device was lost, first seen at D:\parity\x.rs:980; no sparse bind'
+Check 'gpu loss: DeviceLost' ((Find-GpuLoss "reims[error] render: a frame's command buffer failed: the Vulkan runtime's command buffer failed: DeviceLost") -ne $null) 'True'
+Check 'gpu loss: GPU error (15)' (Find-GpuLoss 'vresearch-pvg-reims: frame failed on the GPU: GPU error (15)') 'vresearch-pvg-reims: frame failed on the GPU: GPU error (15)'
+Check 'gpu loss: ordinary frame line' ((Find-GpuLoss "vresearch-pvg-reims: new frame 30976`nframe 29952 shown 1179x2556") -eq $null) 'True'
+Check 'gpu loss: empty string' ((Find-GpuLoss '') -eq $null) 'True'
+Check 'gpu loss: case-sensitive' ((Find-GpuLoss 'THE VULKAN DEVICE WAS LOST') -eq $null) 'True'
+Check 'gpu loss: CRLF line is trimmed' (Find-GpuLoss "x: the Vulkan device was lost`r`ny") 'x: the Vulkan device was lost'
+$msg = New-GpuLossMessage 'LINE-X' 'Intel(R) UHD Graphics 630'
+Check 'message: names the GPU' ($msg.Contains('Intel(R) UHD Graphics 630')) 'True'
+Check 'message: has the log line' ($msg.EndsWith('Log line: LINE-X')) 'True'
+Check 'message: no GPU when unknown' ((New-GpuLossMessage 'L').Contains('GPU:')) 'False'
+Check 'message: says what to do' ((New-GpuLossMessage 'L').Contains('update the graphics driver')) 'True'
+
+# the incremental reader: only what is new, a split line is found once, a shrunken file starts again
+$tmp2 = Join-Path $env:TEMP ('wait-policy-test-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory $tmp2 | Out-Null
+try {
+    $lf = Join-Path $tmp2 'stderr.log'
+    $gd = @{ Dir = $tmp2; Proc = $null }
+    $trk = New-WaitTracker
+    Check 'reader: no file' ((Test-GpuLost $trk $gd) -eq $null) 'True'
+    [IO.File]::WriteAllText($lf, "frame 1 shown`nreims-vgpu: fatal: the Vulkan dev")
+    Check 'reader: half a line is not a hit' ((Test-GpuLost $trk $gd) -eq $null) 'True'
+    [IO.File]::AppendAllText($lf, "ice was lost`nframe 2 shown`n")
+    Check 'reader: the split line is found' (Test-GpuLost $trk $gd) 'reims-vgpu: fatal: the Vulkan device was lost'
+    Check 'reader: not reported twice' ((Test-GpuLost $trk $gd) -eq $null) 'True'
+    [IO.File]::AppendAllText($lf, "frame 3 shown`n")
+    Check 'reader: new ordinary text, no hit' ((Test-GpuLost $trk $gd) -eq $null) 'True'
+    Check 'reader: only the new text' (Read-LogAppended $trk $lf) ''
+    [IO.File]::AppendAllText($lf, "more`n")
+    Check 'reader: returns just the appended text' (Read-LogAppended $trk $lf) "more`n"
+    [IO.File]::WriteAllText($lf, "device: the Vulkan device was lost`n")
+    Check 'reader: a shrunken file restarts at 0' (Test-GpuLost $trk $gd) 'device: the Vulkan device was lost'
+    # a read is capped: 10 bytes at a time, the loss line still arrives
+    $trk2 = New-WaitTracker
+    [IO.File]::WriteAllText($lf, "aaaaaaaaaaaaaaaaaaaa`nbbbb: the Vulkan device was lost`n")
+    $hit = $null
+    for ($i = 0; $i -lt 20 -and -not $hit; $i++) { $hit = Find-GpuLoss (Read-LogAppended $trk2 $lf 10) }
+    Check 'reader: capped reads still find it' $hit 'bbbb: the Vulkan device was lost'
+} finally { Remove-Item $tmp2 -Recurse -Force }
+
 Write-Host "$pass passed, $fail failed"
 exit ([int]($fail -gt 0))

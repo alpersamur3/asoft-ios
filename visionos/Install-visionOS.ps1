@@ -728,6 +728,8 @@ function Do-FirstBoot {
             $tr = New-WaitTracker
             while ($true) {
                 if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                $lost = Test-GpuLost $tr $g
+                if ($lost) { Fail (New-GpuLossMessage $lost) }
                 $min = ((Get-Date) - $t0).TotalMinutes
                 Emit 'pct', 'vision', 'firstboot', ([int][Math]::Min(95, 100 * $min / 8)), 'waiting for the persona manifest'
                 $out = Guest 90 @($test) -NoFail

@@ -795,6 +795,8 @@ function Wait-Ui($g, [int]$minutes) {
     $tr = New-WaitTracker
     while ($true) {
         if (-not (Guest-Alive $g)) { Fail "QEMU ended before iOS's UI was up; see $($g.Dir)" }
+        $lost = Test-GpuLost $tr $g
+        if ($lost) { Fail (New-GpuLossMessage $lost) }
         $n = 0
         $t = Get-Content $log -Raw -ErrorAction SilentlyContinue
         if ($t) { foreach ($m in [regex]::Matches($t, 'frame (\d+) shown')) { $n = [Math]::Max($n, [int]$m.Groups[1].Value) } }
@@ -860,6 +862,8 @@ function Wait-Migration($g) {
     $said = 0
     while ($true) {
         if (-not (Guest-Alive $g)) { Fail "QEMU ended (the window was closed?) before DataMigration was done; run again to redo this step" }
+        $lost = Test-GpuLost $tr $g
+        if ($lost) { Fail (New-GpuLossMessage $lost) }
         $ErrorActionPreference = 'Continue'
         try { $out = & $Py -I -B (Join-Path $Scripts 'guest-shell.py') 4451 60 "cat $plist" 2>&1 | Out-String }
         finally { $ErrorActionPreference = 'Stop' }
@@ -1440,6 +1444,8 @@ function Do-FirstBoot {
             $tr = New-WaitTracker
             while ($true) {
                 if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                $lost = Test-GpuLost $tr $g
+                if ($lost) { Fail (New-GpuLossMessage $lost) }
                 $out = Guest 90 @($test) -NoFail
                 $min = ((Get-Date) - $t0).TotalMinutes
                 # a line of its own: the command (printed as "$ cmd" above it) has the word too
