@@ -42,6 +42,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $repo = Split-Path $here
+. (Join-Path $repo 'ios26\scripts\wait-policy.ps1')
 
 # --- What it reads from Apple, pinned --------------------------------------------------------------
 # Apple's visionOS 27.2 (24N120) restore IPSW for the Vision Pro (N301AP); only these members
@@ -708,23 +709,50 @@ function Do-FirstBoot {
     Need-Space $Space.firstboot
     $g = Start-Vision 'install-firstboot'
     try {
+        # phase 1, required: persona.kb and usersession.kb. Phase 2, best effort: mobileactivationd's data ark in its
+        # system container, which the persona step needs (it fails without it; pc-issue 10: the manifest was there at
+        # 16:55, no container at 16:56): a few more minutes for it, and a warning, not a failure, if it does not come
+        # (the persona step checks the container offline). The containers' metadata is closed to the guest's shell
+        # (Operation not permitted), the ark is not. Coreutils and bash only (the guest has no grep); no double quotes
+        # (Windows PowerShell 5.1 passes them to python unescaped)
         $test = 'test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && echo __READY__ || echo __WAIT__'
-        Say 'waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (up to 30 min; about 6 on our PC)'
+        $arkTest = 'ls /private/var/containers/Data/System/*/Library/internal/data_ark.plist > /dev/null 2>&1 && echo __READY__ || echo __WAIT__'
+        # a slow PC is let be while the boot works (ios26\scripts\wait-policy.ps1): 30 min of nothing new or 120 in all end phase 1
+        $stall = 30; $ceiling = 120; $arkMin = 15
+        Say "waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (about 6 min on our PC; gives up after $stall min of nothing new or $ceiling min), then up to $arkMin min for mobileactivationd's data ark"
         if ($DryRun) {
             $null = Guest 90 @($test)
+            $null = Guest 90 @($arkTest)
         } else {
             $t0 = Get-Date
+            $tr = New-WaitTracker
             while ($true) {
                 if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
                 $min = ((Get-Date) - $t0).TotalMinutes
                 Emit 'pct', 'vision', 'firstboot', ([int][Math]::Min(95, 100 * $min / 8)), 'waiting for the persona manifest'
                 $out = Guest 90 @($test) -NoFail
+                $min = ((Get-Date) - $t0).TotalMinutes
                 # a line of its own: the command (printed as "$ cmd" above it) has the word too
-                if (@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count) { break }
-                if ($min -gt 30) { Fail "no persona.kb after 30 min; see $($g.Dir)\serial.log" }
+                $ready = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
+                $v = Step-Wait $tr $min $ready (Get-GuestSignature $g) $stall $ceiling
+                if ($v -ceq 'done') { break }
+                if ($v -ceq 'stalled') { Fail ("no persona.kb or usersession.kb, and the boot did nothing new for $stall min (after {0:N0} min); see $($g.Dir)\serial.log" -f $min) }
+                if ($v -ceq 'ceiling') { Fail ("no persona.kb or usersession.kb after {0:N0} min; see $($g.Dir)\serial.log" -f $min) }
                 Start-Sleep -Seconds 30
             }
             Say ("there after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes)
+            # phase 2, best effort: no Fail from here (a QEMU that is gone is one)
+            $t1 = Get-Date
+            while ($true) {
+                if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                Emit 'pct', 'vision', 'firstboot', 95, 'waiting for the data ark'
+                $out = Guest 90 @($arkTest) -NoFail
+                $found = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
+                $v = Step-BestEffort ((Get-Date) - $t1).TotalMinutes $found $arkMin
+                if ($v -ceq 'found') { Say ("the data ark after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes); break }
+                if ($v -ceq 'giveup') { Say "no data ark after $arkMin more min; going on, the persona step checks the container" Yellow; break }
+                Start-Sleep -Seconds 30
+            }
             Start-Sleep -Seconds 30
         }
         if (-not (Stop-Vision $g)) { Fail 'the guest did not answer sync; run again to redo the first boot' }
