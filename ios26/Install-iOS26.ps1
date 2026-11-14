@@ -771,11 +771,11 @@ function Guest-Alive($g) { $g.Proc -and -not $g.Proc.HasExited }
 function Guest([int]$wait, [string[]]$cmds, [switch]$NoFail) {
     Py 'guest-shell.py' (@('4451', "$wait") + $cmds) -NoFail:$NoFail
 }
-# How much slower this PC is than ours, from its first boot (Do-FirstBoot writes installirstboot.sec: the
+# How much slower this PC is than ours, from its first boot (Do-FirstBoot writes install\firstboot.sec: the
 # step's seconds, 106 on ours, $Ref26 in Setup-ASoftware.ps1); 1 when there is none
 $FirstBootRefSec = 106
 function Get-BootFactor {
-    $f = In-Work 'installirstboot.sec'
+    $f = In-Work 'install\firstboot.sec'
     $sec = 0.0
     if (-not $DryRun -and (Test-Path $f) -and [double]::TryParse((Get-Content $f -TotalCount 1), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$sec)) {
         return (Get-SpeedFactor $sec $FirstBootRefSec)
@@ -850,7 +850,7 @@ function Wait-Migration($g) {
     $est = [int][Math]::Ceiling($ref * $factor)
     $stall = 30
     $ceiling = Get-WaitCeiling 300 $est
-    $how = if ($factor -gt 1) { ("this PC booted {0:N1} times slower than ours" -f $factor) } elseif (Test-Path (In-Work 'installirstboot.sec')) { 'not slower than ours' } else { 'its first boot was not timed' }
+    $how = if ($factor -gt 1) { ("this PC booted {0:N1} times slower than ours" -f $factor) } elseif (Test-Path (In-Work 'install\firstboot.sec')) { 'not slower than ours' } else { 'its first boot was not timed' }
     Say "waiting for DataMigration to finish: LastSystemVersion in $plist"
     Say "$ref min on our PC, about $est here ($how); it goes on while the boot works, gives up after $stall min of nothing new or $([int]$ceiling) min in all"
     Say "the bar under the Apple logo can sit still that long, and the screen goes dark after the lock screen: leave the window open"
