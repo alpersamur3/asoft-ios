@@ -53,7 +53,8 @@ not been run end to end yet. See [`visionos/`](visionos/README.md).
 Siri Remote beside it, at 1080p or 4K, on the same GPU path; the keyboard is the remote. What does not work: About shows
 Activation: Failed, Search and the Apple TV app say they are not available, a key can take 3 to 20 seconds to show, and
 saves have not been tested. It needs only the base it shares with iOS 26, and WSL. Its installer has not been run end
-to end yet. See [`tvos/`](tvos/README.md).
+to end yet, so it is not in the release package: it is here for a checkout of this repository only
+(`tvos\Install-tvOS.cmd`). See [`tvos/`](tvos/README.md).
 <!-- tvos:end -->
 
 **`ASoftware.exe`** is the launcher: it installs, starts and closes each system, holds its settings and
