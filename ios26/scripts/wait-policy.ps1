@@ -44,3 +44,11 @@ function Get-GuestSignature($g, [string]$extra = '') {
     if ($g.Proc) { try { $g.Proc.Refresh(); $cpu = [int][Math]::Floor($g.Proc.TotalProcessorTime.TotalMinutes) } catch { } }
     "f$frame|l$len|c$cpu|$extra"
 }
+
+# A wait that is only a courtesy (the data ark after the first boot's required files): 'found', 'wait', or
+# 'giveup' once $limit minutes have passed since it began. Found wins over the limit.
+function Step-BestEffort([double]$minSinceStart, [bool]$found, [double]$limit) {
+    if ($found) { return 'found' }
+    if ($minSinceStart -ge $limit) { return 'giveup' }
+    'wait'
+}

@@ -1415,23 +1415,26 @@ function Do-Tweaks {
 
 function Do-FirstBoot {
     # 4.5: boot once, so usermanagerd writes the persona manifest and the user session (persona.kb,
-    # usersession.kb) the persona step completes, and mobileactivationd makes its system container (the
-    # persona step seeds its data ark there; root26-prefs.py only warns when it is not there, so this step
-    # waits for it). HFS+ lets it write them only when they are new.
+    # usersession.kb) the persona step completes. Required: those two files. Then, best effort, a few more
+    # minutes for mobileactivationd's data ark (its system container, which the persona step seeds; root26-prefs.py
+    # only warns without it): not measured on this guest, so its absence does not fail the step.
+    # HFS+ lets it write them only when they are new.
     # -NoAod: this disk has no libMobileGestalt patch yet (the apps step's)
     $t00 = Get-Date
     $g = Start-Guest 'install-firstboot' @('-Disk', 'root26g.qcow2', '-Tc', 'root26.tc', '-NoAod')
     try {
+        $test = 'test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && echo __READY__ || echo __WAIT__'
         # the data ark in mobileactivationd's container: the containers' metadata is closed to the guest's
         # shell (Operation not permitted), the ark is not. Coreutils and bash only (the guest has no grep); no
         # double quotes (Windows PowerShell 5.1 passes them to python unescaped)
-        $test = ('test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && ' +
-                 'ls /private/var/containers/Data/System/*/Library/internal/data_ark.plist > /dev/null 2>&1 && echo __READY__ || echo __WAIT__')
-        # about 2 min on our PC; a slow one is let be while the boot works (Wait-policy), 30 min of nothing new or 120 in all end it
-        $stall = 30; $ceiling = 120
-        Say "waiting for /private/var/keybags/persona.kb, usersession.kb and mobileactivationd's data ark in the guest (about 2 min on our PC; gives up after $stall min of nothing new or $ceiling min)"
+        $arkTest = 'ls /private/var/containers/Data/System/*/Library/internal/data_ark.plist > /dev/null 2>&1 && echo __READY__ || echo __WAIT__'
+        # phase 1: about 2 min on our PC; a slow one is let be while the boot works (wait-policy.ps1): 30 min of
+        # nothing new or 120 in all end it
+        $stall = 30; $ceiling = 120; $arkMin = 15
+        Say "waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (about 2 min on our PC; gives up after $stall min of nothing new or $ceiling min), then up to $arkMin min for mobileactivationd's data ark"
         if ($DryRun) {
             $null = Guest 90 @($test)
+            $null = Guest 90 @($arkTest)
         } else {
             $t0 = Get-Date
             $tr = New-WaitTracker
@@ -1443,18 +1446,29 @@ function Do-FirstBoot {
                 $ready = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
                 $v = Step-Wait $tr $min $ready (Get-GuestSignature $g) $stall $ceiling
                 if ($v -ceq 'done') { break }
-                if ($v -ceq 'stalled') { Fail ("no persona.kb, usersession.kb or data ark, and the boot did nothing new for $stall min (after {0:N0} min); see $($g.Dir)\serial.log" -f $min) }
-                if ($v -ceq 'ceiling') { Fail ("no persona.kb, usersession.kb or data ark after {0:N0} min; see $($g.Dir)\serial.log" -f $min) }
+                if ($v -ceq 'stalled') { Fail ("no persona.kb or usersession.kb, and the boot did nothing new for $stall min (after {0:N0} min); see $($g.Dir)\serial.log" -f $min) }
+                if ($v -ceq 'ceiling') { Fail ("no persona.kb or usersession.kb after {0:N0} min; see $($g.Dir)\serial.log" -f $min) }
                 Start-Sleep -Seconds 30
             }
             Say ("there after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes)
+            # phase 2, best effort: no Fail from here (a QEMU that is gone is one)
+            $t1 = Get-Date
+            while ($true) {
+                if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                $out = Guest 90 @($arkTest) -NoFail
+                $found = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
+                $v = Step-BestEffort ((Get-Date) - $t1).TotalMinutes $found $arkMin
+                if ($v -ceq 'found') { Say ("the data ark after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes); break }
+                if ($v -ceq 'giveup') { Say "no data ark after $arkMin more min; going on, the persona step checks the container" Yellow; break }
+                Start-Sleep -Seconds 30
+            }
             Start-Sleep -Seconds 30
         }
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo the first boot' }
         # how long this PC took, for the wallpaper step's estimate (Get-BootFactor)
         if (-not $DryRun) {
             New-Item -ItemType Directory -Force (In-Work 'install') | Out-Null
-            Set-Content -Path (In-Work 'installirstboot.sec') -Value ([int]((Get-Date) - $t00).TotalSeconds) -Encoding ASCII
+            Set-Content -Path (In-Work 'install\firstboot.sec') -Value ([int]((Get-Date) - $t00).TotalSeconds) -Encoding ASCII
         }
     } catch { Boot-Failed $g; throw }
 }

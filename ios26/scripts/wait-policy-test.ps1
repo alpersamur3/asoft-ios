@@ -50,6 +50,12 @@ Check 'factor: no reference' (Get-SpeedFactor 300 0) '1'
 Check 'ceiling floor' (Get-WaitCeiling 300 33) '300'
 Check 'ceiling 3x estimate' (Get-WaitCeiling 300 150) '450'
 
+# the best-effort wait (the data ark): found wins, gives up at the limit
+Check 'best effort: found at 3' (Step-BestEffort 3 $true 15) 'found'
+Check 'best effort: waiting at 14.5' (Step-BestEffort 14.5 $false 15) 'wait'
+Check 'best effort: gives up at 15' (Step-BestEffort 15 $false 15) 'giveup'
+Check 'best effort: found at the limit' (Step-BestEffort 15 $true 15) 'found'
+
 # the guest signature with no files and no process: stable
 $g = @{ Dir = (Join-Path $env:TEMP 'wait-policy-test-nodir'); Proc = $null }
 Check 'signature of nothing' (Get-GuestSignature $g) 'f0|l0|c0|'
