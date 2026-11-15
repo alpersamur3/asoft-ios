@@ -1,5 +1,5 @@
 # Sourced by the disk scripts (mk-root26.sh, mk-root26g.sh, root26-do.sh, m2-finish.sh, mk-rootx.sh,
-# mk-rootw.sh): settling an HFS+ volume with fsck.hfsplus, and nbd devices that are really free.
+# mk-rootw.sh, mk-roott.sh): settling an HFS+ volume with fsck.hfsplus, and nbd devices that are really free.
 
 # hfs_settle DEV [ROUNDS]: repair DEV (unmounted) until a read-only check is clean, one log line per
 # round. Linux's hfsplus writes past the journal, so a first pass finds work; but one -y pass has
