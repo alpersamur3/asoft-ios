@@ -375,18 +375,21 @@ function Do-Check {
     }
     # the scripts tvOS's steps run, in tvos\scripts (WSL reads them there; bash wants LF): this version's iOS 26
     # scripts (root26-do.sh, mktc.py, root26-prefs.py, ...), the watch's shared-cache tools, visionOS's kernel
-    # patcher, then tvOS's
+    # patcher, the LZFSE decoder of tools\ (the OTA's device tree is stored compressed), then tvOS's
     $dst = In-Tv 'scripts'
     $watchDir = Join-Path $repo 'watchos\scripts'
     $visionDir = Join-Path $repo 'visionos\scripts'
     $dirs = @((Join-Path $repo 'ios26\scripts'), $watchDir, $visionDir, (Join-Path $here 'scripts'))
     foreach ($d in $dirs) { if (-not (Test-Path $d)) { Stop-Here "no $d (this installer comes with ios26\, watchos\, visionos\ and tvos\ beside each other)" } }
-    Show-Cmd "copy ios26\scripts, watchos\scripts\{dscforce,dscfind}.py, visionos\scripts\kc-vision.py, tvos\scripts -> $dst (.sh with LF)"
+    $lzfse = Join-Path $repo 'tools\lzfse.py'
+    if (-not (Test-Path -LiteralPath $lzfse -PathType Leaf)) { Stop-Here "no $lzfse (this installer comes with tools\ beside tvos\)" }
+    Show-Cmd "copy ios26\scripts, watchos\scripts\{dscforce,dscfind}.py, visionos\scripts\kc-vision.py, tools\lzfse.py, tvos\scripts -> $dst (.sh with LF)"
     if (-not $DryRun) {
         New-Item -ItemType Directory -Force $dst, (In-Tv 'ota'), (In-Tv 'build'), (In-Work 'install\logs') | Out-Null
         $files = @(Get-ChildItem (Join-Path $repo 'ios26\scripts') -File) +
                  @('dscforce.py', 'dscfind.py' | ForEach-Object { Get-Item (Join-Path $watchDir $_) }) +
                  @(Get-Item (Join-Path $visionDir 'kc-vision.py')) +
+                 @(Get-Item -LiteralPath $lzfse) +
                  @(Get-ChildItem (Join-Path $here 'scripts') -File)
         foreach ($f in $files) {
             $to = Join-Path $dst $f.Name
