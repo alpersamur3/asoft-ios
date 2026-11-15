@@ -15,7 +15,7 @@ param(
     # a package whose QEMU has no TV window (usb-consumer tv-remote, qemu-sptm asoft-tv), made on purpose: tvOS then
     # starts in the plain window (Install-tvOS.ps1 asks for the TV window but does not need it)
     [switch]$NoTv,
-    # a package without tvOS (its installer has never run end to end): no tvos\, no Start-tvOS.cmd, no tvOS entry in
+    # a package without tvOS, made on purpose: no tvos\, no Start-tvOS.cmd, no tvOS entry in
     # asoft-setup.json, no tvOS paragraph in README.md or line in SOURCES.md, and no tv-remote probe of the QEMU (that
     # probe exists only for tvOS). The launcher and Setup-ASoftware.ps1 then see no tvos\Install-tvOS.ps1 and hide tvOS
     [switch]$NoTvOS
