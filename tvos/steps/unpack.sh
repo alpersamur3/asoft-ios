@@ -45,13 +45,16 @@ python3 -I $S/vsig.py $M "$W/ota/{TC}" $S "$META/vsig.json"
 python3 -I - "$META/vsig.json" <<'EOF'
 import json, sys
 r = json.load(open(sys.argv[1]))
-bad = r['bad_pages'] + r.get('malformed', [])
+# (universal files with slices that are not Mach-O: Metal libraries are expected, anything else is not)
+other = r.get('other_slices', [])
+bad = r['bad_pages'] + r.get('malformed', []) + [o for o in other if not o[0].endswith('.metallib')]
 if bad:
     sys.exit(f'{len(bad)} files whose code does not match their signature, first {bad[:3]}')
 if len(r['not_in_tc']) > {NOTINTC}:
     sys.exit(f"{len(r['not_in_tc'])} signed files not in the OS trust cache (measured: {NOTINTC}), first {r['not_in_tc'][:5]}")
 print(f"signatures: {r['macho']} Mach-O and {r['dsc']} shared cache files, every page matches; "
-      f"{r['in_tc']} in the OS trust cache, {len(r['not_in_tc'])} not (kexts)")
+      f"{r['in_tc']} in the OS trust cache, {len(r['not_in_tc'])} not (kexts); "
+      f"{len(other)} universal Metal libraries hold no code")
 EOF
 sync
 tv_umount

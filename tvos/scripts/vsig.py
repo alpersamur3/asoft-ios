@@ -62,16 +62,17 @@ def check_cd(fh, base, cd):
 
 
 def macho_slices(fh, size):
+    """The file's Mach-O slices as (offset, size), or None, and how many slices of a universal file are not Mach-O."""
     fh.seek(0)
     head = fh.read(8)
     if len(head) < 8:
-        return None
+        return None, 0
     m_be = struct.unpack('>I', head[:4])[0]
     m_le = struct.unpack('<I', head[:4])[0]
     if m_be in (0xcafebabe, 0xcafebabf):
         n = struct.unpack('>I', head[4:8])[0]
         if n == 0 or n > 30:
-            return None  # Java class files share 0xcafebabe
+            return None, 0  # Java class files share 0xcafebabe
         out = []
         fh.seek(8)
         for _ in range(n):
@@ -80,10 +81,19 @@ def macho_slices(fh, size):
             else:
                 ct, st, off, sz, al, _r = struct.unpack('>iiQQII', fh.read(32))
             out.append((off, sz))
-        return out
+        # a universal file's slices need not be Mach-O: a .metallib built for several GPU families is a universal
+        # container of raw Metal archives (MTLB), with no load commands, no code and no signature (tvOS 27.2 has
+        # three: CoreImage.metallib, QuartzCore's default.metallib, DesignLibrary's SiriWaveArchive.metallib)
+        code = []
+        for off, sz in out:
+            fh.seek(off)
+            m = fh.read(4)
+            if len(m) == 4 and struct.unpack('<I', m)[0] in (0xfeedfacf, 0xfeedface):
+                code.append((off, sz))
+        return (code or None), len(out) - len(code)
     if m_le in (0xfeedfacf, 0xfeedface):
-        return [(0, size)]
-    return None
+        return [(0, size)], 0
+    return None, 0
 
 
 def sig_of_slice(fh, off):
@@ -140,7 +150,9 @@ for dp, dns, fns in os.walk(root):
         seen_inodes.add(st.st_ino)
         with open(p, 'rb') as fh:
             is_dsc = False
-            sl = macho_slices(fh, st.st_size)
+            sl, other = macho_slices(fh, st.st_size)
+            if other:
+                res.setdefault('other_slices', []).append([rel, other])
             sigs = []
             if sl is not None:
                 try:
