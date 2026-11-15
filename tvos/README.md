@@ -49,7 +49,7 @@ root's image.
 | firmware | the kernel: visionOS's (`kc-vision.py`, the cloudOS 26.4b research kernel with iOS 27's patches, the IOGPU timeouts and the sandbox syscall filters off; SHA-256 pinned); `dt-tv.py`: J255's identity on the 4, 6 and 8 CPU trees (`dtree-t`, `-t6`, `-t8`: 4K, display scale 2, artwork 3840 @2x), and `dt-res.py` their 1080p siblings (`dtree-t-1080`, `-t6-1080`, `-t8-1080`: display scale 1, artwork 1080 @1x) |
 | gpu | the GPU driver (`work\gpu-driver`), retargeted to tvOS, signed, into `tvos\gpu` (kept) |
 | rootfs | `mk-roott.sh`: the partitioned HFS+ root (`roott.qcow2`, root 16 GB and Data 8 GB) copied from the unpacked root; the image is removed then |
-| patches | `roott-patch.sh` on a new overlay, `roott-p.qcow2`: launchd jobs, keybag, the shared-cache patches (IOMobileFramebuffer, libxpc, and QuartzCore's display-mode scale: `dsc-qcscale.py`, below), the GPU driver, prefs (screen saver and idle screen off) |
+| patches | `roott-patch.sh` on a new overlay, `roott-p.qcow2`: launchd jobs (`roott-jobs.py`; `roott-churn.py` takes out DumpPanic, which crashes every two minutes here), keybag, the shared-cache patches (IOMobileFramebuffer, libxpc, and QuartzCore's display-mode scale: `dsc-qcscale.py`, below), the GPU driver, prefs (screen saver and idle screen off) |
 | trustcache | `roott.tc`: Apple's trust cache + the signed sysroot, the patched shared-cache files (their CDHashes computed by the patches step) and the GPU driver |
 | firstboot | boots once on `roott-b.qcow2` until usermanagerd has written the persona manifest and mobileactivationd its container |
 | persona | the persona manifest, MobileGestalt, the activation record, tvOS's prefs |

@@ -5,6 +5,7 @@
 # TVOS.md):
 #  - root26-tweaks.py: com.asoft.bash on the serial console, _PanicOnCrash renamed, containers
 #  - roott-jobs.py: backboardd without _Conclave (PineBoard has none in 24K122)
+#  - roott-churn.py: DumpPanic out of launchd.plist (it crashes every two minutes here, as on iOS 26 and visionOS)
 #  - the system keybag, as ios26's tweaks step makes it
 #  - libsystem_darwin's lockdown-mode block: absent in tvOS 27.2 (0 hits, checked: another build that has it
 #    stops here, as it would need watchOS's patch)
@@ -23,6 +24,7 @@ mkdir -p "$P"
 
 python3 -I $S/root26-tweaks.py $R
 python3 -I $S/roott-jobs.py $R
+python3 -I $S/roott-churn.py $R on
 install -d -m 0700 -o 0 -g 0 $R/private/var/keybags
 printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
 	'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
