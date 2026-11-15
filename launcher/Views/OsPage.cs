@@ -38,13 +38,13 @@ namespace ASoftware.Views
 
         public void Retext() => Build();
 
-        /// <summary>The page's tabs: Saves only for a system with saves (Guests.HasQuickSave), Apps not for visionOS
+        /// <summary>The page's tabs: Saves only for a system with saves (Guests.HasQuickSave), Apps not for visionOS or tvOS
         /// (no .ipa install there, and nothing planned to say about one).</summary>
         IEnumerable<(string id, string label)> Tabs()
         {
             yield return ("settings", L.K("Settings"));
             if (Guests.HasQuickSave(os)) yield return ("saves", L.K("Saves"));
-            if (os != "vision") yield return ("apps", L.K("Apps"));
+            if (os != "vision" && os != "tv") yield return ("apps", L.K("Apps"));
             yield return ("logs", L.K("Logs"));
         }
 
@@ -52,7 +52,7 @@ namespace ASoftware.Views
         {
             body = new ContentControl();
             // (the headset is wide: at a phone's height it would push the title away)
-            device = new DeviceArt { Os = os, Height = os == "vision" ? 96 : 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 24, 0) };
+            device = new DeviceArt { Os = os, Height = os == "vision" ? 96 : os == "tv" ? 84 : 150, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(6, 0, 24, 0) };
             stateDot = Ui.Dot("Idle");
             stateDot.Margin = new Thickness(0, 1, 8, 0);
             stateText = new TextBlock { FontSize = 13, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap };
@@ -235,6 +235,16 @@ namespace ASoftware.Views
                 p.Children.Add(Ui.Note("Info", L.T("A research preview on an emulated CPU, so it is slow. A start from cold takes about 5 to 7 minutes to Home on 8 vCPUs, and its window stays dark for about 4.5 of them: it has not hung. A start after the window was closed goes on from there in about 15 seconds.",
                                                    "Öykünülen bir işlemcide çalışan bir araştırma önizlemesi, bu yüzden yavaş. Soğuk açılış 8 vCPU ile Home'a yaklaşık 5–7 dakika sürer ve pencere bunun yaklaşık 4,5 dakikasında karanlık kalır: donmuş değildir. Pencere kapatıldıktan sonraki açılış yaklaşık 15 saniyede kaldığı yerden sürer.")));
 
+            // tvOS: a research preview, with what does not work said first, then the speed (Start-tvOS.ps1's measurements;
+            // TVOS.md: Activation failed, Search and Apple TV unavailable, 3-19 s from a key to the picture, saves never tried)
+            if (os == "tv")
+            {
+                p.Children.Add(Ui.Note("Warn", L.T("A research preview, not a usable Apple TV. It reaches Home and Settings. What does not work: About shows Activation failed; Search and the Apple TV app say they are not available; a key can take 3 to 20 seconds to show on screen; saves (Save and close, Go back) have not been tested.",
+                                                   "Bir araştırma önizlemesi, kullanılabilir bir Apple TV değil. Home ve Ayarlar'a varır. Çalışmayanlar: Hakkında'da Activation failed yazar; Search ve Apple TV uygulaması kullanılamıyor der; bir tuşun ekrana yansıması 3–20 saniye sürebilir; kayıtlar (Kaydet ve kapat, Geri dön) sınanmadı.")));
+                p.Children.Add(Ui.Note("Info", L.T("On an emulated CPU a start from cold reaches Home in about a minute at 1080p (about 65 to 95 seconds at 4K). The keyboard is the remote.",
+                                                   "Öykünülen bir işlemcide soğuk açılış 1080p'de yaklaşık bir dakikada Home'a varır (4K'da yaklaşık 65–95 saniye). Klavye kumandadır.")));
+            }
+
             // the guest
             var cpus = Ui.Seg(Guests.CpuChoices(os).Select(n => (n, n.ToString())), c.Smp, v => { c.Smp = v; Changed(); });
             // iOS 16, iOS 26, watchOS: 8 vCPUs untested with the TLBI filter (iOS 16's since 2026-11-04, -M virt; iOS 26's
@@ -243,6 +253,7 @@ namespace ASoftware.Views
             // (notes/WIN-LAUNCHER.md)
             var cpuDesc = os == "ios16" ? L.T("Experimental: 4 booted faster in an older measurement, when every broadcast TLB flush stopped all vCPUs. A TLB filter has cut those stops since and 8 has not been measured again: it may be slower or faster.",
                                               "Deneysel: eski bir ölçümde 4 daha hızlı açılıyordu; o zaman her TLB temizliği tüm vCPU'ları durduruyordu. Sonradan gelen TLB süzgeci bu durdurmaları azalttı ve 8 yeniden ölçülmedi: daha yavaş da olabilir, daha hızlı da.")
+                        : os == "tv" ? L.T("4 is the start script's default and the count it was measured with; 6 and 8 have device trees but are not measured on tvOS. A save goes on only with the vCPUs it was made with.", "4 başlatma betiğinin varsayılanı ve ölçüldüğü sayı; 6 ve 8'in aygıt ağaçları var ama tvOS'ta ölçülmedi. Bir kayıt yalnız alındığı vCPU sayısıyla sürer.")
                         : os == "vision" ? L.T("8 is the start script's default; the boot times on this page are for 8. A save goes on only with the vCPUs it was made with.", "Başlatma betiğinin varsayılanı 8; bu sayfadaki açılış süreleri 8 içindir. Bir kayıt yalnız alındığı vCPU sayısıyla sürer.")
                         : L.T("Experimental: 8 may be slower than 4, or faster. Every broadcast TLB flush used to stop all vCPUs; the TLB filter that cuts this is new and not measured yet.",
                               "Deneysel: 8, 4'ten daha yavaş da olabilir daha hızlı da. Eskiden her TLB temizliği tüm vCPU'ları durduruyordu; bunu azaltan TLB süzgeci yeni ve henüz ölçülmedi.");
@@ -262,6 +273,7 @@ namespace ASoftware.Views
             {
                 ram = Ui.Text($"{Guests.DefaultRam(os) / 1024.0:0.#} GB", "H3");
                 ramDesc = os == "vision" ? L.T("Fixed by visionOS's device tree.", "visionOS'un aygıt ağacıyla sabit.")
+                        : os == "tv" ? L.T("Fixed by tvOS's device tree.", "tvOS'un aygıt ağacıyla sabit.")
                                          : L.T("Fixed by iOS 16's device tree.", "iOS 16'nın aygıt ağacıyla sabit.");
             }
             var mem = Native.Memory();
@@ -284,6 +296,8 @@ namespace ASoftware.Views
                 v => { c.DiskMode = v; quick.IsEnabled = v != "throwaway"; Changed(); });
             var diskDesc = os == "watch"
                 ? L.T("Keep: what the watch writes stays in watchos\\watch.qcow2. Throwaway: a temporary disk.", "Sakla: saatin yazdıkları watchos\\watch.qcow2'de kalır. Atılan: geçici bir disk.")
+                : os == "tv"
+                ? L.T("Keep: what tvOS writes stays in tvos\\tv.qcow2. Throwaway: a temporary disk.", "Sakla: tvOS'un yazdıkları tvos\\tv.qcow2'de kalır. Atılan: geçici bir disk.")
                 : os == "vision" && Guests.HasSoundDisk()
                 ? L.T("Keep: what visionOS writes stays in visionos\\vision-silent.qcow2 (with sound, visionos\\vision.qcow2). Throwaway: a temporary disk.", "Sakla: visionOS'un yazdıkları visionos\\vision-silent.qcow2'de kalır (sesle visionos\\vision.qcow2). Atılan: geçici bir disk.")
                 : os == "vision"
@@ -301,7 +315,23 @@ namespace ASoftware.Views
                 Ui.Row(L.K("Network"), os == "ios26" ? L.T("QEMU's user network (NAT): Safari, the App Store's pages.", "QEMU'nun kullanıcı ağı (NAT): Safari, App Store sayfaları.")
                                                      : L.T("QEMU's user network (NAT).", "QEMU'nun kullanıcı ağı (NAT)."), Ui.Switch(c.Net, v => { c.Net = v; Changed(); }))
             };
-            if (os == "vision")
+            if (os == "tv")
+            {
+                // one disk, two modes: each with its own device trees and frame buffer (Start-tvOS.ps1 -Resolution). A save loads
+                // only at the resolution it was made at, so a change boots afresh and the save stays as the way back.
+                rows.Add(Ui.Row(L.T("Resolution", "Çözünürlük"),
+                    L.T("The TV's picture: 1080p is the default (Home about a minute after a cold start, about 4 GB of memory); 4K draws four times the pixels (a little slower, about 5 GB). The same disk runs both. A save opens only at the resolution it was made at: after a change the next start boots afresh, and the save stays as a way back.",
+                        "TV'nin resmi: 1080p varsayılan (soğuk açılıştan yaklaşık bir dakika sonra Home, yaklaşık 4 GB bellek); 4K dört kat piksel çizer (biraz daha yavaş, yaklaşık 5 GB). İkisini de aynı disk çalıştırır. Bir kayıt yalnız alındığı çözünürlükte açılır: değişiklikten sonra sonraki açılış baştan başlar, kayıt geri dönüş noktası olarak kalır."),
+                    Ui.Seg(new[] { ("1080", "1080p"), ("2160", "4K") }, Guests.Resolution(), v => { c.Resolution = v; Changed(); })));
+                rows.Add(Ui.Row(L.T("The drawn TV", "Çizilmiş TV"),
+                    L.T("The window draws a TV with a Siri Remote beside the picture; off, the picture alone, as large as the window lets it be. F9 switches it in the window. (Needs the TV window of our QEMU build; an older one shows a plain window.)",
+                        "Pencere resmin yanına Siri Remote'lu bir TV çizer; kapalıyken yalnız resim, pencerenin izin verdiği kadar büyük. Pencerede F9 ile değişir. (QEMU derlememizin TV penceresini ister; eskisi düz pencere gösterir.)"),
+                    Ui.Switch(c.Frame, v => { c.Frame = v; Changed(); })));
+                var tg = LauncherConfig.Current.Ios26.HostGpu;
+                rows.Add(Ui.Row(L.T("The PC's GPU", "PC'nin GPU'su"), L.T("tvOS draws on the one chosen in iOS 26's settings.", "tvOS, iOS 26 ayarlarında seçilende çizer."),
+                    Ui.Text(tg == "integrated" ? L.T("Integrated", "Tümleşik") : tg == "discrete" ? L.T("Graphics card", "Ekran kartı") : L.T("Auto", "Otomatik"), "H3")));
+            }
+            else if (os == "vision")
             {
                 rows.Add(Ui.Row(L.T("The drawn headset", "Çizilmiş Vision Pro"),
                     L.T("The window draws an Apple Vision Pro around the picture; off, the picture alone, as large as the window lets it be. F9 switches it in the window.",
@@ -328,7 +358,8 @@ namespace ASoftware.Views
             p.Children.Add(Ui.Group(L.T("Window and system", "Pencere ve sistem"), rows.ToArray()));
 
             if (os == "vision") p.Children.Add(VisionKeys());
-            if (os != "watch" && os != "vision") p.Children.Add(TimeGroup(c));
+            if (os == "tv") p.Children.Add(TvKeys());
+            if (os != "watch" && os != "vision" && os != "tv") p.Children.Add(TimeGroup(c));
             if (os == "ios26") p.Children.Add(GpuGroup(c));
             p.Children.Add(FolderGroup(c));
             body.Content = p;
@@ -346,6 +377,17 @@ namespace ASoftware.Views
                 L.T("F1 Digital Crown (hold: recentre), F2 top button, F3 / F4 volume down / up.", "F1 Digital Crown (basılı tutunca görüşü ortalar), F2 üst düğme, F3 / F4 sesi kısar / açar."), null),
             Ui.Row(L.T("The window", "Pencere"),
                 L.T("F9 the drawn headset on or off, F11 full screen, F12 shows the keys you press.", "F9 çizilmiş Vision Pro'yu açar / kapatır, F11 tam ekran, F12 bastığınız tuşları gösterir."), null));
+
+        /// <summary>tvOS's window, in short: the keyboard is the Siri Remote (Start-tvOS.ps1's list; the TV window of the
+        /// asoft-tv QEMU also lets the remote's parts be clicked).</summary>
+        static UIElement TvKeys() => Ui.Group(L.T("In its window", "Penceresinde"),
+            Ui.Row(L.T("Move and select", "Gezinmek ve seçmek"),
+                L.T("The arrow keys move the focus, Return selects, Esc goes back (the remote's Menu).", "Ok tuşları odağı taşır, Return seçer, Esc geri gider (kumandanın Menu'sü)."), null),
+            Ui.Row(L.T("Buttons", "Düğmeler"),
+                L.T("F1 the TV button, F2 power, F3 / F4 volume down / up, F5 Play/Pause, F6 Mute, F7 Siri. In the drawn TV the remote's parts can be clicked too.",
+                    "F1 TV düğmesi, F2 güç, F3 / F4 sesi kısar / açar, F5 Oynat/Duraklat, F6 Sessiz, F7 Siri. Çizilmiş TV'de kumandanın parçalarına tıklanabilir de."), null),
+            Ui.Row(L.T("The window", "Pencere"),
+                L.T("F9 the drawn TV on or off, F11 full screen.", "F9 çizilmiş TV'yi açar / kapatır, F11 tam ekran."), null));
 
         UIElement TimeGroup(OsConfig c)
         {
@@ -470,6 +512,7 @@ namespace ASoftware.Views
                     // (the watch follows iOS 26's folder when it had none: its picture was of another disk too)
                     if (os == "ios26" && LauncherConfig.Current.Watch.Work == "") { LauncherConfig.Current.Watch.Work = f; Thumbs.Drop("watch"); }
                     if (os == "ios26" && LauncherConfig.Current.Vision.Work == "") { LauncherConfig.Current.Vision.Work = f; Thumbs.Drop("vision"); }
+                    if (os == "ios26" && LauncherConfig.Current.Tv.Work == "") { LauncherConfig.Current.Tv.Work = f; Thumbs.Drop("tv"); }
                     // another install's disk: the screen of the one before does not stand for it
                     if (!string.Equals(was, f, StringComparison.OrdinalIgnoreCase)) Thumbs.Drop(os);
                     Changed(); ShowSettings();

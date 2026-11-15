@@ -14,6 +14,8 @@
 # used as they are, without qemu-img and qemu-nbd.
 set -eu
 ROOT=$1 OUT=$2 DSIZE=${3:-16G}
+S=$(cd "$(dirname "$0")" && pwd)
+. "$S/hfs-settle.sh"
 NBD=${NBD:-/dev/nbd12} NBD2=${NBD2:-/dev/nbd13}
 R=/tmp/r26 D=/tmp/d26
 [ -b "$ROOT" ] && NBD=$ROOT
@@ -21,7 +23,7 @@ R=/tmp/r26 D=/tmp/d26
 for n in $NBD $NBD2; do
 	[ "$n" = "$ROOT" ] || [ "$n" = "$OUT" ] && continue
 	case $n in /dev/nbd1[2-9]|/dev/nbd[2-9][0-9]) ;; *) echo "use /dev/nbd12 or higher"; exit 1;; esac
-	[[ ! -s /sys/block/${n#/dev/}/pid ]] || { echo "$n is in use"; exit 1; }
+	nbd_wait_free $n 30 || { echo "$n is in use"; exit 1; }
 done
 [ "$NBD2" = "$OUT" ] || [ ! -e "$OUT" ] || { echo "$OUT exists"; exit 1; }
 modprobe nbd max_part=0 2> /dev/null || true
@@ -30,8 +32,8 @@ L1= L2=
 cleanup() {
 	for m in $D $R; do mountpoint -q $m && umount $m; done
 	for l in $L1 $L2; do losetup -d $l; done
-	[ "$NBD" = "$ROOT" ] || qemu-nbd -d $NBD > /dev/null
-	[ "$NBD2" = "$OUT" ] || qemu-nbd -d $NBD2 > /dev/null
+	[ "$NBD" = "$ROOT" ] || nbd_detach $NBD
+	[ "$NBD2" = "$OUT" ] || nbd_detach $NBD2
 }
 trap cleanup EXIT
 if [ "$NBD" != "$ROOT" ]; then
@@ -54,7 +56,7 @@ echo "copying $((RBYTES >> 20)) MiB"
 dd if=$NBD of=$NBD2 bs=4M seek=$((START * 512)) oflag=seek_bytes conv=sparse,notrunc status=none
 L1=$(losetup -f --show -o $((START * 512)) --sizelimit $RBYTES $NBD2)
 L2=$(losetup -f --show -o $(( (START + P1) * 512 )) --sizelimit $DBYTES $NBD2)
-fsck.hfsplus -f -y $L1 | tail -1 || true
+hfs_settle $L1 || echo "$L1: not settled before the copy; the final check decides"
 mkfs.hfsplus -s -J -v Data $L2 > /dev/null
 mkdir -p $R $D
 mount -t hfsplus -o force $L1 $R

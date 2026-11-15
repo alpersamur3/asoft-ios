@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -44,9 +45,9 @@ namespace ASoftware.Views
 
         static IEnumerable<(string value, string label)> Areas() => new[]
         {
-            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"), ("vision", "visionOS"),
+            ("ios16", "iOS 16"), ("ios26", "iOS 26"), ("watch", "watchOS"), ("vision", "visionOS"), ("tv", "tvOS"),
             ("install", L.T("Install", "Kurulum")), ("phone", L.T("Phone", "Telefon")), ("launcher", L.T("Launcher", "Başlatıcı"))
-        };
+        }.Where(a => a.Item1 != "tv" || Guests.HasTv);
 
         static string AreaName(string a) { foreach (var x in Areas()) if (x.value == a) return x.label; return a; }
 

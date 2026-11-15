@@ -48,6 +48,16 @@ with iOS 26, and WSL. It is slow (about 5 minutes to Home on a cold start, about
 save) and silent for now: sound needs a plug-in that is not published yet. Its installer is new and has
 not been run end to end yet. See [`visionos/`](visionos/README.md).
 
+<!-- tvos:begin (Make-Release.ps1 -NoTvOS leaves this paragraph out of the package's README) -->
+**tvOS 27.2** (research preview, not a usable Apple TV): the Apple TV 4K's Home and Settings in a window drawn as a TV with its
+Siri Remote beside it, at 1080p or 4K, on the same GPU path; the keyboard is the remote. What does not work: About shows
+Activation: Failed, Search and the Apple TV app say they are not available, a key can take 3 to 20 seconds to show, and
+saves have not been tested. It needs only the base it shares with iOS 26, and WSL: iOS 26 itself does not have to be
+installed. It is in the release package and the launcher (`Install-ASoftware.cmd -Version tvos`, which makes that base
+when it is not there). Its installer ran to its end on our PC with Apple's files already downloaded and decrypted; its
+download and decrypt steps have not been run from the package. See [`tvos/`](tvos/README.md).
+<!-- tvos:end -->
+
 **`ASoftware.exe`** is the launcher: it installs, starts and closes each system, holds its settings and
 saves, sends iOS to an Android phone ([ASoftware iOS for Android](https://github.com/alpersamur3/asoft-ios-android))
 and packs a problem report. The `.cmd` scripts below still work without it. One QEMU build runs all four

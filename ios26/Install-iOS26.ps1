@@ -40,6 +40,9 @@
 #                    not the release's download
 #     -BakeMinutes N how long the wallpaper boot leaves iOS running once it is up (6)
 #     -KeepBuildFiles  keep the decrypted images and the intermediate disk (about 32 GB)
+#     -KeepSystemAppMigrator  leave iOS's SystemAppMigrator plugin in the disk (and copy the staged
+#                    system apps): DataMigration then runs it, ~33 min of waiting, as before (also
+#                    ASOFT_KEEP_SYSTEMAPPMIGRATOR=1); for comparing times
 # Folders, saved in the menu's config (%LOCALAPPDATA%\ASoftware iOS 26\ios26.config.json):
 #   -Work (ASOFT26)      Apple's files, the disks and the runs; a drive-letter path without
 #                        spaces. Default: the config's, else <fixed drive with most room>:\ios26.
@@ -68,12 +71,14 @@ param(
     [ValidateRange(1, 120)][int]$BakeMinutes = 6,
     [switch]$Base,
     [switch]$KeepBuildFiles,
+    [switch]$KeepSystemAppMigrator,
     [switch]$NoShortcut,
     [ValidateSet('', 'auto', 'wsl', 'helper')][string]$Linux = ''
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $repo = Split-Path $here
+. (Join-Path $here 'scripts\wait-policy.ps1')
 
 # --- What it downloads, pinned (one place) -------------------------------------------------------
 # Our QEMU for Windows as a release package: win-build.sh's dist (qemu-system-aarch64.exe and the
@@ -684,21 +689,30 @@ function Find-NotOwned {
 
 # --- WSL ---------------------------------------------------------------------------------------
 function Get-Wsl {
-    # distro name -> WSL version, from wsl -l -v; Ok is false without WSL
+    # distro name -> WSL version, from wsl -l -v; Ok is false without WSL. WSL with no distro yet is Ok:
+    # there wsl -l -v fails ("no installed distributions") and wsl --status does not. Said keeps what
+    # wsl printed, for the message of a step that stops on it.
     $env:WSL_UTF8 = '1'
     $d = @{}
-    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return @{ Ok = $false; Distros = $d } }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { return @{ Ok = $false; Distros = $d; Said = 'no wsl.exe on the PATH' } }
     $ErrorActionPreference = 'Continue'
-    $out = & wsl.exe -l -v 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() }
-    $ok = ($LASTEXITCODE -eq 0)
+    $out = @(& wsl.exe -l -v 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() } | Where-Object { $_ })
+    $listed = ($LASTEXITCODE -eq 0)
+    $said = "wsl -l -v ($LASTEXITCODE): " + (@($out | Select-Object -First 3) -join ' / ')
+    $ok = $listed
+    if (-not $listed) {
+        $st = @(& wsl.exe --status 2>&1 | ForEach-Object { ("$_" -replace "`0", '').Trim() } | Where-Object { $_ })
+        $ok = ($LASTEXITCODE -eq 0)
+        $said += "; wsl --status ($LASTEXITCODE): " + (@($st | Select-Object -First 3) -join ' / ')
+    }
     $ErrorActionPreference = 'Stop'
-    if ($ok) {
+    if ($listed) {
         foreach ($l in @($out | Select-Object -Skip 1)) {
             $f = @(($l -replace '^\*\s*', '') -split '\s+' | Where-Object { $_ })
             if ($f.Count -ge 3) { $d[$f[0]] = $f[-1] }
         }
     }
-    @{ Ok = $ok; Distros = $d }
+    @{ Ok = $ok; Distros = $d; Said = $said }
 }
 
 # --- Booting iOS for a step (the launcher, as the menu runs it) ----------------------------------
@@ -757,22 +771,44 @@ function Guest-Alive($g) { $g.Proc -and -not $g.Proc.HasExited }
 function Guest([int]$wait, [string[]]$cmds, [switch]$NoFail) {
     Py 'guest-shell.py' (@('4451', "$wait") + $cmds) -NoFail:$NoFail
 }
+# How much slower this PC is than ours, from its first boot (Do-FirstBoot writes install\firstboot.sec: the
+# step's seconds, 106 on ours, $Ref26 in Setup-ASoftware.ps1); 1 when there is none
+$FirstBootRefSec = 106
+function Get-BootFactor {
+    $f = In-Work 'install\firstboot.sec'
+    $sec = 0.0
+    if (-not $DryRun -and (Test-Path $f) -and [double]::TryParse((Get-Content $f -TotalCount 1), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$sec)) {
+        return (Get-SpeedFactor $sec $FirstBootRefSec)
+    }
+    1.0
+}
+# Waits until iOS draws its UI. It goes on while QEMU draws frames, logs or works, gives up after $StallMin
+# minutes of none of them or after $minutes x the speed factor x 2 in all (80 min on our PC's speed)
 function Wait-Ui($g, [int]$minutes) {
     $log = Join-Path $g.Dir 'stderr.log'
-    Say "waiting for iOS's UI: 'frame N shown' with N >= 5 in $log (up to $minutes min)"
+    $factor = Get-BootFactor
+    $ceiling = $minutes * [Math]::Max(2.0, $factor)
+    $stall = 15
+    Say ("waiting for iOS's UI: 'frame N shown' with N >= 5 in $log (it goes on while the boot works; gives up after $stall min of nothing new or {0:N0} min)" -f $ceiling)
     if ($DryRun) { return }
     $t0 = Get-Date
-    while (((Get-Date) - $t0).TotalMinutes -lt $minutes) {
+    $tr = New-WaitTracker
+    while ($true) {
         if (-not (Guest-Alive $g)) { Fail "QEMU ended before iOS's UI was up; see $($g.Dir)" }
+        $lost = Test-GpuLost $tr $g
+        if ($lost) { Fail (New-GpuLossMessage $lost) }
         $n = 0
         $t = Get-Content $log -Raw -ErrorAction SilentlyContinue
         if ($t) { foreach ($m in [regex]::Matches($t, 'frame (\d+) shown')) { $n = [Math]::Max($n, [int]$m.Groups[1].Value) } }
-        if ($n -ge 5) { Write-Progress -Activity 'iOS' -Completed; Say ("UI up after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes); return }
-        Write-Progress -Activity 'iOS' -Status ("starting ({0:N0} min, frame {1})" -f ((Get-Date) - $t0).TotalMinutes, $n)
-        Emit 'pct', 'ios26', $script:StepId, '', ("iOS starting ({0:N0} min)" -f ((Get-Date) - $t0).TotalMinutes)
+        $min = ((Get-Date) - $t0).TotalMinutes
+        $v = Step-Wait $tr $min ($n -ge 5) (Get-GuestSignature $g) $stall $ceiling
+        if ($v -ceq 'done') { Write-Progress -Activity 'iOS' -Completed; Say ("UI up after {0:N0} min" -f $min); return }
+        if ($v -ceq 'stalled') { Fail ("iOS showed no UI and QEMU did nothing new for $stall min (after {0:N0} min); see $($g.Dir)" -f $min) }
+        if ($v -ceq 'ceiling') { Fail ("iOS showed no UI in {0:N0} min; see $($g.Dir)" -f $min) }
+        Write-Progress -Activity 'iOS' -Status ("starting ({0:N0} min, frame {1})" -f $min, $n)
+        Emit 'pct', 'ios26', $script:StepId, '', ("iOS starting ({0:N0} min)" -f $min)
         Start-Sleep -Seconds 10
     }
-    Fail "iOS showed no UI in $minutes minutes; see $($g.Dir)"
 }
 function Wait-Running($g, [int]$seconds, [string]$what) {
     Say "leaving iOS running for $([int]($seconds / 60)) min: $what"
@@ -803,28 +839,51 @@ function Wait-PcTime($g) {
 }
 # DataMigration (root26-staged.py has it run in this boot) puts LastSystemVersion back into
 # com.apple.migration when it is done; a disk stopped before that runs it again at every start from
-# it, under the Apple logo's progress bar (20 min and more)
-function Wait-Migration($g, [int]$minutes) {
+# it, under the Apple logo's progress bar (20 min and more).
+# 33 min on our PC (52 with -KeepSystemAppMigrator), 3 to 5 times that on a slow one: it waits while the
+# boot shows life (frames, log lines, QEMU's CPU time: Get-GuestSignature), gives up after $stall min of
+# none (the guest idle or hung), or at the ceiling, 300 min or 3 times the estimate, and says every 5 min
+# what it waits for. The estimate is our 33 min times how much longer this install's first boot took
+# than ours (Get-BootFactor).
+function Wait-Migration($g) {
     $plist = '/var/mobile/Library/Preferences/com.apple.migration.plist'
-    Say "waiting for DataMigration to finish: LastSystemVersion in $plist (up to $minutes min, about 50 on our PC)"
+    $ref = if (Keep-SystemAppMigrator) { 52 } else { 33 }
+    $factor = Get-BootFactor
+    $est = [int][Math]::Ceiling($ref * $factor)
+    $stall = 30
+    $ceiling = Get-WaitCeiling 300 $est
+    $how = if ($factor -gt 1) { ("this PC booted {0:N1} times slower than ours" -f $factor) } elseif (Test-Path (In-Work 'install\firstboot.sec')) { 'not slower than ours' } else { 'its first boot was not timed' }
+    Say "waiting for DataMigration to finish: LastSystemVersion in $plist"
+    Say "$ref min on our PC, about $est here ($how); it goes on while the boot works, gives up after $stall min of nothing new or $([int]$ceiling) min in all"
     Say "the bar under the Apple logo can sit still that long, and the screen goes dark after the lock screen: leave the window open"
     if ($DryRun) { return }
     $t0 = Get-Date
-    while (((Get-Date) - $t0).TotalMinutes -lt $minutes) {
+    $tr = New-WaitTracker
+    $said = 0
+    while ($true) {
         if (-not (Guest-Alive $g)) { Fail "QEMU ended (the window was closed?) before DataMigration was done; run again to redo this step" }
+        $lost = Test-GpuLost $tr $g
+        if ($lost) { Fail (New-GpuLossMessage $lost) }
         $ErrorActionPreference = 'Continue'
         try { $out = & $Py -I -B (Join-Path $Scripts 'guest-shell.py') 4451 60 "cat $plist" 2>&1 | Out-String }
         finally { $ErrorActionPreference = 'Stop' }
-        if ($out.Contains('LastSystemVersion')) {
+        $min = ((Get-Date) - $t0).TotalMinutes
+        $v = Step-Wait $tr $min ($out.Contains('LastSystemVersion')) (Get-GuestSignature $g) $stall $ceiling
+        if ($v -ceq 'done') {
             Write-Progress -Activity 'iOS' -Completed
-            Say ("DataMigration done after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes)
+            Say ("DataMigration done after {0:N0} min" -f $min)
             return
         }
-        Write-Progress -Activity 'iOS' -Status ("DataMigration ({0:N0} min)" -f ((Get-Date) - $t0).TotalMinutes)
-        Emit 'pct', 'ios26', $script:StepId, '', ("DataMigration ({0:N0} min; about 50 on our PC)" -f ((Get-Date) - $t0).TotalMinutes)
+        if ($v -ceq 'stalled') { Fail ("DataMigration: the boot did nothing new for $stall min (after {0:N0} min; frames, log and QEMU's CPU time stood still); run again to redo this step" -f $min) }
+        if ($v -ceq 'ceiling') { Fail ("DataMigration was not done in {0:N0} min (the most this waits); run again to redo this step" -f $min) }
+        if ($min -ge ($said + 1) * 5) {
+            $said = [int][Math]::Floor($min / 5)
+            Say ("still waiting for DataMigration: {0:N0} min so far, about $est expected here ($ref on our PC); the boot last showed life {1:N0} min ago" -f $min, ($min - $tr.LastChange)) DarkGray
+        }
+        Write-Progress -Activity 'iOS' -Status ("DataMigration ({0:N0} min)" -f $min)
+        Emit 'pct', 'ios26', $script:StepId, '', ("DataMigration ({0:N0} min; about $est expected here, $ref on our PC)" -f $min)
         Start-Sleep -Seconds 30
     }
-    Fail "DataMigration was not done in $minutes minutes; run again to redo this step"
 }
 # sync the guest's disks, then quit QEMU (QMP); a QEMU that does not end is stopped
 function Stop-Guest($g, [switch]$NoSync) {
@@ -1050,13 +1109,15 @@ function Do-Wsl {
     } else {
         $w = Get-Wsl
         if (-not $w.Ok) {
-            Fail 'WSL is not installed: in an administrator PowerShell run "wsl --install --no-distribution", restart Windows, then run this again'
+            Fail ('WSL is not installed: in an administrator PowerShell run "wsl --install --no-distribution", restart Windows, ' +
+                  "then run this again; or run this with -Linux helper, which needs no WSL. What wsl said: $($w.Said)")
         }
         if (-not $w.Distros.ContainsKey($Distro)) {
             $null = Run 'wsl.exe' @('--install', 'Ubuntu-24.04', '--name', $Distro, '--no-launch')
             $w = Get-Wsl
             if (-not $w.Distros.ContainsKey($Distro)) {
-                Fail "WSL did not make the distro $Distro`: run 'wsl --update', or make an Ubuntu 24.04 distro yourself and pass -Distro NAME"
+                Fail ("WSL did not make the distro $Distro`: run 'wsl --update', or make an Ubuntu 24.04 distro yourself and pass -Distro NAME, " +
+                      "or run this with -Linux helper, which needs no WSL. What wsl said: $($w.Said)")
             }
         }
         if ("$($w.Distros[$Distro])" -cne '2') { Fail "$Distro is a WSL $($w.Distros[$Distro]) distro; the build needs WSL 2: wsl --set-version $Distro 2" }
@@ -1358,28 +1419,63 @@ function Do-Tweaks {
 
 function Do-FirstBoot {
     # 4.5: boot once, so usermanagerd writes the persona manifest and the user session (persona.kb,
-    # usersession.kb) the persona step completes. HFS+ lets it write them only when they are new.
+    # usersession.kb) the persona step completes. Required: those two files. Then, best effort, a few more
+    # minutes for mobileactivationd's data ark (its system container, which the persona step seeds; root26-prefs.py
+    # only warns without it): not measured on this guest, so its absence does not fail the step.
+    # HFS+ lets it write them only when they are new.
     # -NoAod: this disk has no libMobileGestalt patch yet (the apps step's)
+    $t00 = Get-Date
     $g = Start-Guest 'install-firstboot' @('-Disk', 'root26g.qcow2', '-Tc', 'root26.tc', '-NoAod')
     try {
         $test = 'test -e /private/var/keybags/persona.kb && test -e /private/var/keybags/usersession.kb && echo __READY__ || echo __WAIT__'
-        Say 'waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (up to 30 min)'
+        # the data ark in mobileactivationd's container: the containers' metadata is closed to the guest's
+        # shell (Operation not permitted), the ark is not. Coreutils and bash only (the guest has no grep); no
+        # double quotes (Windows PowerShell 5.1 passes them to python unescaped)
+        $arkTest = 'ls /private/var/containers/Data/System/*/Library/internal/data_ark.plist > /dev/null 2>&1 && echo __READY__ || echo __WAIT__'
+        # phase 1: about 2 min on our PC; a slow one is let be while the boot works (wait-policy.ps1): 30 min of
+        # nothing new or 120 in all end it
+        $stall = 30; $ceiling = 120; $arkMin = 15
+        Say "waiting for /private/var/keybags/persona.kb and usersession.kb in the guest (about 2 min on our PC; gives up after $stall min of nothing new or $ceiling min), then up to $arkMin min for mobileactivationd's data ark"
         if ($DryRun) {
             $null = Guest 90 @($test)
+            $null = Guest 90 @($arkTest)
         } else {
             $t0 = Get-Date
+            $tr = New-WaitTracker
             while ($true) {
                 if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                $lost = Test-GpuLost $tr $g
+                if ($lost) { Fail (New-GpuLossMessage $lost) }
                 $out = Guest 90 @($test) -NoFail
+                $min = ((Get-Date) - $t0).TotalMinutes
                 # a line of its own: the command (printed as "$ cmd" above it) has the word too
-                if (@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count) { break }
-                if (((Get-Date) - $t0).TotalMinutes -gt 30) { Fail "no persona.kb after 30 min; see $($g.Dir)\serial.log" }
+                $ready = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
+                $v = Step-Wait $tr $min $ready (Get-GuestSignature $g) $stall $ceiling
+                if ($v -ceq 'done') { break }
+                if ($v -ceq 'stalled') { Fail ("no persona.kb or usersession.kb, and the boot did nothing new for $stall min (after {0:N0} min); see $($g.Dir)\serial.log" -f $min) }
+                if ($v -ceq 'ceiling') { Fail ("no persona.kb or usersession.kb after {0:N0} min; see $($g.Dir)\serial.log" -f $min) }
                 Start-Sleep -Seconds 30
             }
             Say ("there after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes)
+            # phase 2, best effort: no Fail from here (a QEMU that is gone is one)
+            $t1 = Get-Date
+            while ($true) {
+                if (-not (Guest-Alive $g)) { Fail "QEMU ended during the first boot; see $($g.Dir)" }
+                $out = Guest 90 @($arkTest) -NoFail
+                $found = [bool](@($out | Where-Object { "$_".Trim() -ceq '__READY__' }).Count)
+                $v = Step-BestEffort ((Get-Date) - $t1).TotalMinutes $found $arkMin
+                if ($v -ceq 'found') { Say ("the data ark after {0:N0} min" -f ((Get-Date) - $t0).TotalMinutes); break }
+                if ($v -ceq 'giveup') { Say "no data ark after $arkMin more min; going on, the persona step checks the container" Yellow; break }
+                Start-Sleep -Seconds 30
+            }
             Start-Sleep -Seconds 30
         }
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo the first boot' }
+        # how long this PC took, for the wallpaper step's estimate (Get-BootFactor)
+        if (-not $DryRun) {
+            New-Item -ItemType Directory -Force (In-Work 'install') | Out-Null
+            Set-Content -Path (In-Work 'install\firstboot.sec') -Value ([int]((Get-Date) - $t00).TotalSeconds) -Encoding ASCII
+        }
     } catch { Boot-Failed $g; throw }
 }
 
@@ -1409,6 +1505,8 @@ function Do-Activation {
     $null = Run-Linux 'activation-put' $body -In @('install/work/mobileactivationd')
 }
 
+function Keep-SystemAppMigrator { $KeepSystemAppMigrator -or $env:ASOFT_KEEP_SYSTEMAPPMIGRATOR -ceq '1' }
+
 function Do-Apps {
     # 5.3.1-5.3.5 and 5.4: the staged system apps, PosterBoard's purgeable-file patch and the side
     # button's (.42), UIKitCore's touch edge patch (.03) and libMobileGestalt's Always On Display
@@ -1416,6 +1514,8 @@ function Do-Apps {
     Need-OsImage
     Need-Space $Space.apps
     $body = Step-Body 'apps-get'
+    # (read by apply-staged.sh and root26-staged.py)
+    if (Keep-SystemAppMigrator) { $body = "export ASOFT_KEEP_SYSTEMAPPMIGRATOR=1`n" + $body }
     $dsc = ($DscFiles | ForEach-Object { '$C/' + $_ }) -join ' '
     # (apply-staged.sh and apply-apps.sh read the staged apps off the OS image)
     $osDisk = @{ ro = "os/$OsImage" }
@@ -1573,7 +1673,7 @@ function Do-Wallpaper {
     try {
         Wait-Ui $g 40
         Wait-PcTime $g
-        Wait-Migration $g 90
+        Wait-Migration $g
         Wait-Running $g ($BakeMinutes * 60) 'PosterBoard writes its poster store'
         if (-not (Stop-Guest $g)) { Fail 'the guest did not answer sync; run again to redo the wallpaper' }
     } catch { Boot-Failed $g; throw }
@@ -1757,7 +1857,8 @@ function Step-Sig([string]$id) {
         'collections' { if (Want-Collections) { return 'on' } else { return 'off' } }
         # aod: the apps step with Always On Display and Auto-Lock Never (an install before it redoes
         # apps and the layers on it)
-        'apps' { return 'aod lock-longpress' }
+        # (no-sam: SystemAppMigrator out of the disk; an install from before redoes apps)
+        'apps' { if (Keep-SystemAppMigrator) { return 'aod lock-longpress' } else { return 'aod lock-longpress no-sam' } }
         # the other -Linux has its own tools
         'linux' { return $LinuxMode }
     }

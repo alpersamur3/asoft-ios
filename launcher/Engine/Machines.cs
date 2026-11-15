@@ -128,6 +128,22 @@ namespace ASoftware.Engine
                     var visionGpu = sp.TryGetValue("gpu", out var vg) ? vg : Guests.HostGpu(os);
                     if (visionGpu == "integrated" || visionGpu == "discrete") a.AddRange(new[] { "-HostGpu", visionGpu });
                     break;
+                case "tv":
+                    // (Start-tvOS.ps1: a device tree per vCPU count and resolution, its RAM the tree's; quick boot on unless
+                    // -NoQuickBoot or -Snapshot. -Resolution is always given, the save's own for one that is resumed: a state
+                    // loads only into the frame buffer it was saved with, and a start that gives another resolution boots
+                    // instead, leaving the save as the way back)
+                    a.AddRange(new[] { "-Cpus", (smp == 6 || smp == 8 ? smp : 4).ToString() });
+                    var tvRes = sp.TryGetValue("res", out var tr) ? tr : (loadState != null && shape != null ? null : Guests.Resolution());
+                    if (tvRes == "1080" || tvRes == "2160") a.AddRange(new[] { "-Resolution", tvRes });
+                    if (!keep) a.Add("-Snapshot");
+                    else if (!c.QuickBoot) a.Add("-NoQuickBoot");
+                    if (!netOn) a.Add("-NoNet");
+                    if (!c.Frame) a.Add("-NoFrame");
+                    // the PC's GPU is iOS 26's setting (one choice for the guests reims-vgpu draws), or the save's
+                    var tvGpu = sp.TryGetValue("gpu", out var tg) ? tg : Guests.HostGpu(os);
+                    if (tvGpu == "integrated" || tvGpu == "discrete") a.AddRange(new[] { "-HostGpu", tvGpu });
+                    break;
                 default:
                     // (Start-watchOS.ps1: quick boot is on unless -NoQuickBoot)
                     a.AddRange(new[] { "-Smp", smp.ToString() });
@@ -187,6 +203,9 @@ namespace ASoftware.Engine
                 if (os != "ios16") ram = g.ram;
                 var m = LauncherConfig.Current.FindSave(disk, loadState);
                 shape = m != null && m.Shape != "" ? m.Shape : Guests.Shape(os, ram, smp);
+                // a tvOS save from before the launcher noted its settings: its resolution is the state's own (the start script
+                // reads it from the disk's start notes), not this setting's
+                if (os == "tv" && (m == null || m.Shape == "")) shape = string.Join(";", shape.Split(';').Where(x => !x.StartsWith("res=", StringComparison.Ordinal)));
                 if (shape != Guests.Shape(os))
                     Say(os, L.T($"Opens the save with {Guests.Hardware(os, shape)}, as it was made; the settings apply at the next start without a save.",
                                 $"Kayıt alındığı gibi {Guests.Hardware(os, shape)} ile açılıyor; ayarlar kayıtsız bir sonraki açılışta geçerli olur."));
@@ -322,6 +341,7 @@ namespace ASoftware.Engine
                 };
                 // visionOS: the disk it was started on (sound or silent), not the one the settings would take now
                 if (os == "vision") run.Disk = Guests.VisionDisk(cmd);
+                if (os == "tv") run.Disk = Guests.TvDisk(cmd);
                 if (cmd.Contains("-snapshot")) run.Disk = "";
                 Runs[os] = run;
                 Watch(run);
@@ -359,7 +379,7 @@ namespace ASoftware.Engine
             await WaitEnd(run, 600);
         }
 
-        /// <summary>Turns the guest off: iOS 16 powers down (its power key); iOS 26, watchOS and visionOS sync their disk on
+        /// <summary>Turns the guest off: iOS 16 powers down (its power key); iOS 26, watchOS, visionOS and tvOS sync their disk on
         /// the root shell (their serial console), then QEMU quits.</summary>
         public static async Task TurnOff(string os)
         {

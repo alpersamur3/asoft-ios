@@ -95,7 +95,7 @@
                             Padding="16,22,16,16" SizeChanged="Shelf_SizeChanged">
                         <ItemsControl x:Name="Cards" ItemTemplate="{StaticResource CardTemplate}" HorizontalAlignment="Center" Focusable="False" Grid.IsSharedSizeScope="True">
                             <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate><WrapPanel ItemWidth="270"/></ItemsPanelTemplate>
+                                <ItemsPanelTemplate><v:ShelfPanel ItemWidth="270"/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                         </ItemsControl>
                     </Border>

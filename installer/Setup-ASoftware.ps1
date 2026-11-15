@@ -1,5 +1,5 @@
-﻿# ASoftware iOS setup: one installer for iOS 16, iOS 26 or both, and watchOS 27.2 and visionOS 27.2 with
-# iOS 26 or without it (then only the base they share with iOS 26: Install-iOS26.ps1 -Base, about 1 GB from
+﻿# ASoftware iOS setup: one installer for iOS 16, iOS 26 or both, and watchOS 27.2, visionOS 27.2 and tvOS 27.2
+# with iOS 26 or without it (then only the base they share with iOS 26: Install-iOS26.ps1 -Base, about 1 GB from
 # Apple) (Install-ASoftware.cmd runs it).
 # It asks which, and for iOS 26 how the build runs its Linux tools: in WSL (fast; installing WSL
 # needs an administrator and a restart) or in a small Linux VM in our QEMU (no WSL). Before
@@ -8,16 +8,19 @@
 # our PC, scaled by this PC's cores and a 10 MB probe of Apple's CDN). Then it runs the two
 # installers as they are, each still usable on its own:
 #   installer\Install-ASoftware.ps1 (iOS 16), ios26\Install-iOS26.ps1 (iOS 26, or its -Base),
-#   watchos\Install-watchOS.ps1 (watchOS) and visionos\Install-visionOS.ps1 (visionOS), both on that base
+#   watchos\Install-watchOS.ps1 (watchOS), visionos\Install-visionOS.ps1 (visionOS) and tvos\Install-tvOS.ps1
+#   (tvOS), all on that base
 # from the install folder, in one work folder (<Dir>\work) that holds our QEMU once for both.
 # Both resume where they stopped, and so does this after a stop or a restart: its choices are in
 # %LOCALAPPDATA%\ASoftware\setup.json. While it runs, the window title shows the step, the time
 # so far and the time left; at the end it prints what it took and where everything is.
 #
-#   Install-ASoftware.cmd [-Version ios16|ios26|both|watchos|ios16-watchos|visionos|ios16-visionos] [-Watch yes|no] [-Vision yes|no]
+#   Install-ASoftware.cmd [-Version ios16|ios26|both|watchos|ios16-watchos|visionos|ios16-visionos|tvos|ios16-tvos]
+#                         [-Watch yes|no] [-Vision yes|no] [-Tv yes|no]
 #                         [-Linux wsl|helper] [-Dir D:\ASoftware] [-Lang en|tr] [-Yes] [-Estimate] [-List] [-Check] [-DryRun]
-#     -Version, -Watch, -Vision, -Linux   the answers to the questions (else it asks; -Watch and -Vision are
-#                        for ios26 and both; watchos, ios16-watchos, visionos and ios16-visionos install theirs without iOS 26)
+#     -Version, -Watch, -Vision, -Tv, -Linux   the answers to the questions (else it asks; -Watch, -Vision and -Tv
+#                        are for ios26 and both; watchos, ios16-watchos, visionos, ios16-visionos, tvos and ios16-tvos
+#                        install theirs without iOS 26)
 #     -Dir               the install folder: the app, and work\ for both iOS (default: <the fixed
 #                        drive with the most room>:\ASoftware; no spaces, as iOS 26's build wants;
 #                        watchOS without iOS 26: the folder whose work\ has the base already, if any)
@@ -34,7 +37,8 @@
 #   -WatchDir DIR[|DIR], -WatchQemu FOLDER as its -QemuFrom: our QEMU build with the watch's devices,
 #   which -QemuDist is only when it has them), visionOS's to Install-visionOS.ps1 (-VisionQemu FOLDER as
 #   its -QemuDir: our QEMU build with visionOS's options, which -QemuDist is only when it has them;
-#   -AudioPlugin FOLDER, -CdnEdge IP); -NoShortcut to all.
+#   -AudioPlugin FOLDER, -CdnEdge IP), tvOS's to Install-tvOS.ps1 (-TvQemu FOLDER as its -QemuDir: the same
+#   build as visionOS's; -TvOta FILE as its -OtaFile: the OTA on this PC; -CdnEdge IP); -NoShortcut to all.
 param(
     [string]$Version = '',
     [string]$Watch = '',
@@ -68,6 +72,9 @@ param(
     [string]$VisionQemu = '',
     [string]$AudioPlugin = '',
     [string]$CdnEdge = '',
+    [string]$Tv = '',
+    [string]$TvQemu = '',
+    [string]$TvOta = '',
     [switch]$NoShortcut,
     [string]$State = (Join-Path $env:LOCALAPPDATA 'ASoftware\setup.json')
 )
@@ -77,6 +84,13 @@ $Inst16 = Join-Path $src 'installer\Install-ASoftware.ps1'
 $Inst26 = Join-Path $src 'ios26\Install-iOS26.ps1'
 $InstW = Join-Path $src 'watchos\Install-watchOS.ps1'
 $InstV = Join-Path $src 'visionos\Install-visionOS.ps1'
+$InstT = Join-Path $src 'tvos\Install-tvOS.ps1'
+# tvOS exists for this setup only when its installer is in the package (a package made with Make-Release.ps1
+# -NoTvOS has none): then no question, menu entry, estimate row, summary line or text below mentions it
+$HasTvOS = Test-Path -LiteralPath $InstT -PathType Leaf
+$SysEn = if ($HasTvOS) { 'watchOS, visionOS and tvOS' } else { 'watchOS and visionOS' }
+$SysTr = if ($HasTvOS) { 'watchOS, visionOS ve tvOS' } else { 'watchOS ve visionOS' }
+$TvNoOpt = if ($HasTvOS) { ' / -Tv no' } else { '' }
 # the release package's own QEMU (Make-Release.ps1), which both take instead of downloading one
 $PkgQemu = Join-Path $src 'qemu\bin'
 if (-not $QemuDist -and (Test-Path (Join-Path $PkgQemu 'qemu-system-aarch64.exe'))) { $QemuDist = $PkgQemu }
@@ -86,8 +100,8 @@ if (-not $Lang) {
 }
 function L([string]$en, [string]$tr) { if ($Lang -eq 'tr') { $tr } else { $en } }
 # Progress for ASoftware.exe, which sets ASOFT_PROGRESS=1 (the installers write theirs, ##asoft|step|..., too):
-#   plan|VER|ID|SECONDS|DOWNLOAD BYTES|ADD GB|KEEP GB|DONE 0/1|TITLE   the chosen steps, in order (VER ios16, ios26, watch, vision)
-#   option|KEY|DOWNLOAD|SECONDS|PEAK|AFTER   each row of the estimate table (ios16, ios26-wsl, ios26-helper, watch, vision)
+#   plan|VER|ID|SECONDS|DOWNLOAD BYTES|ADD GB|KEEP GB|DONE 0/1|TITLE   the chosen steps, in order (VER ios16, ios26, watch, vision, tv)
+#   option|KEY|DOWNLOAD|SECONDS|PEAK|AFTER   each row of the estimate table (ios16, ios26-wsl, ios26-helper, watch, vision, tv)
 #   total|DOWNLOAD|SECONDS|PEAK|AFTER|NEED|FREE|BANDWIDTH NOTE   the choice as a whole (bytes, seconds)
 #   warn|TEXT, stop|TEXT, end|VER|CODE (each installer), end|setup|CODE, wsl-restart
 function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('##asoft|' + (@($f | ForEach-Object { "$_" -replace '[|\r\n]', ' ' }) -join '|')) } }
@@ -95,8 +109,8 @@ function Emit([object[]]$f) { if ($env:ASOFT_PROGRESS -ceq '1') { Write-Host ('#
 # next step with exit 5; this before the next installer)
 function Pause-Requested { [bool]($env:ASOFT_PAUSE_FILE -and (Test-Path -LiteralPath $env:ASOFT_PAUSE_FILE)) }
 function Fail([string]$why, [int]$code = 1) { Emit 'stop', $why; Emit 'end', 'setup', $code; Write-Host ''; Write-Host $why -ForegroundColor Red; exit $code }
-foreach ($p in @(@('Version', $Version, @('ios16', 'ios26', 'both', 'watchos', 'ios16-watchos', 'visionos', 'ios16-visionos')), @('Watch', $Watch, @('yes', 'no')),
-                 @('Vision', $Vision, @('yes', 'no')), @('Linux', $Linux, @('wsl', 'helper')),
+foreach ($p in @(@('Version', $Version, (@('ios16', 'ios26', 'both', 'watchos', 'ios16-watchos', 'visionos', 'ios16-visionos') + @(if ($HasTvOS) { 'tvos', 'ios16-tvos' }))), @('Watch', $Watch, @('yes', 'no')),
+                 @('Vision', $Vision, @('yes', 'no')), @('Tv', $Tv, @('yes', 'no')), @('Linux', $Linux, @('wsl', 'helper')),
                  @('Lang', $Lang, @('en', 'tr')), @('IfNoWsl', $IfNoWsl, @('install', 'nowsl')))) {
     if ($p[1] -and $p[2] -cnotcontains $p[1]) { Fail "-$($p[0]) $($p[1]): one of $($p[2] -join ', ')" }
 }
@@ -221,13 +235,42 @@ function Vision-Qemu([string]$work) {
     }
     $r
 }
+# tvOS's QEMU: the same build as visionOS's (Install-tvOS.ps1 checks the same options), its release package
+# os.tvos.files.qemu in asoft-setup.json, else visionOS's (both empty until published)
+function Tv-QemuRelease {
+    try {
+        $os = (Get-Content (Join-Path $src 'installer\asoft-setup.json') -Raw | ConvertFrom-Json).os
+        foreach ($q in @($os.tvos.files.qemu, $os.visionos.files.qemu)) { if ($q -and $q.url) { return "$($q.url)" } }
+    } catch { }
+    ''
+}
+# -TvQemu, else -QemuDist when it is such a build, else this install's <work>\qemu when it is one, else the release
+# package; with visionOS chosen too, the one visionOS's installer puts in <work>\qemu first (as Vision-Qemu has it)
+function Tv-Qemu([string]$work) {
+    $r = @{ Dir = $null; There = $false; Why = '' }
+    if ($work) { $r.There = Qemu-HasVision ([IO.Path]::Combine($work, 'qemu')) }
+    if ($TvQemu) {
+        $d = [IO.Path]::GetFullPath($TvQemu).TrimEnd('\')
+        if (Qemu-HasVision $d) { $r.Dir = $d }
+        else { $r.Why = L "-TvQemu $d`: no qemu-system-aarch64.exe with visionOS's options (walk-hold-key, x-tlbi-filter), which tvOS runs on, there" "-TvQemu $d`: orada tvOS'un üzerinde çalıştığı visionOS seçeneklerini (walk-hold-key, x-tlbi-filter) içeren qemu-system-aarch64.exe yok" }
+    } elseif ($QemuDist -and (Qemu-HasVision ([IO.Path]::GetFullPath($QemuDist)))) {
+        $r.Dir = [IO.Path]::GetFullPath($QemuDist).TrimEnd('\')
+    } elseif ($VisionQemu -and (Qemu-HasVision ([IO.Path]::GetFullPath($VisionQemu)))) {
+        $r.Dir = [IO.Path]::GetFullPath($VisionQemu).TrimEnd('\')
+    } elseif (-not $r.There -and -not (Tv-QemuRelease)) {
+        $r.Why = L "tvOS's QEMU (our build with visionOS's options) is not published yet: give one with -TvQemu <folder>" "tvOS'un QEMU'su (visionOS seçeneklerini içeren derlememiz) henüz yayımlanmadı: -TvQemu <klasör> ile verin"
+    }
+    $r
+}
 $T16 = Read-Tables $Inst16 @('ipswUrl', 'ipswSize', 'pythonUrl', 'QemuRelease', 'space', 'Steps')
 $T26 = Read-Tables $Inst26 @('BaseSteps', 'QemuRelease', 'Pin', 'CloudOsUrl', 'IPhoneUrl', 'CloudOsFiles', 'CloudOsGpuImage', 'ReleaseKernel', 'OsImage',
                              'SysOsImage', 'AppOsImage', 'IPhoneFiles', 'GpuPluginRelease', 'Space', 'Steps')
 # watchOS (on what iOS 26 installed), where this version has its installer
 $TW = if (Test-Path $InstW) { Read-Tables $InstW @('WatchUrl', 'OsImage', 'WatchFiles', 'QemuWatchRelease', 'Space', 'Steps') } else { $null }
 # visionOS (on what iOS 26 installed), where this version has its installer
-$TV = if (Test-Path $InstV) { Read-Tables $InstV @('OsMember', 'VisionFiles', 'Runtime', 'AudioPluginRelease', 'Space', 'Steps') } else { $null }
+$TVis = if (Test-Path $InstV) { Read-Tables $InstV @('OsMember', 'VisionFiles', 'Runtime', 'AudioPluginRelease', 'Space', 'Steps') } else { $null }
+# tvOS (on what iOS 26 installed), where this version has its installer
+$TT = if ($HasTvOS) { Read-Tables $InstT @('OtaUrl', 'OtaSize', 'Space', 'Steps') } else { $null }
 # the install without WSL: Install-iOS26.ps1's -Linux helper and the helper VM it boots
 # (installer\helper\out: in the release package; a git checkout builds it, README.md "Without WSL")
 $Has26Linux = Has-Param $Inst26 'Linux'
@@ -335,6 +378,31 @@ $RefV = [ordered]@{
     cleanup    = @{ S = 5; Thr = 1; Add = 0; Keep = 0 }
     shortcut   = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
 }
+# tvOS: Install-tvOS.ps1's steps on what iOS 26 left (WSL only). Estimates: the installer is not timed end to end.
+# decrypt, unpack (tvx.py 12.9 min + vsig.py 24.1), rootfs and patches are the hand build's of 2026-11-08/09
+# (notes/TVOS.md; its OTA files on a USB 2 drive, so likely less from an SSD); Home 73-96 s after a start; the
+# lzraven build and the first boot's wait are guesses from the watch's and visionOS's. Add/Keep as the installer's
+# own table: Keep after the step's own removals (decrypt removes the .aea, unpack the decrypted archive, rootfs the
+# unpacked root's image)
+$RefT = [ordered]@{
+    check      = @{ S = 5; Thr = 1; Add = 0.01; Keep = 0.01; Linux = $true }
+    qemu       = @{ S = 10; Thr = 1; Add = 0.55; Keep = 0 }      # the install's qemu\ replaced in place
+    lzraven    = @{ S = 120; Thr = 4; Add = 0; Keep = 0; Linux = $true }
+    download   = @{ S = 30; Thr = 1; Add = 4.97; Keep = 4.97 }   # S: its SHA-256
+    decrypt    = @{ S = 360; Thr = 2; Add = 5.0; Keep = 0.03; Linux = $true }
+    unpack     = @{ S = 2400; Thr = 2; Add = 13.0; Keep = 8.0; Linux = $true }
+    firmware   = @{ S = 10; Thr = 1; Add = 0.05; Keep = 0.05 }
+    gpu        = @{ S = 15; Thr = 1; Add = 0.01; Keep = 0.01; Linux = $true }
+    rootfs     = @{ S = 1200; Thr = 2; Add = 10.3; Keep = -2.7; Linux = $true }
+    patches    = @{ S = 60; Thr = 2; Add = 0.65; Keep = 0.65; Linux = $true }
+    trustcache = @{ S = 2; Thr = 1; Add = 0; Keep = 0 }
+    firstboot  = @{ S = 300; Thr = 4; Add = 1.3; Keep = 1.3 }
+    persona    = @{ S = 30; Thr = 1; Add = 0.05; Keep = 0.05; Linux = $true }
+    homeboot   = @{ S = 300; Thr = 4; Add = 0.3; Keep = 0.3 }
+    disks      = @{ S = 20; Thr = 1; Add = 0.01; Keep = 0.01; Linux = $true }
+    cleanup    = @{ S = 5; Thr = 1; Add = 0; Keep = 0 }
+    shortcut   = @{ S = 1; Thr = 1; Add = 0; Keep = 0 }
+}
 # The install without WSL: a Linux step with no H takes this many times its WSL time (the helper VM
 # runs Linux under TCG; the measured ones took 0.05 to 11 times as long)
 $HelperFactor = 4
@@ -436,20 +504,37 @@ function Plan-Watch {
     }
 }
 function Plan-Vision {
-    foreach ($s in $TV.Steps) {
+    foreach ($s in $TVis.Steps) {
         $r = $RefV[$s.Id]
         if (-not $r) { $r = @{ S = 60; Thr = 1; Add = 0; Keep = 0 } }
         $dl = 0; $add = $r.Add; $keep = $r.Keep
         switch ($s.Id) {
             # the runtime whole, the IPSW's two members + the OS member's first MiB + its cluster index (1.2 MB),
             # about 10 GB of the OS image read in place, and our QEMU package when this install's lacks the options
-            'rooms' { $dl = $TV.Runtime.Size }
-            'ipsw' { foreach ($v in $TV.VisionFiles.Values) { $dl += $v }; $dl += 1048576 + 1237088 }
+            'rooms' { $dl = $TVis.Runtime.Size }
+            'ipsw' { foreach ($v in $TVis.VisionFiles.Values) { $dl += $v }; $dl += 1048576 + 1237088 }
             'rootfs' { $dl = 10e9 }
             'qemu' { if (-not $VisionQemuDir -and -not $VisionQemuThere) { $dl = $Bytes.Qemu } else { $add = 0 } }
         }
         $done = Test-Path (Join-Path $Work "install\vision-$($s.Id).done")
         @{ Ver = 'vision'; Id = $s.Id; Title = $s.Title; Dl = $dl; S = $r.S; Thr = $r.Thr; Add = $add; Keep = $keep; Linux = [bool]$r.Linux; Done = $done }
+    }
+}
+function Plan-Tv {
+    foreach ($s in $TT.Steps) {
+        $r = $RefT[$s.Id]
+        if (-not $r) { $r = @{ S = 60; Thr = 1; Add = 0; Keep = 0 } }
+        $dl = 0; $add = $r.Add; $keep = $r.Keep
+        switch ($s.Id) {
+            # Apple's OTA, unless -TvOta gives it from this PC (read where it is: neither downloaded nor removed, so
+            # the decrypted archive is all the decrypt step adds); our QEMU package when this install's lacks the
+            # options and neither -TvQemu nor visionOS's installer puts one there
+            'download' { if ($TvOta) { $add = 0; $keep = 0 } else { $dl = $TT.OtaSize } }
+            'decrypt' { if ($TvOta) { $keep = $add } }
+            'qemu' { if (-not $TvQemuDir -and -not $TvQemuThere -and -not $WantVision) { $dl = $Bytes.Qemu } else { $add = 0 } }
+        }
+        $done = Test-Path (Join-Path $Work "install\tv-$($s.Id).done")
+        @{ Ver = 'tv'; Id = $s.Id; Title = $s.Title; Dl = $dl; S = $r.S; Thr = $r.Thr; Add = $add; Keep = $keep; Linux = [bool]$r.Linux; Done = $done }
     }
 }
 function Step-Seconds($st, [double]$bps) {
@@ -470,6 +555,27 @@ function Sum-Plan($steps, [double]$bps) {
         $cum += $st.Keep
     }
     @{ Dl = $dl; S = $sec; Peak = $peak * 1e9; After = $cum * 1e9; Need = ($peak - $there) * 1e9 }
+}
+
+# The old-driver warning of ios26\scripts\gpu-check.cs (Vulkan below 1.2, no VK_EXT_external_memory_host, or a driver more
+# than two years old), in the language asked for: the `warn|code|vendor|detail|sentence` line of that check's output, its sentence
+# ('' when there is no such line)
+function ConvertFrom-GpuWarn([string[]]$lines) {
+    $w = @($lines | Where-Object { "$_" -clike 'warn|*' }) | Select-Object -Last 1
+    if ($w) { $f = "$w" -split '\|', 5; if ($f.Count -eq 5) { return $f[4].Trim() } }
+    ''
+}
+# gpu-check.ps1 (the launcher's GPU check, not a second one) in a process of its own with a time limit, since a Vulkan driver can
+# crash or hang it. A warning only: whatever goes wrong here gives '' and nothing stops
+function Get-GpuWarning([string]$script, [string]$lang) {
+    if (-not (Test-Path -LiteralPath $script)) { return '' }
+    $o = [IO.Path]::GetTempFileName()
+    try {
+        $p = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $script + '"'), '-Lang', $lang) -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError "$o.err"
+        $null = $p.Handle
+        if (-not $p.WaitForExit(60000)) { try { $p.Kill() } catch { }; return '' }
+        return ConvertFrom-GpuWarn ([IO.File]::ReadAllLines($o, [Console]::OutputEncoding))
+    } catch { return '' } finally { Remove-Item -LiteralPath $o, "$o.err" -Force -ErrorAction SilentlyContinue }
 }
 
 # --- This PC -----------------------------------------------------------------------------------
@@ -533,6 +639,7 @@ function Probe-Bandwidth([string]$url) {
 function Ask([string]$question, [object[]]$options, [int]$default) {
     Write-Host ''
     Write-Host $question -ForegroundColor White
+    $options = @($options | Where-Object { $null -ne $_ })   # (an entry the package leaves out is $null)
     for ($i = 0; $i -lt $options.Count; $i++) {
         $o = $options[$i]
         $mark = if ($i -eq $default) { '*' } else { ' ' }
@@ -565,7 +672,7 @@ function Save-State([hashtable]$keys) {
     ($o | ConvertTo-Json) | Set-Content -Encoding UTF8 $State
 }
 function Version-Name([string]$v) {
-    switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'both' { L 'iOS 16 and iOS 26' 'iOS 16 ve iOS 26' } 'watchos' { 'watchOS' } 'ios16-watchos' { L 'iOS 16 and watchOS' 'iOS 16 ve watchOS' } 'visionos' { 'visionOS' } 'ios16-visionos' { L 'iOS 16 and visionOS' 'iOS 16 ve visionOS' } }
+    switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { 'iOS 26' } 'both' { L 'iOS 16 and iOS 26' 'iOS 16 ve iOS 26' } 'watchos' { 'watchOS' } 'ios16-watchos' { L 'iOS 16 and watchOS' 'iOS 16 ve watchOS' } 'visionos' { 'visionOS' } 'ios16-visionos' { L 'iOS 16 and visionOS' 'iOS 16 ve visionOS' } 'tvos' { 'tvOS' } 'ios16-tvos' { L 'iOS 16 and tvOS' 'iOS 16 ve tvOS' } }
 }
 function Linux-Name([string]$h) { if ($h -eq 'helper') { L 'without WSL' "WSL'siz" } else { 'WSL' } }
 # watchOS's sources for setup.json, so a resumed run (with no arguments) has them again: the watch QEMU
@@ -580,7 +687,13 @@ function Vision-Sources([string]$qemuDir) {
     @{ Vision = $(if ($WantVision) { 'yes' } else { 'no' })
        VisionQemu = $(if ($WantVision -and $qemuDir) { $qemuDir } else { '' })
        AudioPlugin = $(if ($WantVision -and $AudioPlugin) { [IO.Path]::GetFullPath($AudioPlugin) } else { '' })
-       CdnEdge = $(if ($WantVision) { $CdnEdge } else { '' }) }
+       CdnEdge = $(if ($WantVision -or $WantTv) { $CdnEdge } else { '' }) }
+}
+# tvOS's, as visionOS's: the QEMU folder found (Tv-Qemu's Dir), -TvOta as a full path (-CdnEdge is visionOS's above)
+function Tv-Sources([string]$qemuDir) {
+    @{ Tv = $(if ($WantTv) { 'yes' } else { 'no' })
+       TvQemu = $(if ($WantTv -and $qemuDir) { $qemuDir } else { '' })
+       TvOta = $(if ($WantTv -and $TvOta) { [IO.Path]::GetFullPath($TvOta) } else { '' }) }
 }
 # The install folder when -Dir does not say: <the fixed drive with the most room>:\ASoftware
 function Default-Dir {
@@ -618,6 +731,10 @@ if ($Saved -and "$($Saved.Stage)" -ne 'done' -and -not $Version -and -not $Linux
         if (-not $VisionQemu -and $Saved.VisionQemu) { $VisionQemu = "$($Saved.VisionQemu)" }
         if (-not $AudioPlugin -and $Saved.AudioPlugin) { $AudioPlugin = "$($Saved.AudioPlugin)" }
         if (-not $CdnEdge -and $Saved.CdnEdge) { $CdnEdge = "$($Saved.CdnEdge)" }
+        # and tvOS's
+        if (-not $Tv -and $Saved.Tv) { $Tv = "$($Saved.Tv)" }
+        if (-not $TvQemu -and $Saved.TvQemu) { $TvQemu = "$($Saved.TvQemu)" }
+        if (-not $TvOta -and $Saved.TvOta) { $TvOta = "$($Saved.TvOta)" }
         $resumed = $true
     }
 }
@@ -631,24 +748,28 @@ if (-not $Version) {
           (L 'two to three hours, about 50 GB at its peak; a Vulkan GPU' 'iki üç saat sürer, en çok yaklaşık 50 GB; Vulkan destekli GPU'), $false),
         @((L 'Both' 'İkisi de'), (L 'one QEMU for both, downloaded once' 'ikisine tek QEMU, bir kez indirilir'), $false),
         @((L 'watchOS 27.2 only (Apple Watch Series 9)' 'Yalnız watchOS 27.2 (Apple Watch Series 9)'), (L 'iOS 26 is not needed, only the base it shares; WSL' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL'), (-not $TW)),
-        @((L 'visionOS 27.2 only (Apple Vision Pro)' 'Yalnız visionOS 27.2 (Apple Vision Pro)'), (L 'iOS 26 is not needed, only the base it shares; WSL; about 2 hours and 19 GB from Apple' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 2 saat ve Apple''dan 19 GB'), (-not $TV))) 0
-    $Version = @('ios16', 'ios26', 'both', 'watchos', 'visionos')[$i]
+        @((L 'visionOS 27.2 only (Apple Vision Pro)' 'Yalnız visionOS 27.2 (Apple Vision Pro)'), (L 'iOS 26 is not needed, only the base it shares; WSL; about 2 hours and 19 GB from Apple' 'iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 2 saat ve Apple''dan 19 GB'), (-not $TVis)),
+        $(if ($HasTvOS) { ,@((L 'tvOS 27.2 only (Apple TV 4K): research preview' 'Yalnız tvOS 27.2 (Apple TV 4K): araştırma önizlemesi'), (L 'Home and Settings only: Activation failed, Search and the Apple TV app unavailable, slow keys, saves untested. iOS 26 is not needed, only the base it shares; WSL; about 1.5 hours and 6 GB from Apple' 'Yalnız Home ve Ayarlar: Activation failed, Search ve Apple TV uygulaması kullanılamıyor, tuşlar yavaş, kayıtlar sınanmadı. iOS 26 gerekmez, yalnız paylaştığı taban; WSL; yaklaşık 1,5 saat ve Apple''dan 6 GB'), (-not $TT)) })) 0
+    $Version = @('ios16', 'ios26', 'both', 'watchos', 'visionos', 'tvos')[$i]
 }
-$Want16 = $Version -ceq 'ios16' -or $Version -ceq 'both' -or $Version -ceq 'ios16-watchos' -or $Version -ceq 'ios16-visionos'
-# (visionOS named by the version: alone or with iOS 16)
+$Want16 = $Version -ceq 'ios16' -or $Version -ceq 'both' -or $Version -ceq 'ios16-watchos' -or $Version -ceq 'ios16-visionos' -or $Version -ceq 'ios16-tvos'
+# (visionOS named by the version: alone or with iOS 16; tvOS likewise)
 $VisionVer = $Version -ceq 'visionos' -or $Version -ceq 'ios16-visionos'
-# watchOS or visionOS alone needs only what it shares with iOS 26 (Install-iOS26.ps1 -Base)
-$BaseOnly = $Version -ceq 'watchos' -or $Version -ceq 'ios16-watchos' -or $VisionVer
+$TvVer = $Version -ceq 'tvos' -or $Version -ceq 'ios16-tvos'
+# watchOS, visionOS or tvOS alone needs only what it shares with iOS 26 (Install-iOS26.ps1 -Base)
+$BaseOnly = $Version -ceq 'watchos' -or $Version -ceq 'ios16-watchos' -or $VisionVer -or $TvVer
 $Want26 = $Version -cne 'ios16'
 if ($BaseOnly) { if (-not $Linux) { $Linux = 'wsl' } }
-if ($VisionVer) { $Vision = 'yes'; if (-not $Watch) { $Watch = 'no' } }
-elseif ($BaseOnly) { $Watch = 'yes'; if (-not $Vision) { $Vision = 'no' } }
-if ($VisionVer -and -not $TV) { Fail (L 'this version has no visionOS installer (visionos\Install-visionOS.ps1)' 'bu sürümde visionOS kurucusu yok (visionos\Install-visionOS.ps1)') 2 }
-# watchOS or visionOS without iOS 26, no -Dir: the folder that has the base already (an iOS 26 install, or a base made
-# before: the work folder iOS 26's settings name, with its cloudos step done), so none of it is fetched again
+if ($VisionVer) { $Vision = 'yes'; if (-not $Watch) { $Watch = 'no' }; if (-not $Tv) { $Tv = 'no' } }
+elseif ($TvVer) { $Tv = 'yes'; if (-not $Watch) { $Watch = 'no' }; if (-not $Vision) { $Vision = 'no' } }
+elseif ($BaseOnly) { $Watch = 'yes'; if (-not $Vision) { $Vision = 'no' }; if (-not $Tv) { $Tv = 'no' } }
+if ($VisionVer -and -not $TVis) { Fail (L 'this version has no visionOS installer (visionos\Install-visionOS.ps1)' 'bu sürümde visionOS kurucusu yok (visionos\Install-visionOS.ps1)') 2 }
+if ($TvVer -and -not $TT) { Fail (L 'this version has no tvOS installer (tvos\Install-tvOS.ps1)' 'bu sürümde tvOS kurucusu yok (tvos\Install-tvOS.ps1)') 2 }
+# watchOS, visionOS or tvOS without iOS 26, no -Dir: the folder that has the base already (an iOS 26 install, or a
+# base made before: the work folder iOS 26's settings name, with its cloudos step done), so none of it is fetched again
 if ($BaseOnly -and -not $Dir) {
-    $sysName = if ($VisionVer) { 'visionOS' } else { 'watchOS' }
-    $sysCmd = if ($VisionVer) { 'visionos\Install-visionOS.cmd' } else { 'watchos\Install-watchOS.cmd' }
+    $sysName = if ($VisionVer) { 'visionOS' } elseif ($TvVer) { 'tvOS' } else { 'watchOS' }
+    $sysCmd = if ($VisionVer) { 'visionos\Install-visionOS.cmd' } elseif ($TvVer) { 'tvos\Install-tvOS.cmd' } else { 'watchos\Install-watchOS.cmd' }
     $w26 = ''
     if (Test-Path $Cfg26File) { try { $w26 = "$((Get-Content $Cfg26File -Raw | ConvertFrom-Json).Work)" } catch { } }
     if ($w26 -and [IO.Path]::IsPathRooted($w26) -and (Test-Path -LiteralPath ([IO.Path]::Combine($w26, 'install\cloudos.done')))) {
@@ -685,11 +806,11 @@ if ($Want26 -and $TW) {
 
 # --- 1c. visionOS on iOS 26 --------------------------------------------------------------------
 $WantVision = $false
-if ($Want26 -and $TV) {
+if ($Want26 -and $TVis) {
     # its QEMU first, as for the watch (the work folder this run will use may have one in qemu\)
     $vq = Vision-Qemu ([IO.Path]::Combine([IO.Path]::GetFullPath($(if ($Dir) { $Dir } else { Default-Dir })).TrimEnd('\'), 'work'))
     if (-not $Vision) {
-        $vdl = $TV.Runtime.Size + 10e9
+        $vdl = $TVis.Runtime.Size + 10e9
         $i = Ask (L 'visionOS 27.2 too (Apple Vision Pro), built on what iOS 26 installs?' 'visionOS 27.2 de kurulsun mu (Apple Vision Pro), iOS 26''nın kurduklarının üstüne?') @(
             @((L 'No' 'Hayır'), '', $false),
             @((L 'Yes' 'Evet'), $(if ($vq.Why) { $vq.Why } else { L "about $(Fmt-Size $vdl) more download, 21 GB more disk and 2 hours more; WSL; its own launcher, Start-visionOS.cmd" "yaklaşık $(Fmt-Size $vdl) daha indirme, 21 GB daha disk ve 2 saat daha; WSL; kendi başlatıcısı, Start-visionOS.cmd" }), [bool]$vq.Why)) 0
@@ -699,6 +820,27 @@ if ($Want26 -and $TV) {
     $WantVision = $Vision -eq 'yes'
 } elseif ($Vision -eq 'yes') {
     Fail (L '-Vision yes needs iOS 26 or its base (-Version ios26, both, visionos or ios16-visionos): visionOS is built on it' '-Vision yes iOS 26 ya da tabanını ister (-Version ios26, both, visionos ya da ios16-visionos): visionOS onun üstüne kurulur')
+}
+
+# --- 1d. tvOS on iOS 26 ------------------------------------------------------------------------
+$WantTv = $false
+$tq = @{ Dir = $null; There = $false; Why = '' }
+if ($Want26 -and $TT) {
+    # its QEMU first, as for visionOS (the same build; visionOS's installer, when it is chosen too, puts it in
+    # work\qemu before tvOS's runs)
+    $tq = Tv-Qemu ([IO.Path]::Combine([IO.Path]::GetFullPath($(if ($Dir) { $Dir } else { Default-Dir })).TrimEnd('\'), 'work'))
+    if ($WantVision -and $tq.Why -and -not $vq.Why) { $tq.Why = '' }
+    if (-not $Tv) {
+        $i = Ask (L 'tvOS 27.2 too (Apple TV 4K, research preview), built on what iOS 26 installs?' 'tvOS 27.2 de kurulsun mu (Apple TV 4K, araştırma önizlemesi), iOS 26''nın kurduklarının üstüne?') @(
+            @((L 'No' 'Hayır'), '', $false),
+            @((L 'Yes' 'Evet'), $(if ($tq.Why) { $tq.Why } else { L "it reaches Home and Settings only (Activation failed, Search and the Apple TV app unavailable, slow keys, saves untested); about $(Fmt-Size $TT.OtaSize) more download, 13 GB more disk (23 GB at the peak) and about 1.5 hours more; WSL; its own launcher, Start-tvOS.cmd" "yalnız Home ve Ayarlar'a varır (Activation failed, Search ve Apple TV uygulaması kullanılamıyor, tuşlar yavaş, kayıtlar sınanmadı); yaklaşık $(Fmt-Size $TT.OtaSize) daha indirme, 13 GB daha disk (en çok 23 GB) ve yaklaşık 1,5 saat daha; WSL; kendi başlatıcısı, Start-tvOS.cmd" }), [bool]$tq.Why)) 0
+        $Tv = @('no', 'yes')[$i]
+    }
+    if ($Tv -eq 'yes' -and $tq.Why) { Fail ((L 'tvOS cannot be installed here: ' 'tvOS burada kurulamaz: ') + $tq.Why + (L ' (or -Tv no)' ' (ya da -Tv no)')) 2 }
+    $WantTv = $Tv -eq 'yes'
+} elseif ($Tv -eq 'yes') {
+    if (-not $HasTvOS) { Fail (L 'this version has no tvOS installer (tvos\Install-tvOS.ps1)' 'bu sürümde tvOS kurucusu yok (tvos\Install-tvOS.ps1)') 2 }
+    Fail (L '-Tv yes needs iOS 26 or its base (-Version ios26, both, tvos or ios16-tvos): tvOS is built on it' '-Tv yes iOS 26 ya da tabanını ister (-Version ios26, both, tvos ya da ios16-tvos): tvOS onun üstüne kurulur')
 }
 
 # --- 2. iOS 26: WSL or not ---------------------------------------------------------------------
@@ -723,9 +865,9 @@ if ($Want26) {
         $Linux = 'helper'
     }
     if (-not $Linux) {
-        # WSL when it works or -IfNoWsl install says to get it (or watchOS or visionOS, which need it), else
+        # WSL when it works or -IfNoWsl install says to get it (or watchOS, visionOS or tvOS, which need it), else
         # the helper when there is one
-        $default = if ($IfNoWsl -ne 'install' -and $Wsl.State -ne 'ok' -and $Helper -and -not $WantWatch -and -not $WantVision) { 1 } else { 0 }
+        $default = if ($IfNoWsl -ne 'install' -and $Wsl.State -ne 'ok' -and $Helper -and -not $WantWatch -and -not $WantVision -and -not $WantTv) { 1 } else { 0 }
         $i = Ask (L "How should the iOS 26 build run its Linux tools? (iOS 16 never needs WSL.)" "iOS 26 kurulumu Linux araçlarını nasıl çalıştırsın? (iOS 16 hiç WSL istemez.)") @(
             @((L 'Fast install with WSL' 'Hızlı kurulum (WSL)'), $wslNote, $false),
             @((L 'Install without WSL' 'WSL''siz kurulum'), $helperNote, (-not $Helper))) $default
@@ -756,7 +898,7 @@ if ($Want26) {
             if ($ReadOnly) {
                 Write-Host (L '  (nothing is run in this mode)' '  (bu kipte hiçbir şey çalıştırılmaz)') -ForegroundColor DarkGray
             } else {
-                Save-State (@{ Version = $Version; Watch = $(if ($WantWatch) { 'yes' } else { 'no' }); Linux = 'wsl'; Dir = $Dir; Lang = $Lang; Stage = 'wsl-install'; Started = (Get-Date).ToString('s') } + (Watch-Sources $wq.Dir) + (Vision-Sources $vq.Dir))
+                Save-State (@{ Version = $Version; Watch = $(if ($WantWatch) { 'yes' } else { 'no' }); Linux = 'wsl'; Dir = $Dir; Lang = $Lang; Stage = 'wsl-install'; Started = (Get-Date).ToString('s') } + (Watch-Sources $wq.Dir) + (Vision-Sources $vq.Dir) + (Tv-Sources $tq.Dir))
                 try {
                     $p = Start-Process -FilePath 'wsl.exe' -ArgumentList '--install', '--no-distribution' -Verb RunAs -Wait -PassThru
                     $code = $p.ExitCode
@@ -800,6 +942,15 @@ if ($WantVision) {
     $vq = Vision-Qemu $Work
     $VisionQemuDir = $vq.Dir; $VisionQemuThere = $vq.There; $VisionQemuWhy = $vq.Why
 }
+# tvOS's QEMU likewise (with visionOS chosen too, the one visionOS's installer puts in work\qemu first)
+$TvQemuDir = $null
+$TvQemuThere = $false
+$TvQemuWhy = ''
+if ($WantTv) {
+    $tq = Tv-Qemu $Work
+    $TvQemuDir = $tq.Dir; $TvQemuThere = $tq.There
+    $TvQemuWhy = if ($WantVision -and -not $VisionQemuWhy) { '' } else { $tq.Why }
+}
 
 # --- 4. What it costs --------------------------------------------------------------------------
 $bps = 0
@@ -836,12 +987,14 @@ if ($Want26) {
 }
 if ($WantWatch) { $Plans['watch'] = @(Plan-Watch) }
 if ($WantVision) { $Plans['vision'] = @(Plan-Vision) }
+if ($WantTv) { $Plans['tv'] = @(Plan-Tv) }
 function Row-Name([string]$k) {
     if ($BaseOnly -and $k -clike 'ios26-*') {
         if ($VisionVer) { return (L 'What visionOS shares with iOS 26' 'visionOS''un iOS 26 ile paylaştığı') }
+        if ($TvVer) { return (L 'What tvOS shares with iOS 26' 'tvOS''un iOS 26 ile paylaştığı') }
         return (L 'What watchOS shares with iOS 26' 'watchOS''un iOS 26 ile paylaştığı')
     }
-    switch ($k) { 'watch' { 'watchOS 27.2' } 'vision' { 'visionOS 27.2' } 'ios16' { 'iOS 16' } 'ios26-wsl' { L 'iOS 26, fast install (WSL)' 'iOS 26, hızlı kurulum (WSL)' } 'ios26-helper' { L 'iOS 26, without WSL' 'iOS 26, WSL''siz' } }
+    switch ($k) { 'watch' { 'watchOS 27.2' } 'vision' { 'visionOS 27.2' } 'tv' { 'tvOS 27.2' } 'ios16' { 'iOS 16' } 'ios26-wsl' { L 'iOS 26, fast install (WSL)' 'iOS 26, hızlı kurulum (WSL)' } 'ios26-helper' { L 'iOS 26, without WSL' 'iOS 26, WSL''siz' } }
 }
 Write-Host ''
 Write-Host ((L 'What it takes on this PC' 'Bu PC''de ne gerektirir') + " ($bwNote; " + (L "times measured on $Ref, scaled to this PC's $($Pc.Cores) logical processors" "süreler $Ref üzerinde ölçüldü, $($Pc.Cores) mantıksal işlemciye göre ölçeklendi") + '):') -ForegroundColor White
@@ -852,7 +1005,7 @@ foreach ($k in $Plans.Keys) {
     $sums[$k] = $s
     $note = ''
     if ($k -eq 'ios26-helper' -and -not $Helper) { Write-Host ('  {0,-30} {1}' -f (Row-Name $k), $HelperWhy) -ForegroundColor DarkGray; continue }
-    $chosen = ($k -eq 'ios16') -or ($k -eq "ios26-$Linux") -or ($k -eq 'watch') -or ($k -eq 'vision')
+    $chosen = ($k -eq 'ios16') -or ($k -eq "ios26-$Linux") -or ($k -eq 'watch') -or ($k -eq 'vision') -or ($k -eq 'tv')
     Write-Host ('  {0,-30} {1,10} {2,22} {3,16}{4}' -f (Row-Name $k), (Fmt-Size $s.Dl), ('{0} / {1}' -f (Fmt-Size $s.Peak), (Fmt-Size $s.After)), ('~' + (Fmt-Time $s.S)), $note) -ForegroundColor $(if ($chosen) { 'Gray' } else { 'DarkGray' })
 }
 # the choice as a whole: iOS 16 first, then iOS 26 on what iOS 16 left
@@ -861,6 +1014,7 @@ if ($Want16) { $Chosen += $Plans['ios16'] }
 if ($Want26) { $Chosen += $Plans["ios26-$Linux"] }
 if ($WantWatch) { $Chosen += $Plans['watch'] }
 if ($WantVision) { $Chosen += $Plans['vision'] }
+if ($WantTv) { $Chosen += $Plans['tv'] }
 $Total = Sum-Plan $Chosen $bps
 $freeB = Free-Bytes $Dir
 foreach ($k in $sums.Keys) {
@@ -872,7 +1026,7 @@ foreach ($st in $Chosen) {
 }
 Emit 'total', ([long]$Total.Dl), ([int]$Total.S), ([long]$Total.Peak), ([long]$Total.After), ([long]$Total.Need), ([long]$freeB), $bwNote
 Write-Host ''
-Write-Host ('  {0}: {1}, {2} {3}, {4} {5} / {6}, ~{7}' -f (L 'Your choice' 'Seçiminiz'), "$(Version-Name $Version)$(if ($WantWatch -and $Version -cne 'watchos' -and $Version -cne 'ios16-watchos') { ' + watchOS' })$(if ($WantVision -and -not $VisionVer) { ' + visionOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' })",
+Write-Host ('  {0}: {1}, {2} {3}, {4} {5} / {6}, ~{7}' -f (L 'Your choice' 'Seçiminiz'), "$(Version-Name $Version)$(if ($WantWatch -and $Version -cne 'watchos' -and $Version -cne 'ios16-watchos') { ' + watchOS' })$(if ($WantVision -and -not $VisionVer) { ' + visionOS' })$(if ($WantTv -and -not $TvVer) { ' + tvOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' })",
     (L 'download' 'indirme'), (Fmt-Size $Total.Dl), (L 'disk' 'disk'), (Fmt-Size $Total.Peak), (Fmt-Size $Total.After), (Fmt-Time $Total.S)) -ForegroundColor White
 Write-Host ('  {0}: {1}   ({2} {3} {4})' -f (L 'Folder' 'Klasör'), $Dir, (Fmt-Size $freeB), (L 'free on' 'boş:'), ([IO.Path]::GetPathRoot($Dir))) -ForegroundColor White
 if ($Want26 -and $Linux -eq 'wsl' -and $wslState -eq 'bare') {
@@ -894,7 +1048,7 @@ if ($short) {
         $(if ($room) { ' ' + (L "Drives with room: $($room -join ', ') (-Dir)." "Yeri olan sürücüler: $($room -join ', ') (-Dir).") } else { ' ' + (L 'Free some space first, or use an external drive (-Dir).' 'Önce yer açın ya da harici bir sürücü kullanın (-Dir).') })) -ForegroundColor Yellow
 }
 if ($Estimate -or $DryRun) {
-    foreach ($k in @($Plans.Keys | Where-Object { $_ -eq 'ios16' -or $_ -eq "ios26-$Linux" -or $_ -eq 'watch' -or $_ -eq 'vision' })) {
+    foreach ($k in @($Plans.Keys | Where-Object { $_ -eq 'ios16' -or $_ -eq "ios26-$Linux" -or $_ -eq 'watch' -or $_ -eq 'vision' -or $_ -eq 'tv' })) {
         Write-Host ''
         Write-Host ('  ' + (Row-Name $k) + ':') -ForegroundColor White
         $n = 0
@@ -928,30 +1082,53 @@ if ($VisionQemuWhy) { $stop += $VisionQemuWhy }
 if ($WantVision) {
     if ($AudioPlugin -and -not (Test-Path -LiteralPath $AudioPlugin -PathType Container)) {
         $stop += L "-AudioPlugin $AudioPlugin`: no such folder" "-AudioPlugin $AudioPlugin`: böyle bir klasör yok"
-    } elseif (-not $AudioPlugin -and -not $TV.AudioPluginRelease.Url) {
+    } elseif (-not $AudioPlugin -and -not $TVis.AudioPluginRelease.Url) {
         $warn += L "visionOS is installed silent only: its audio plug-in is not published yet (give one with -AudioPlugin <folder> for the sound disk)" "visionOS yalnız sessiz kurulur: ses eklentisi henüz yayımlanmadı (ses diski için -AudioPlugin <klasör> ile verin)"
     }
     # the guest needs about 7 GB of RAM at once (4 GiB guest + the GPU's)
     if ($Pc.Ram -lt 16) { $warn += L "visionOS takes about 7 GB of RAM while it runs" "visionOS çalışırken yaklaşık 7 GB RAM tutar" }
 }
+if ($WantTv -and $Linux -eq 'helper') {
+    $stop += L 'WSL for tvOS (its installer has no install without WSL): choose WSL, or no tvOS (-Tv no)' 'tvOS için WSL (onun kurucusunda WSL''siz kurulum yok): WSL''i seçin ya da tvOS''u kurmayın (-Tv no)'
+}
+if ($TvQemuWhy) { $stop += $TvQemuWhy }
+if ($WantTv) {
+    if ($TvOta -and -not (Test-Path -LiteralPath $TvOta -PathType Leaf)) {
+        $stop += L "-TvOta $TvOta`: no such file" "-TvOta $TvOta`: böyle bir dosya yok"
+    } elseif ($TvOta -and (Get-Item -LiteralPath $TvOta).Length -ne $TT.OtaSize) {
+        $stop += L "-TvOta $TvOta is not the tvOS 27.2 OTA for AppleTV14,1 ($($TT.OtaSize) bytes)" "-TvOta $TvOta, AppleTV14,1 için tvOS 27.2 OTA'sı değil ($($TT.OtaSize) bayt)"
+    }
+    # the unpacked root's image is a sparse file, which only NTFS gives
+    $fsName = try { ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($Dir))).DriveFormat } catch { '' }
+    if ($fsName -and $fsName -cne 'NTFS') {
+        $stop += L "an NTFS drive for tvOS's build ($([IO.Path]::GetPathRoot($Dir)) is $fsName): choose another with -Dir, or no tvOS (-Tv no)" "tvOS kurulumu için NTFS sürücü ($([IO.Path]::GetPathRoot($Dir)) $fsName): -Dir ile başkasını seçin ya da tvOS'u kurmayın (-Tv no)"
+    }
+    # QEMU took about 5 GB at the tree's 4 GiB of guest RAM (the hand-built tvOS)
+    if ($Pc.Ram -lt 16) { $warn += L "tvOS takes about 5 GB of RAM while it runs" "tvOS çalışırken yaklaşık 5 GB RAM tutar" }
+}
 if ($WantWatch -and $WatchIpsw -and -not (Test-Path -LiteralPath $WatchIpsw -PathType Leaf)) {
     $stop += L "-WatchIpsw $WatchIpsw`: no such file" "-WatchIpsw $WatchIpsw`: böyle bir dosya yok"
 }
-# the watch face and visionOS need iOS 26's GPU driver (Metal): a GPU-less iOS 26 would stop their check
+# the watch face, visionOS and tvOS need iOS 26's GPU driver (Metal): a GPU-less iOS 26 would stop their check
 # steps, after the whole iOS 26 build
-if ($WantWatch -or $WantVision) {
+if ($WantWatch -or $WantVision -or $WantTv) {
     $gm = ''
     if (Test-Path $Cfg26File) { try { $gm = "$((Get-Content $Cfg26File -Raw | ConvertFrom-Json).GpuMode)" } catch { } }
     if ($gm -ceq 'gpuless' -and -not (Test-Path (Join-Path $Work 'gpu-driver\AppleParavirtGPUMetalIOGPUFamily.bundle'))) {
-        $stop += L "a GPU driver for iOS 26, which watchOS and visionOS need (iOS 26's settings say GPU-less): choose one in ios26\Start-iOS26.cmd's menu ([G]), or -Watch no / -Vision no" "watchOS ve visionOS'un ihtiyaç duyduğu iOS 26 GPU sürücüsü (iOS 26 ayarı GPU'suz diyor): ios26\Start-iOS26.cmd menüsünden ([G]) birini seçin ya da -Watch no / -Vision no"
+        $stop += L "a GPU driver for iOS 26, which $SysEn need (iOS 26's settings say GPU-less): choose one in ios26\Start-iOS26.cmd's menu ([G]), or -Watch no / -Vision no$TvNoOpt" "$SysTr'un ihtiyaç duyduğu iOS 26 GPU sürücüsü (iOS 26 ayarı GPU'suz diyor): ios26\Start-iOS26.cmd menüsünden ([G]) birini seçin ya da -Watch no / -Vision no$TvNoOpt"
     } elseif (-not $gm -and -not $Yes -and -not $BaseOnly) {
         # (the base alone does not ask: Install-iOS26.ps1 -Base takes Apple's driver)
-        $warn += L "watchOS and visionOS need iOS 26's GPU driver: when iOS 26's setup asks for one, do not choose None" "watchOS ve visionOS, iOS 26'nın GPU sürücüsünü ister: iOS 26 kurulumu sorduğunda Yok'u seçmeyin"
+        $warn += L "$SysEn need iOS 26's GPU driver: when iOS 26's setup asks for one, do not choose None" "$SysTr, iOS 26'nın GPU sürücüsünü ister: iOS 26 kurulumu sorduğunda Yok'u seçmeyin"
     }
 }
 if ($Want26 -and $Linux -eq 'wsl' -and $Pc.Build -lt 19041) { $stop += L 'Windows 10 2004 (build 19041) or later for WSL 2' 'WSL 2 için Windows 10 2004 (yapı 19041) ya da sonrası' }
 if ($Want26 -and -not $Pc.VkLoader) { $stop += L "a Vulkan driver for iOS 26 (vulkan-1.dll; your GPU vendor's driver)" "iOS 26 için Vulkan sürücüsü (vulkan-1.dll; GPU üreticinizin sürücüsü)" }
 elseif ($Want26 -and -not $Pc.VkDrivers) { $warn += L 'no Vulkan driver found in the registry (the loader is there); iOS 26 draws on the GPU through Vulkan' 'kayıt defterinde Vulkan sürücüsü bulunamadı (yükleyici var); iOS 26 GPU''da Vulkan ile çizer' }
+# the GPU driver's age (a warning only; -Estimate skips it: the launcher shows the same warning from its own run of the check)
+if ($Want26 -and $Pc.VkLoader -and -not $Estimate -and -not $DryRun) {
+    $gw = Get-GpuWarning (Join-Path $src 'ios26\scripts\gpu-check.ps1') $Lang
+    if ($gw) { $warn += $gw }
+}
 if ($Pc.Ram -lt 16) { $warn += L "$($Pc.Ram) GB of RAM: 16 GB is what we ask for" "$($Pc.Ram) GB RAM: istenen 16 GB" }
 if ($Want26 -and $Pc.Cores -lt 8) { $warn += L "$($Pc.Cores) logical processors: iOS 26 asks for 8 or more" "$($Pc.Cores) mantıksal işlemci: iOS 26 8 ya da fazlasını ister" }
 elseif ($Pc.Cores -lt 4) { $warn += L "$($Pc.Cores) logical processors: iOS 16 asks for 4 or more" "$($Pc.Cores) mantıksal işlemci: iOS 16 4 ya da fazlasını ister" }
@@ -1009,6 +1186,14 @@ if ($AudioPlugin) { $ArgsV += '-AudioPlugin', [IO.Path]::GetFullPath($AudioPlugi
 if ($CdnEdge) { $ArgsV += '-CdnEdge', $CdnEdge }
 if ($KeepBuildFiles) { $ArgsV += '-KeepBuildFiles' }
 if ($NoShortcut) { $ArgsV += '-NoShortcut' }
+$ArgsT = @('-Work', $Work)
+if ($Ios26Config) { $ArgsT += '-Config', [IO.Path]::GetFullPath($Ios26Config) }
+# (a QEMU folder only when work\qemu lacks the options: the tvOS installer then puts it there, unless visionOS's has)
+if ($TvQemuDir -and -not $TvQemuThere) { $ArgsT += '-QemuDir', $TvQemuDir }
+if ($TvOta) { $ArgsT += '-OtaFile', [IO.Path]::GetFullPath($TvOta) }
+if ($CdnEdge) { $ArgsT += '-CdnEdge', $CdnEdge }
+if ($KeepBuildFiles) { $ArgsT += '-KeepBuildFiles' }
+if ($NoShortcut) { $ArgsT += '-NoShortcut' }
 if (-not $Has26Linux -and $Want26 -and $Linux -eq 'helper') {
     Write-Host ('  ' + (L '(-Pretend helper: Install-iOS26.ps1 has no -Linux yet, so it runs as it is)' '(-Pretend helper: Install-iOS26.ps1''de henüz -Linux yok, olduğu gibi çalışır)')) -ForegroundColor Yellow
 }
@@ -1021,6 +1206,7 @@ if ($List -or $Check) {
     # (Install-watchOS.ps1 lists its steps for both)
     if ($WantWatch) { Write-Host ''; Write-Host '== watchOS (-List)' -ForegroundColor Cyan; $rc = [Math]::Max($rc, (Run-Installer (Join-Path $runFrom 'watchos\Install-watchOS.ps1') ($ArgsW + '-List'))) }
     if ($WantVision) { Write-Host ''; Write-Host '== visionOS (-List)' -ForegroundColor Cyan; $rc = [Math]::Max($rc, (Run-Installer (Join-Path $runFrom 'visionos\Install-visionOS.ps1') ($ArgsV + '-List'))) }
+    if ($WantTv) { Write-Host ''; Write-Host '== tvOS (-List)' -ForegroundColor Cyan; $rc = [Math]::Max($rc, (Run-Installer (Join-Path $runFrom 'tvos\Install-tvOS.ps1') ($ArgsT + '-List'))) }
     exit $rc
 }
 
@@ -1035,7 +1221,7 @@ if ($short -and -not $DryRun) {
 }
 $t0 = Get-Date
 $started = if ($resumed -and $Saved.Started) { "$($Saved.Started)" } else { $t0.ToString('s') }
-Save-State (@{ Version = $Version; Watch = $(if ($WantWatch) { 'yes' } else { 'no' }); Linux = $(if ($Want26) { $Linux } else { '' }); Dir = $Dir; Lang = $Lang; Stage = 'running'; Started = $started } + (Watch-Sources $WatchQemuDir) + (Vision-Sources $VisionQemuDir))
+Save-State (@{ Version = $Version; Watch = $(if ($WantWatch) { 'yes' } else { 'no' }); Linux = $(if ($Want26) { $Linux } else { '' }); Dir = $Dir; Lang = $Lang; Stage = 'running'; Started = $started } + (Watch-Sources $WatchQemuDir) + (Vision-Sources $VisionQemuDir) + (Tv-Sources $TvQemuDir))
 # iOS 26's setup asks where its GPU driver comes from; -Yes answers it as its default does
 if ($Want26 -and $Yes -and -not $DryRun) {
     $cfgFile = $Cfg26File
@@ -1089,9 +1275,10 @@ $titler = [powershell]::Create()
                     }
                 } else {
                     # the first step of iOS 26's (or watchOS's: install\watch-<id>.done, visionOS's:
-                    # install\vision-<id>.done) without a marker (the every-run ones have none)
+                    # install\vision-<id>.done, tvOS's: install\tv-<id>.done) without a marker (the every-run
+                    # ones have none)
                     $prev = $sync.PhaseStart
-                    $pre = if ($ver -eq 'watch') { 'watch-' } elseif ($ver -eq 'vision') { 'vision-' } else { '' }
+                    $pre = if ($ver -eq 'watch') { 'watch-' } elseif ($ver -eq 'vision') { 'vision-' } elseif ($ver -eq 'tv') { 'tv-' } else { '' }
                     for ($i = 0; $i -lt $plan.Count; $i++) {
                         if ($plan[$i].Ver -ne $ver -or $always -contains $plan[$i].Id) { continue }
                         $m = Join-Path $work "install\$pre$($plan[$i].Id).done"
@@ -1108,7 +1295,7 @@ $titler = [powershell]::Create()
                     $in = ((Get-Date) - $since).TotalSeconds
                     $left = [Math]::Max($plan[$idx].Est - $in, 0.1 * $plan[$idx].Est)
                     for ($i = $idx + 1; $i -lt $plan.Count; $i++) { $left += $plan[$i].Est }
-                    $name = switch ($plan[$idx].Ver) { 'ios16' { 'iOS 16' } 'watch' { 'watchOS' } 'vision' { 'visionOS' } default { $name26 } }
+                    $name = switch ($plan[$idx].Ver) { 'ios16' { 'iOS 16' } 'watch' { 'watchOS' } 'vision' { 'visionOS' } 'tv' { 'tvOS' } default { $name26 } }
                     $el = T ((Get-Date) - $t0).TotalSeconds
                     [Console]::Title = if ($tr) { "ASoftware $name - adım $($idx + 1)/$($plan.Count) $($plan[$idx].Id) - $el geçti, ~$(T $left) kaldı" }
                                        else { "ASoftware $name - step $($idx + 1)/$($plan.Count) $($plan[$idx].Id) - $el elapsed, ~$(T $left) left" }
@@ -1117,7 +1304,7 @@ $titler = [powershell]::Create()
         } catch { }
         Start-Sleep -Seconds 5
     }
-}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir).AddArgument($(if ($VisionVer) { L 'visionOS base' 'visionOS tabanı' } elseif ($BaseOnly) { L 'watchOS base' 'watchOS tabanı' } else { 'iOS 26' }))
+}).AddArgument($sync).AddArgument($titlePlan).AddArgument($Work).AddArgument([IO.Path]::GetPathRoot($Dir)).AddArgument($t0).AddArgument($Lang -eq 'tr').AddArgument(@('setup', 'prereq', 'check', 'cleanup', 'shortcut')).AddArgument($Dir).AddArgument($(if ($VisionVer) { L 'visionOS base' 'visionOS tabanı' } elseif ($TvVer) { L 'tvOS base' 'tvOS tabanı' } elseif ($BaseOnly) { L 'watchOS base' 'watchOS tabanı' } else { 'iOS 26' }))
 $titlerRun = $null
 if (-not $DryRun) { $titlerRun = $titler.BeginInvoke() }
 $net0 = $null
@@ -1142,9 +1329,9 @@ try {
         $results['app'] = @{ Code = $rc; Start = $ts; End = (Get-Date) }
         if ($rc) { throw (L 'copying the app failed' 'uygulama kopyalanamadı') }
     }
-    foreach ($v in @('ios16', 'ios26', 'watch', 'vision')) {
-        if (($v -eq 'ios16' -and -not $Want16) -or ($v -eq 'ios26' -and -not $Want26) -or ($v -eq 'watch' -and -not $WantWatch) -or ($v -eq 'vision' -and -not $WantVision)) { continue }
-        $name = switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L 'The base watchOS and visionOS share with iOS 26' 'watchOS ve visionOS''un iOS 26 ile paylaştığı taban' } else { 'iOS 26' } } 'watch' { 'watchOS' } 'vision' { 'visionOS' } }
+    foreach ($v in @('ios16', 'ios26', 'watch', 'vision', 'tv')) {
+        if (($v -eq 'ios16' -and -not $Want16) -or ($v -eq 'ios26' -and -not $Want26) -or ($v -eq 'watch' -and -not $WantWatch) -or ($v -eq 'vision' -and -not $WantVision) -or ($v -eq 'tv' -and -not $WantTv)) { continue }
+        $name = switch ($v) { 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L "The base $SysEn share with iOS 26" "$SysTr'un iOS 26 ile paylaştığı taban" } else { 'iOS 26' } } 'watch' { 'watchOS' } 'vision' { 'visionOS' } 'tv' { 'tvOS' } }
         # ASoftware.exe asked for a pause: before the next installer, as the installers do before a step
         if (-not $DryRun -and (Pause-Requested)) { $rc = 5; Emit 'paused', $v, ''; break }
         Write-Host ''
@@ -1154,7 +1341,8 @@ try {
         if ($v -eq 'ios16') { $rc = Run-Installer (Join-Path $runFrom 'installer\Install-ASoftware.ps1') ($Args16 + $(if ($DryRun) { '-DryRun' } else { @() })) }
         elseif ($v -eq 'ios26') { $rc = Run-Installer (Join-Path $runFrom 'ios26\Install-iOS26.ps1') ($Args26 + $(if ($DryRun) { '-DryRun' } else { @() })) }
         elseif ($v -eq 'watch') { $rc = Run-Installer (Join-Path $runFrom 'watchos\Install-watchOS.ps1') ($ArgsW + $(if ($DryRun) { '-DryRun' } else { @() })) }
-        else { $rc = Run-Installer (Join-Path $runFrom 'visionos\Install-visionOS.ps1') ($ArgsV + $(if ($DryRun) { '-DryRun' } else { @() })) }
+        elseif ($v -eq 'vision') { $rc = Run-Installer (Join-Path $runFrom 'visionos\Install-visionOS.ps1') ($ArgsV + $(if ($DryRun) { '-DryRun' } else { @() })) }
+        else { $rc = Run-Installer (Join-Path $runFrom 'tvos\Install-tvOS.ps1') ($ArgsT + $(if ($DryRun) { '-DryRun' } else { @() })) }
         $results[$v] = @{ Code = $rc; Start = $ts; End = (Get-Date) }
         Emit 'end', $v, $rc
         if ($rc) { break }
@@ -1177,11 +1365,11 @@ if ($DryRun) {
 # --- 7. What it took ---------------------------------------------------------------------------
 $t1 = Get-Date
 $lines = @()
-$lines += (L 'ASoftware iOS setup' 'ASoftware iOS kurulumu') + " $(Version-Name $Version)$(if ($WantWatch -and $Version -cne 'watchos' -and $Version -cne 'ios16-watchos') { ' + watchOS' })$(if ($WantVision -and -not $VisionVer) { ' + visionOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' }): $($t0.ToString('yyyy-MM-dd HH:mm')) - $($t1.ToString('HH:mm'))"
+$lines += (L 'ASoftware iOS setup' 'ASoftware iOS kurulumu') + " $(Version-Name $Version)$(if ($WantWatch -and $Version -cne 'watchos' -and $Version -cne 'ios16-watchos') { ' + watchOS' })$(if ($WantVision -and -not $VisionVer) { ' + visionOS' })$(if ($WantTv -and -not $TvVer) { ' + tvOS' })$(if ($Want26) { ' (' + (Linux-Name $Linux) + ')' }): $($t0.ToString('yyyy-MM-dd HH:mm')) - $($t1.ToString('HH:mm'))"
 $lines += (L 'Time' 'Süre') + ": $(Fmt-Time ($t1 - $t0).TotalSeconds) (" + (L 'estimate' 'tahmin') + " $(Fmt-Time $Total.S))"
 foreach ($v in $results.Keys) {
     $r = $results[$v]
-    $name = switch ($v) { 'app' { L 'The app and our QEMU' "Uygulama ve QEMU'muz" } 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L 'The base watchOS and visionOS share with iOS 26' 'watchOS ve visionOS''un iOS 26 ile paylaştığı taban' } else { 'iOS 26' } } 'watch' { 'watchOS' } 'vision' { 'visionOS' } }
+    $name = switch ($v) { 'app' { L 'The app and our QEMU' "Uygulama ve QEMU'muz" } 'ios16' { 'iOS 16' } 'ios26' { if ($BaseOnly) { L "The base $SysEn share with iOS 26" "$SysTr'un iOS 26 ile paylaştığı taban" } else { 'iOS 26' } } 'watch' { 'watchOS' } 'vision' { 'visionOS' } 'tv' { 'tvOS' } }
     $lines += "  $name`: $(Fmt-Time ($r.End - $r.Start).TotalSeconds)$(if ($r.Code) { ', ' + (L "stopped (exit $($r.Code))" "durdu (çıkış $($r.Code))") })"
     # per step: when each began (iOS 16: work\install16.log; iOS 26: the === lines of its step logs),
     # the first time in this run
@@ -1190,11 +1378,12 @@ foreach ($v in $results.Keys) {
         foreach ($l in @(Get-Content (Join-Path $Work 'install16.log') -ErrorAction SilentlyContinue)) {
             if ($l -match '^(\S+ \S+) (\d)/6 (.*)$') { $at = [datetime]::ParseExact($Matches[1], 'yyyy-MM-dd HH:mm:ss', $null); if ($at -ge $r.Start) { $marks += @{ At = $at; N = [int]$Matches[2]; Id = $Plans['ios16'][[int]$Matches[2] - 1].Id } } }
         }
-    } elseif ($v -eq 'ios26' -or $v -eq 'watch' -or $v -eq 'vision') {
-        # watchOS's step logs are install\logs\watch-<id>.log, visionOS's vision-<id>.log, iOS 26's the others
-        $own = switch ($v) { 'watch' { 'watch-*' } 'vision' { 'vision-*' } default { '' } }
+    } elseif ($v -eq 'ios26' -or $v -eq 'watch' -or $v -eq 'vision' -or $v -eq 'tv') {
+        # watchOS's step logs are install\logs\watch-<id>.log, visionOS's vision-<id>.log, tvOS's tv-<id>.log,
+        # iOS 26's the others
+        $own = switch ($v) { 'watch' { 'watch-*' } 'vision' { 'vision-*' } 'tv' { 'tv-*' } default { '' } }
         foreach ($f in @(Get-ChildItem (Join-Path $Work 'install\logs') -Filter '*.log' -ErrorAction SilentlyContinue | Where-Object {
-                    if ($own) { $_.Name -like $own } else { $_.Name -notlike 'watch-*' -and $_.Name -notlike 'vision-*' } })) {
+                    if ($own) { $_.Name -like $own } else { $_.Name -notlike 'watch-*' -and $_.Name -notlike 'vision-*' -and $_.Name -notlike 'tv-*' } })) {
             foreach ($m in @(Select-String -Path $f.FullName -Pattern '^=== (\S+ \S+) (\d+)/\d+ (\S+):' -ErrorAction SilentlyContinue)) {
                 $at = [datetime]::ParseExact($m.Matches[0].Groups[1].Value, 'yyyy-MM-dd HH:mm:ss', $null)
                 if ($at -ge $r.Start) { $marks += @{ At = $at; N = [int]$m.Matches[0].Groups[2].Value; Id = $m.Matches[0].Groups[3].Value } }
@@ -1222,6 +1411,10 @@ if ($Want16) { $lines += '  iOS 16: ' + (Join-Path $Dir 'Start-iOS.cmd') + $(if 
 if ($Want26 -and -not $BaseOnly) { $lines += '  iOS 26: ' + (Join-Path $Dir 'ios26\Start-iOS26.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware iOS 26"' 'Başlat menüsü "ASoftware iOS 26"') + ')' }) + '; ' + (L 'logs' 'loglar') + ': ' + (Join-Path $Work 'install\logs') }
 if ($WantWatch) { $lines += '  watchOS: ' + (Join-Path $Dir 'Start-watchOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware watchOS"' 'Başlat menüsü "ASoftware watchOS"') + ')' }) }
 if ($WantVision) { $lines += '  visionOS: ' + (Join-Path $Dir 'Start-visionOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware visionOS"' 'Başlat menüsü "ASoftware visionOS"') + ')' }) }
+if ($WantTv) {
+    $lines += '  tvOS: ' + (Join-Path $Dir 'Start-tvOS.cmd') + $(if (-not $NoShortcut) { ' (' + (L 'Start menu "ASoftware tvOS"' 'Başlat menüsü "ASoftware tvOS"') + ')' })
+    $lines += '    ' + (L 'tvOS is a research preview: Home and Settings only. About shows Activation: Failed, Search and the Apple TV app say they are not available, keys answer slowly, saves are untested.' 'tvOS bir araştırma önizlemesi: yalnız Home ve Ayarlar. Hakkında Activation: Failed yazar, Search ve Apple TV uygulaması kullanılamıyor der, tuşlar yavaş yanıt verir, kayıtlar sınanmadı.')
+}
 Write-Host ''
 foreach ($l in $lines) { Write-Host $l }
 try { Set-Content (Join-Path $Dir 'install-summary.txt') $lines -Encoding UTF8 } catch { }

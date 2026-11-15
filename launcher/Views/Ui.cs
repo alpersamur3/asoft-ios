@@ -163,7 +163,7 @@ namespace ASoftware.Views
         }
 
         // a number and its unit, an OS's name and its number, and a range's two ends
-        static readonly System.Text.RegularExpressions.Regex UnitGap = new System.Text.RegularExpressions.Regex(@"(\d) (GB|MB|KB|TB|min|dk|sa|h|vCPU|%)(?!\p{L})|(iOS|watchOS|visionOS) (\d)");
+        static readonly System.Text.RegularExpressions.Regex UnitGap = new System.Text.RegularExpressions.Regex(@"(\d) (GB|MB|KB|TB|min|dk|sa|h|vCPU|%)(?!\p{L})|(iOS|watchOS|visionOS|tvOS) (\d)");
         static readonly System.Text.RegularExpressions.Regex RangeDash = new System.Text.RegularExpressions.Regex(@"(\d)–(\d)");
 
         /// <summary>The text with no-break spaces where a line must not break: "5 GB", "40 dk", "iOS 26", "1,5–2,5".</summary>

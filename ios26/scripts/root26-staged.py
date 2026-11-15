@@ -10,13 +10,39 @@ After the apps are copied back (apply-staged.sh), this:
   - puts installcoordinationd, installcoordination_proxy and dasd back into
     launchd.plist from the .prechurn copy (everything else the churn cut
     removed stays out); dasd runs SpringBoard's poster update tasks
-  - removes LastSystemVersion from com.apple.migration so DataMigration (and
-    with it SystemAppMigrator) runs once on the next boot.
+  - removes LastSystemVersion from com.apple.migration so DataMigration runs once on the next boot
+  - moves the SystemAppMigrator plugin out of /System/Library/DataClassMigrators (see
+    skip_system_app_migrator), unless ASOFT_KEEP_SYSTEMAPPMIGRATOR=1
 Idempotent.
 """
-import os, plistlib, sys
+import os, plistlib, shutil, sys
 
 RESTORE = {'com.apple.installcoordinationd', 'com.apple.installcoordination_proxy', 'com.apple.dasd'}
+
+
+def skip_system_app_migrator(root):
+    """SystemAppMigrator installs the deletable system apps through installcoordinationd, which needs
+    an APFS clone: on this HFS+ root every install fails, and the plugin waited ~33 of DataMigration's
+    ~52 min on a lock before it "Returned NO" (stackshots of the 2026-11-04 run). apply-apps.sh puts the
+    apps into /Applications itself. The other migrators do not name it. It goes to a sibling folder
+    datamigrator does not scan; ASOFT_KEEP_SYSTEMAPPMIGRATOR=1 puts it back."""
+    d = os.path.join(root, 'System/Library/DataClassMigrators')
+    off = os.path.join(root, 'System/Library/DataClassMigrators-off')
+    name = 'SystemAppMigrator.migrator'
+    if os.environ.get('ASOFT_KEEP_SYSTEMAPPMIGRATOR') == '1':
+        if os.path.isdir(os.path.join(off, name)) and not os.path.exists(os.path.join(d, name)):
+            shutil.move(os.path.join(off, name), d)
+            print('SystemAppMigrator.migrator put back (ASOFT_KEEP_SYSTEMAPPMIGRATOR=1)')
+        else:
+            print('SystemAppMigrator.migrator stays (ASOFT_KEEP_SYSTEMAPPMIGRATOR=1)')
+        return
+    if os.path.isdir(os.path.join(d, name)):
+        os.makedirs(off, exist_ok=True)
+        shutil.rmtree(os.path.join(off, name), ignore_errors=True)
+        shutil.move(os.path.join(d, name), off)
+        print('SystemAppMigrator.migrator moved to DataClassMigrators-off (it cannot install on HFS+)')
+    else:
+        print('SystemAppMigrator.migrator: already out')
 
 
 def main():
@@ -58,6 +84,7 @@ def main():
         m['DMWatchdogPluginsAfterTimeout'] = False
         changed = True
         print('com.apple.migration: DMWatchdogPluginsAfterTimeout = false (no plugin watchdog, no reboot timer)')
+    skip_system_app_migrator(root)
     if changed:
         st = os.stat(mig)
         with open(mig, 'wb') as f:
